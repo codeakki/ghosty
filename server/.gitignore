@@ -2,3 +2,5 @@ node_modules/
 dist/
 .env
 *.log
+# News aggregator state (last-seen ids)
+.ghosty/
