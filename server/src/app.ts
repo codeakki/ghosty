@@ -63,7 +63,7 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
   const config = opts.config ?? loadConfig();
   // Starts from SIMULATE_BRAIN_OFFLINE; POST /sim/safe-stop flips it at runtime.
   const brain = new BrainSwitch(config.SIMULATE_BRAIN_OFFLINE);
-  const brainOnline = () => isBrainOnline(config, brain);
+  const brainOnline = () => isBrainOnline(config, { sim: brain });
   // Virtual pod state: the pipeline reports every step into it; /state and /events read it.
   const state = new PodState(opts.scorer ?? new FakeEthosScorer(), {
     safeStop: config.SAFE_STOP_ENABLED && config.SIMULATE_BRAIN_OFFLINE,

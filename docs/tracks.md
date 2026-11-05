@@ -73,6 +73,22 @@ Source: https://ethglobal.com/events/mumbai/prizes, fetched 2026-11-05. Requirem
 - [ ] Not on the "not wanted" list: not a chatbot with a body, not 0G only for logs
 - [ ] Submission: public repo, README, video **< 3 min**, live link, contract addresses (if any), team Telegram / X
 
+#### 0G evidence: where it lives
+
+Code is on `feat/server-0g`. Items stay unchecked until they run with real keys and the demo route is wired.
+
+| Requirement | Code | Runtime evidence |
+|---|---|---|
+| 0G Compute in the decision loop | `server/src/agent/decide.ts` → `ZeroGDecider` (picked by `createAgent()` in `server/src/agent/index.ts` when `OG_API_KEY` is set) | Log line `0G compute response` with `requestId`, `completionId`, `traceRequestId`, `headerRequestId`, `provider` |
+| Request ID per decision | `Decision.requestId` (= `x_0g_trace.request_id`), `Decision.zeroG` | `x-request-id` header on `/voice`; `requestId` in each episode blob and in `server/.ghosty/episodes.jsonl` |
+| Episode per decision on 0G Storage | `server/src/agent/episode.ts` → `ZeroGEpisodeLog` | `server/.ghosty/episodes.jsonl` lines `{ts, requestId, rootHash, txHash, sha256}`; open the `txHash` on chainscan-galileo, the `rootHash` on storagescan-galileo; `verify(rootHash)` re-downloads and checks |
+| Encrypted memory on 0G Storage | `server/src/agent/memory.ts` → `ZeroGMemory`, `server/src/agent/crypto.ts` (AES-256-GCM) | `server/.ghosty/memory.json` `{rootHash, txHash}`; the blob on storagescan is ciphertext |
+| Safe-stop | `server/src/safety/safeStop.ts` (`GET /models` probe, 10 s cache, `reportBrainFailure`), `BrainOfflineError` | `/health.safeStop`; `SIMULATE_BRAIN_OFFLINE=true` or a bad router URL → 503 `brain_offline` |
+| Status for the demo | `zeroGStatus()` in `server/src/agent/index.ts` | To be exposed as `GET /zerog/status` by the app/simulator branch |
+| Tests | `server/test/0g-*.test.ts` | `npm test` (offline, no keys) |
+
+Details, endpoints and gas numbers: [research/0g.md → Implementation notes](research/0g.md#implementation-notes).
+
 ### 2. Hedera x402
 
 - [ ] x402 endpoint (`GET /signal`) settling on `hedera:testnet` through a listed facilitator

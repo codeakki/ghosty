@@ -30,6 +30,19 @@ const ConfigSchema = z.object({
   OG_API_KEY: optional,
   OG_PRIVATE_KEY: optional,
   OG_INDEXER_URL: z.string().default('https://indexer-storage-testnet-turbo.0g.ai'),
+  /** Router model id (catalog: GET <OG_ROUTER_URL>/models). glm-4.7 supports response_format on mainnet. */
+  OG_MODEL: z.string().default('glm-4.7'),
+  /** Ask the router for `response_format: json_object`. Turn off for models without structured-output support. */
+  OG_JSON_MODE: bool(true),
+  /** 0G Galileo EVM RPC used to submit storage transactions. */
+  OG_RPC_URL: z.string().default('https://evmrpc-testnet.0g.ai'),
+  /** 32-byte hex AES-256-GCM key for user memory. Unset → sha256-derived from OG_PRIVATE_KEY. */
+  OG_MEMORY_KEY: optional,
+  /** Buffer episodes and upload them OG_EPISODE_BATCH_SIZE at a time to save faucet gas. */
+  OG_EPISODE_BATCH: bool(false),
+  OG_EPISODE_BATCH_SIZE: z.coerce.number().int().min(1).max(100).default(5).catch(5),
+  /** Local cache dir for root-hash pointers (default: server/.ghosty). */
+  OG_DATA_DIR: optional,
 
   HEDERA_ACCOUNT_ID: optional,
   HEDERA_PRIVATE_KEY: optional,
