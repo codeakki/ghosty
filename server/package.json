@@ -14,7 +14,8 @@
     "build": "tsc -p tsconfig.build.json",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "node --test --import tsx test/*.test.ts"
+    "test": "node --test --import tsx test/*.test.ts",
+    "x402:demo": "tsx src/scripts/x402Demo.ts"
   },
   "dependencies": {
     "@hiero-ledger/sdk": "2.90.1",
