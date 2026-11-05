@@ -1,4 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest, type FastifyServerOptions } from 'fastify';
 import { z } from 'zod';
 import { FakeDecider } from './agent/decide.js';
@@ -20,6 +22,9 @@ import { InjectedNewsProvider } from './sim/injected.js';
 import { registerSimRoutes } from './sim/routes.js';
 import { PodState } from './sim/state.js';
 import { VERSION } from './version.js';
+
+/** server/public, from both src/ (tsx) and dist/ (built). Holds the virtual pod page. */
+const PUBLIC_DIR = fileURLToPath(new URL('../public/', import.meta.url));
 
 /** 30 s of 16 kHz 16-bit mono is ~960 KB; leave headroom. */
 const AUDIO_BODY_LIMIT = 4 * 1024 * 1024;
@@ -135,6 +140,10 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
     }
     return pipeline.handleButton(parsed.data.action);
   });
+
+  // Virtual pod web UI: a single static page, no build step. `serve: false` exposes only /sim.
+  app.register(fastifyStatic, { root: PUBLIC_DIR, serve: false });
+  app.get('/sim', (_req, reply) => reply.sendFile('sim.html'));
 
   registerSimRoutes(app, {
     state,

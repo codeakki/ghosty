@@ -1,0 +1,697 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ghosty virtual pod</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    --bg: #0d1014;
+    --panel: #151a21;
+    --panel-2: #1b222b;
+    --line: #262f3b;
+    --text: #e4e9f0;
+    --muted: #8b97a8;
+    --accent: #7aa2ff;
+    --good: #3ecf8e;
+    --warn: #f5b84b;
+    --bad: #ff6b6b;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); }
+  body { font: 14px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  header {
+    display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center;
+    padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel);
+    position: sticky; top: 0; z-index: 5;
+  }
+  header h1 { font-size: 16px; margin: 0; letter-spacing: .02em; }
+  header .spacer { flex: 1; }
+  label.inline { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); font-size: 13px; }
+  input[type=text], input[type=password] {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 6px;
+    padding: 6px 8px; font: inherit; min-width: 0;
+  }
+  input:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 6px;
+    padding: 6px 12px; font: inherit; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  button.good { border-color: var(--good); color: var(--good); }
+  button.bad { border-color: var(--bad); color: var(--bad); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--bad); display: inline-block; }
+  .dot.on { background: var(--good); }
+  .badge {
+    display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 12px;
+    border: 1px solid var(--line); color: var(--muted); white-space: nowrap;
+  }
+  .badge.good { color: var(--good); border-color: var(--good); }
+  .badge.warn { color: var(--warn); border-color: var(--warn); }
+  .badge.bad { color: var(--bad); border-color: var(--bad); }
+  .badge.accent { color: var(--accent); border-color: var(--accent); }
+  #banner {
+    display: none; margin: 12px 16px 0; padding: 10px 14px; border-radius: 8px;
+    background: #3a2a0c; border: 1px solid var(--warn); color: #ffe2a8;
+    align-items: center; gap: 12px;
+  }
+  #banner.show { display: flex; }
+  #banner strong { color: var(--warn); font-size: 15px; }
+  #banner .text { flex: 1; }
+  main {
+    display: grid; gap: 12px; padding: 12px 16px 24px;
+    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; min-width: 0; }
+  section h2 {
+    margin: 0 0 10px; font-size: 12px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted);
+    display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .row + .row { margin-top: 8px; }
+  .row input[type=text] { flex: 1 1 160px; }
+  #talk {
+    width: 100%; padding: 22px 12px; font-size: 17px; font-weight: 600; border-radius: 10px;
+    border: 2px solid var(--accent); color: var(--accent); background: #131b2b; user-select: none; touch-action: none;
+  }
+  #talk.rec { background: #3b1414; border-color: var(--bad); color: #ffb3b3; }
+  #talk.busy { border-color: var(--muted); color: var(--muted); }
+  #status { margin-top: 8px; color: var(--muted); min-height: 1.4em; font-size: 13px; }
+  #status.err { color: var(--bad); }
+  dl.kv { display: grid; grid-template-columns: max-content 1fr; gap: 3px 10px; margin: 10px 0 0; font-size: 13px; }
+  dl.kv dt { color: var(--muted); }
+  dl.kv dd { margin: 0; font-family: var(--mono); word-break: break-all; }
+  ul.list { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow-y: auto; }
+  ul.list li { padding: 7px 2px; border-bottom: 1px solid var(--line); }
+  ul.list li:last-child { border-bottom: 0; }
+  .meta { color: var(--muted); font-size: 12px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 3px; }
+  .mono { font-family: var(--mono); font-size: 12px; }
+  .empty { color: var(--muted); font-style: italic; font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 5px 4px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  td.num { font-family: var(--mono); text-align: right; }
+  .rationale { margin: 8px 0 0; padding: 8px 10px; background: var(--panel-2); border-radius: 6px; }
+  #log { font-family: var(--mono); font-size: 12px; max-height: 220px; overflow-y: auto; white-space: pre-wrap; color: var(--muted); }
+  .toggle { display: inline-flex; gap: 8px; align-items: center; cursor: pointer; }
+  .toggle input { width: 16px; height: 16px; accent-color: var(--bad); }
+  .wide { grid-column: 1 / -1; }
+  @media (max-width: 420px) {
+    main { padding: 12px 8px 24px; grid-template-columns: 1fr; }
+    header { padding: 10px 8px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Ghosty virtual pod</h1>
+  <span class="badge" id="version">server ?</span>
+  <span class="inline label"><span class="dot" id="conn"></span><span id="connText" class="badge">events: connecting</span></span>
+  <span class="badge" id="safeBadge">safe-stop ?</span>
+  <span class="spacer"></span>
+  <label class="inline">X-Device-Token <input type="password" id="token" placeholder="empty = no token" size="16" autocomplete="off"></label>
+</header>
+
+<div id="banner" role="alert">
+  <strong>Alert</strong>
+  <span class="text" id="bannerText"></span>
+  <button id="bannerClose" type="button">Dismiss</button>
+</div>
+
+<main>
+  <section>
+    <h2>Pod</h2>
+    <button id="talk" type="button">Hold to talk</button>
+    <div id="status">Hold the button (or the space bar) and speak, release to send. Max 10 s, like the pod.</div>
+    <div class="row" style="margin-top:10px">
+      <button id="confirm" class="good" type="button">Confirm</button>
+      <button id="cancel" class="bad" type="button">Cancel</button>
+      <button id="poll" type="button" title="GET /alerts/next, as the firmware will">Poll alert</button>
+      <button id="replay" type="button" disabled>Replay reply</button>
+    </div>
+    <div class="row">
+      <input type="text" id="sayText" placeholder="Or type what you would say (POST /voice/text)">
+      <button id="say" type="button">Say</button>
+    </div>
+    <div class="row">
+      <label class="toggle"><input type="checkbox" id="safeStop"> Safe-stop (simulate 0G offline)</label>
+    </div>
+    <dl class="kv" id="reply">
+      <dt>transcript</dt><dd id="rTranscript">-</dd>
+      <dt>x-signal</dt><dd id="rSignal">-</dd>
+      <dt>x-request-id</dt><dd id="rRequest">-</dd>
+      <dt>latency</dt><dd id="rLatency">-</dd>
+      <dt>audio</dt><dd id="rAudio">-</dd>
+      <dt>button</dt><dd id="rButton">-</dd>
+    </dl>
+  </section>
+
+  <section>
+    <h2>Inject headline</h2>
+    <div class="row">
+      <input type="text" id="headline" placeholder="e.g. Missile strike reported near Taiwan Strait">
+    </div>
+    <div class="row">
+      <input type="text" id="source" placeholder="source handle, e.g. Reuters (optional)">
+      <input type="text" id="url" placeholder="url (optional)">
+      <button id="inject" type="button">Inject</button>
+    </div>
+    <div id="injectResult" class="meta" style="margin-top:8px"></div>
+    <h2 style="margin-top:14px">Decision <span id="decTrigger"></span></h2>
+    <div id="decision"><div class="empty">No decision yet.</div></div>
+    <h2 style="margin-top:14px">Planned actions</h2>
+    <div id="actions"><div class="empty">Nothing pending.</div></div>
+  </section>
+
+  <section>
+    <h2>News <span class="badge" id="newsCount">0</span></h2>
+    <ul class="list" id="news"></ul>
+  </section>
+
+  <section>
+    <h2>Alerts <span class="badge" id="alertCount">0 pending</span></h2>
+    <ul class="list" id="alerts"></ul>
+  </section>
+
+  <section>
+    <h2>Orders</h2>
+    <div id="orders"><div class="empty">No orders yet.</div></div>
+  </section>
+
+  <section>
+    <h2>Episode log</h2>
+    <ul class="list" id="episodes"></ul>
+  </section>
+
+  <section class="wide">
+    <h2>Event stream <button id="clearLog" type="button">Clear</button></h2>
+    <div id="log"></div>
+  </section>
+</main>
+
+<script>
+'use strict';
+(() => {
+  const $ = (id) => document.getElementById(id);
+
+  // ---------- small DOM helper (textContent only, never innerHTML with data) ----------
+  function h(tag, props, ...kids) {
+    const el = document.createElement(tag);
+    for (const [k, v] of Object.entries(props || {})) {
+      if (v === undefined || v === null || v === false) continue;
+      if (k === 'class') el.className = v;
+      else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+      else el.setAttribute(k, v === true ? '' : String(v));
+    }
+    for (const kid of kids.flat()) {
+      if (kid === undefined || kid === null || kid === false) continue;
+      el.append(kid instanceof Node ? kid : document.createTextNode(String(kid)));
+    }
+    return el;
+  }
+  const fill = (el, ...kids) => { el.replaceChildren(...kids.flat().filter(Boolean)); };
+  const time = (iso) => (iso ? new Date(iso).toLocaleTimeString() : '');
+  const usd = (n) => '$' + Number(n).toFixed(2);
+  const signalBadge = (s) => h('span', { class: 'badge ' + (s === 'none' ? '' : s === 'geopolitical_shock' ? 'bad' : 'warn') }, s);
+
+  // ---------- per-viewer settings (best effort) ----------
+  const prefs = {
+    get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch { /* storage unavailable */ } },
+  };
+  const tokenInput = $('token');
+  tokenInput.value = prefs.get('ghosty.token') || '';
+  tokenInput.addEventListener('change', () => prefs.set('ghosty.token', tokenInput.value.trim()));
+
+  function headers(extra) {
+    const out = Object.assign({}, extra);
+    const t = tokenInput.value.trim();
+    if (t) out['X-Device-Token'] = t;
+    return out;
+  }
+
+  async function api(method, path, body) {
+    const init = { method, headers: headers(body === undefined ? {} : { 'content-type': 'application/json' }) };
+    if (body !== undefined) init.body = JSON.stringify(body);
+    const res = await fetch(path, init);
+    const ct = res.headers.get('content-type') || '';
+    const data = ct.includes('json') ? await res.json() : null;
+    return { res, data };
+  }
+
+  function errText(res, data) {
+    if (res.status === 503) return '503 brain offline: safe-stop engaged, nothing executed';
+    if (res.status === 401) return '401 unauthorized: check X-Device-Token';
+    return res.status + ' ' + (data && (data.message || data.error) || res.statusText);
+  }
+
+  const statusEl = $('status');
+  function setStatus(msg, isErr) {
+    statusEl.textContent = msg;
+    statusEl.classList.toggle('err', !!isErr);
+  }
+
+  // ---------- audio ----------
+  let ac;
+  function audioCtx() {
+    if (!ac) ac = new (window.AudioContext || window.webkitAudioContext)();
+    if (ac.state === 'suspended') ac.resume();
+    return ac;
+  }
+
+  let lastReply = null;
+  function playPcm(buf, rate) {
+    const n = Math.floor(buf.byteLength / 2);
+    if (!n) return;
+    const ctx = audioCtx();
+    const dv = new DataView(buf);
+    const ab = ctx.createBuffer(1, n, rate);
+    const ch = ab.getChannelData(0);
+    for (let i = 0; i < n; i++) ch[i] = dv.getInt16(i * 2, true) / 32768;
+    const src = ctx.createBufferSource();
+    src.buffer = ab;
+    src.connect(ctx.destination);
+    src.start();
+    lastReply = { buf, rate };
+    $('replay').disabled = false;
+  }
+
+  function beep() {
+    try {
+      const ctx = audioCtx();
+      const t0 = ctx.currentTime;
+      [0, 0.22].forEach((offset) => {
+        const osc = ctx.createOscillator();
+        const g = ctx.createGain();
+        osc.frequency.value = 880;
+        g.gain.setValueAtTime(0.0001, t0 + offset);
+        g.gain.exponentialRampToValueAtTime(0.25, t0 + offset + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + offset + 0.16);
+        osc.connect(g).connect(ctx.destination);
+        osc.start(t0 + offset);
+        osc.stop(t0 + offset + 0.18);
+      });
+    } catch { /* audio blocked until the first click */ }
+  }
+
+  /** Box-filter downsample to 16 kHz and convert to signed 16-bit. */
+  function downsampleTo16k(input, inRate) {
+    const outRate = 16000;
+    const ratio = inRate / outRate;
+    const outLen = Math.floor(input.length / ratio);
+    const out = new Int16Array(outLen);
+    for (let i = 0; i < outLen; i++) {
+      const start = Math.floor(i * ratio);
+      const end = Math.min(input.length, Math.floor((i + 1) * ratio));
+      let sum = 0;
+      let n = 0;
+      for (let j = start; j < end; j++) { sum += input[j]; n++; }
+      const v = n ? sum / n : input[Math.min(input.length - 1, start)];
+      const s = Math.max(-1, Math.min(1, v));
+      out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+    }
+    return out;
+  }
+
+  /** 44-byte RIFF/WAVE header + PCM s16le mono, exactly what the pod sends. */
+  function encodeWav(pcm, rate) {
+    const dataLen = pcm.length * 2;
+    const buf = new ArrayBuffer(44 + dataLen);
+    const v = new DataView(buf);
+    const str = (off, s) => { for (let i = 0; i < s.length; i++) v.setUint8(off + i, s.charCodeAt(i)); };
+    str(0, 'RIFF'); v.setUint32(4, 36 + dataLen, true); str(8, 'WAVE');
+    str(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+    v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+    str(36, 'data'); v.setUint32(40, dataLen, true);
+    for (let i = 0; i < pcm.length; i++) v.setInt16(44 + i * 2, pcm[i], true);
+    return buf;
+  }
+
+  // Mic tap: an AudioWorklet that posts each 128-sample frame; ScriptProcessor where worklets are missing.
+  const TAP_SOURCE = "registerProcessor('pcm-tap', class extends AudioWorkletProcessor {" +
+    ' process(inputs) { const ch = inputs[0] && inputs[0][0]; if (ch) this.port.postMessage(ch.slice(0)); return true; } });';
+  let tapReady = null;
+  async function createTap(ctx, onFrame) {
+    if (ctx.audioWorklet && window.AudioWorkletNode) {
+      if (!tapReady) {
+        const url = URL.createObjectURL(new Blob([TAP_SOURCE], { type: 'application/javascript' }));
+        tapReady = ctx.audioWorklet.addModule(url).finally(() => URL.revokeObjectURL(url));
+      }
+      await tapReady;
+      const node = new AudioWorkletNode(ctx, 'pcm-tap', { numberOfInputs: 1, numberOfOutputs: 1, channelCount: 1 });
+      node.port.onmessage = (e) => onFrame(e.data);
+      return node;
+    }
+    const node = ctx.createScriptProcessor(4096, 1, 1);
+    node.onaudioprocess = (e) => onFrame(new Float32Array(e.inputBuffer.getChannelData(0)));
+    return node;
+  }
+
+  // ---------- hold to talk ----------
+  const MAX_MS = 10000;
+  const talkBtn = $('talk');
+  let rec = null;
+  let busy = false;
+
+  async function startRec() {
+    if (rec || busy) return;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setStatus('No microphone API here. Open the page on http://localhost (or HTTPS) to allow the mic.', true);
+      return;
+    }
+    const ctx = audioCtx();
+    const r = { chunks: [], rate: ctx.sampleRate, ready: false, cancelled: false };
+    rec = r;
+    talkBtn.classList.add('rec');
+    talkBtn.textContent = 'Recording… release to send';
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
+      if (r.cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
+      const source = ctx.createMediaStreamSource(stream);
+      const proc = await createTap(ctx, (frame) => { if (rec === r) r.chunks.push(frame); });
+      if (r.cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
+      // The tap must reach the destination to be pulled; a zero gain keeps it silent.
+      const mute = ctx.createGain();
+      mute.gain.value = 0;
+      source.connect(proc);
+      proc.connect(mute);
+      mute.connect(ctx.destination);
+      Object.assign(r, { stream, source, proc, mute, ready: true });
+      r.timer = setTimeout(() => { if (rec === r) stopRec(); }, MAX_MS);
+      setStatus('Recording at ' + r.rate + ' Hz, release to send');
+    } catch (err) {
+      rec = null;
+      resetTalk();
+      setStatus('Mic error: ' + err.message, true);
+    }
+  }
+
+  function resetTalk() {
+    talkBtn.classList.remove('rec', 'busy');
+    talkBtn.textContent = 'Hold to talk';
+  }
+
+  async function stopRec() {
+    const r = rec;
+    rec = null;
+    if (!r) return;
+    clearTimeout(r.timer);
+    if (!r.ready) {
+      r.cancelled = true;
+      resetTalk();
+      setStatus('Mic was not ready yet (allow the permission prompt), then hold again.');
+      return;
+    }
+    r.proc.disconnect(); r.source.disconnect(); r.mute.disconnect();
+    if (r.proc.port) r.proc.port.close();
+    r.stream.getTracks().forEach((t) => t.stop());
+    const total = r.chunks.reduce((n, c) => n + c.length, 0);
+    if (total < r.rate * 0.2) { resetTalk(); setStatus('Too short, hold a bit longer.'); return; }
+    const samples = new Float32Array(total);
+    let off = 0;
+    for (const c of r.chunks) { samples.set(c, off); off += c.length; }
+    const wav = encodeWav(downsampleTo16k(samples, r.rate), 16000);
+    await sendVoice(wav);
+  }
+
+  async function sendVoice(wav) {
+    busy = true;
+    talkBtn.classList.remove('rec');
+    talkBtn.classList.add('busy');
+    talkBtn.textContent = 'Thinking…';
+    setStatus('POST /voice ' + wav.byteLength + ' bytes…');
+    const t0 = performance.now();
+    try {
+      const res = await fetch('/voice', { method: 'POST', headers: headers({ 'content-type': 'audio/wav' }), body: wav });
+      const latency = Math.round(performance.now() - t0);
+      if (!res.ok) {
+        const data = (res.headers.get('content-type') || '').includes('json') ? await res.json() : null;
+        setStatus('/voice → ' + errText(res, data), true);
+        $('rLatency').textContent = latency + ' ms';
+        return;
+      }
+      const buf = await res.arrayBuffer();
+      const rate = Number(res.headers.get('x-sample-rate')) || 16000;
+      const requestId = res.headers.get('x-request-id') || '-';
+      $('rSignal').textContent = res.headers.get('x-signal') || '-';
+      $('rRequest').textContent = requestId;
+      $('rLatency').textContent = latency + ' ms (round trip)';
+      $('rAudio').textContent = 'sent ' + wav.byteLength + ' B WAV, got ' + buf.byteLength + ' B PCM @ ' + rate + ' Hz (' + (buf.byteLength / 2 / rate).toFixed(2) + ' s)';
+      $('rTranscript').textContent = '…';
+      setStatus('200 OK, playing reply');
+      playPcm(buf, rate);
+      const { data } = await api('GET', '/state');
+      const d = data && data.lastDecision;
+      $('rTranscript').textContent = d && d.requestId === requestId ? d.transcript || '(empty)' : '(see decision panel)';
+    } catch (err) {
+      setStatus('Network error: ' + err.message, true);
+    } finally {
+      busy = false;
+      resetTalk();
+    }
+  }
+
+  talkBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); talkBtn.setPointerCapture(e.pointerId); startRec(); });
+  talkBtn.addEventListener('pointerup', () => stopRec());
+  talkBtn.addEventListener('pointercancel', () => stopRec());
+  talkBtn.addEventListener('contextmenu', (e) => e.preventDefault());
+  const typing = () => ['INPUT', 'TEXTAREA'].includes(document.activeElement && document.activeElement.tagName);
+  window.addEventListener('keydown', (e) => { if (e.code === 'Space' && !e.repeat && !typing()) { e.preventDefault(); startRec(); } });
+  window.addEventListener('keyup', (e) => { if (e.code === 'Space' && !typing()) { e.preventDefault(); stopRec(); } });
+
+  // ---------- text turn ----------
+  async function say() {
+    const text = $('sayText').value.trim();
+    if (!text) return;
+    audioCtx();
+    const t0 = performance.now();
+    try {
+      const { res, data } = await api('POST', '/voice/text', { text });
+      const latency = Math.round(performance.now() - t0);
+      $('rLatency').textContent = latency + ' ms (round trip)';
+      if (!res.ok) { setStatus('/voice/text → ' + errText(res, data), true); return; }
+      $('rTranscript').textContent = data.transcript;
+      $('rSignal').textContent = data.signal;
+      $('rRequest').textContent = data.requestId;
+      $('rAudio').textContent = data.audioBytes + ' B PCM @ ' + data.sampleRate + ' Hz (' + (data.audioBytes / 2 / data.sampleRate).toFixed(2) + ' s)';
+      const bin = atob(data.audioBase64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      playPcm(bytes.buffer, data.sampleRate);
+      setStatus('Text turn OK: ' + data.rationale);
+    } catch (err) {
+      setStatus('Network error: ' + err.message, true);
+    }
+  }
+  $('say').addEventListener('click', say);
+  $('sayText').addEventListener('keydown', (e) => { if (e.key === 'Enter') say(); });
+
+  // ---------- buttons ----------
+  async function press(action) {
+    try {
+      const { res, data } = await api('POST', '/button', { action });
+      if (!res.ok) { $('rButton').textContent = errText(res, data); setStatus('/button → ' + errText(res, data), true); return; }
+      const summary = action + ' → ' + data.signal + (data.executed ? ', executed ' + data.orders.length + ' order(s)' : ', nothing executed');
+      $('rButton').textContent = summary;
+      setStatus('/button ' + summary);
+    } catch (err) {
+      setStatus('Network error: ' + err.message, true);
+    }
+  }
+  $('confirm').addEventListener('click', () => press('confirm'));
+  $('cancel').addEventListener('click', () => press('cancel'));
+  $('replay').addEventListener('click', () => { if (lastReply) playPcm(lastReply.buf, lastReply.rate); });
+
+  $('poll').addEventListener('click', async () => {
+    try {
+      const { res, data } = await api('GET', '/alerts/next');
+      if (res.status === 204) { setStatus('GET /alerts/next → 204, no pending alert'); return; }
+      if (!res.ok) { setStatus('/alerts/next → ' + errText(res, data), true); return; }
+      setStatus('GET /alerts/next → ' + data.id + ': ' + data.text);
+    } catch (err) {
+      setStatus('Network error: ' + err.message, true);
+    }
+  });
+
+  async function ack(id) {
+    const { res, data } = await api('POST', '/alerts/' + encodeURIComponent(id) + '/ack');
+    if (!res.ok) setStatus('ack → ' + errText(res, data), true);
+  }
+
+  // ---------- inject ----------
+  async function inject() {
+    const title = $('headline').value.trim();
+    if (!title) return;
+    const body = { title };
+    const source = $('source').value.trim();
+    const url = $('url').value.trim();
+    if (source) body.source = source;
+    if (url) body.url = url;
+    try {
+      const { res, data } = await api('POST', '/news/inject', body);
+      if (!res.ok) { fill($('injectResult'), h('span', { class: 'badge bad' }, errText(res, data))); return; }
+      fill($('injectResult'),
+        signalBadge(data.decision.signal),
+        h('span', {}, 'confidence ' + data.decision.confidence),
+        data.alert ? h('span', { class: 'badge warn' }, 'alert ' + data.alert.id + ' queued') : h('span', { class: 'badge' }, 'no alert'),
+      );
+      $('headline').value = '';
+    } catch (err) {
+      fill($('injectResult'), h('span', { class: 'badge bad' }, 'Network error: ' + err.message));
+    }
+  }
+  $('inject').addEventListener('click', inject);
+  $('headline').addEventListener('keydown', (e) => { if (e.key === 'Enter') inject(); });
+
+  // ---------- safe-stop ----------
+  const safeBox = $('safeStop');
+  safeBox.addEventListener('change', async () => {
+    const enabled = safeBox.checked;
+    try {
+      const { res, data } = await api('POST', '/sim/safe-stop', { enabled });
+      if (!res.ok) { safeBox.checked = !enabled; setStatus('/sim/safe-stop → ' + errText(res, data), true); return; }
+      if (enabled && !data.safeStop) setStatus('SAFE_STOP_ENABLED=false on the server, so safe-stop stays off.', true);
+      else setStatus(data.safeStop ? 'Safe-stop ON: brain offline, /voice and /button return 503.' : 'Safe-stop OFF.');
+    } catch (err) {
+      safeBox.checked = !enabled;
+      setStatus('Network error: ' + err.message, true);
+    }
+  });
+
+  // ---------- banner ----------
+  const banner = $('banner');
+  $('bannerClose').addEventListener('click', () => banner.classList.remove('show'));
+  function onAlert(alert) {
+    $('bannerText').textContent = alert.text;
+    banner.classList.add('show');
+    beep();
+  }
+
+  // ---------- rendering ----------
+  function render(s) {
+    const safe = $('safeBadge');
+    safe.textContent = s.safeStop ? 'safe-stop: ON (brain offline)' : 'safe-stop: off';
+    safe.className = 'badge ' + (s.safeStop ? 'bad' : 'good');
+    safeBox.checked = s.safeStop;
+
+    $('newsCount').textContent = String(s.news.length);
+    const news = $('news');
+    if (!s.news.length) fill(news, h('li', { class: 'empty' }, 'No news yet.'));
+    else fill(news, s.news.map((n) => {
+      const c = n.credibility;
+      const level = c ? c.level : 'unknown';
+      const cls = { exemplary: 'good', reputable: 'good', neutral: 'accent', questionable: 'warn', untrusted: 'bad' }[level] || '';
+      return h('li', {},
+        n.url ? h('a', { href: n.url, target: '_blank', rel: 'noopener noreferrer', style: 'color:inherit' }, n.title) : n.title,
+        h('div', { class: 'meta' },
+          n.signal !== 'none' && signalBadge(n.signal),
+          h('span', { class: 'badge ' + cls }, (c ? c.handle + ' · ' : '') + level + (c && c.score !== null ? ' ' + c.score : '') + (c ? ' ×' + c.weight : '')),
+          h('span', {}, n.source),
+          h('span', {}, time(n.publishedAt)),
+        ));
+    }));
+
+    const d = s.lastDecision;
+    if (!d) fill($('decision'), h('div', { class: 'empty' }, 'No decision yet.'));
+    else fill($('decision'),
+      h('div', { class: 'row' }, signalBadge(d.signal), h('span', {}, 'confidence ' + d.confidence), h('span', { class: 'meta' }, time(d.at))),
+      h('p', { class: 'rationale' }, d.rationale),
+      h('dl', { class: 'kv' },
+        h('dt', {}, 'request id'), h('dd', {}, d.requestId),
+        h('dt', {}, 'trigger'), h('dd', {}, d.trigger),
+        d.transcript && [h('dt', {}, 'transcript'), h('dd', {}, d.transcript)],
+        d.headline && [h('dt', {}, 'headline'), h('dd', {}, d.headline)],
+      ));
+    fill($('decTrigger'), d ? h('span', { class: 'badge accent' }, d.trigger) : null);
+
+    if (!s.plannedActions.length) fill($('actions'), h('div', { class: 'empty' }, 'Nothing pending.'));
+    else fill($('actions'), h('table', {},
+      h('thead', {}, h('tr', {}, h('th', {}, 'coin'), h('th', {}, 'side'), h('th', {}, 'size'), h('th', {}, 'why'))),
+      h('tbody', {}, s.plannedActions.map((a) => h('tr', {},
+        h('td', { class: 'mono' }, a.coin),
+        h('td', {}, h('span', { class: 'badge ' + (a.side === 'long' ? 'good' : 'bad') }, a.side)),
+        h('td', { class: 'num' }, usd(a.sizeUsd)),
+        h('td', {}, a.reason),
+      )))));
+
+    const pending = s.alerts.filter((a) => a.status === 'pending').length;
+    $('alertCount').textContent = pending + ' pending';
+    const alerts = $('alerts');
+    if (!s.alerts.length) fill(alerts, h('li', { class: 'empty' }, 'No alerts yet. Inject a headline.'));
+    else fill(alerts, s.alerts.map((a) => h('li', {},
+      a.text,
+      h('div', { class: 'meta' },
+        h('span', { class: 'mono' }, a.id),
+        h('span', { class: 'badge ' + (a.status === 'pending' ? 'warn' : a.status === 'acked' ? 'good' : 'accent') }, a.status),
+        signalBadge(a.signal),
+        h('span', {}, time(a.createdAt)),
+        a.status !== 'acked' && h('button', { type: 'button', onclick: () => ack(a.id) }, 'Ack'),
+      ))));
+
+    if (!s.orders.length) fill($('orders'), h('div', { class: 'empty' }, 'No orders yet.'));
+    else fill($('orders'), h('table', {},
+      h('thead', {}, h('tr', {}, h('th', {}, 'order'), h('th', {}, 'coin'), h('th', {}, 'side'), h('th', {}, 'size'), h('th', {}, 'status'))),
+      h('tbody', {}, s.orders.map((o) => h('tr', { title: 'request ' + o.requestId + ' at ' + o.at },
+        h('td', { class: 'mono' }, o.orderId),
+        h('td', { class: 'mono' }, o.coin),
+        h('td', {}, h('span', { class: 'badge ' + (o.isBuy ? 'good' : 'bad') }, o.isBuy ? 'buy' : 'sell')),
+        h('td', { class: 'num' }, usd(o.sizeUsd)),
+        h('td', {}, o.status),
+      )))));
+
+    const eps = $('episodes');
+    if (!s.episodes.length) fill(eps, h('li', { class: 'empty' }, 'No episodes yet.'));
+    else fill(eps, s.episodes.map((e) => h('li', {},
+      h('div', { class: 'row' },
+        h('span', { class: 'mono' }, '#' + e.seq),
+        h('span', { class: 'badge ' + ({ executed: 'good', cancelled: 'warn', proposed: 'accent' }[e.outcome] || 'bad') }, e.outcome),
+        signalBadge(e.decision.signal),
+        h('span', { class: 'meta' }, time(e.at)),
+      ),
+      h('div', { class: 'meta mono' }, e.requestId, e.receipts && e.receipts.length ? ' · ' + e.receipts.join(', ') : ''),
+    )));
+  }
+
+  // ---------- event stream ----------
+  const logEl = $('log');
+  function log(type, data) {
+    const line = new Date().toLocaleTimeString() + '  ' + type.padEnd(8) + ' ' + summarize(type, data) + '\n';
+    logEl.prepend(document.createTextNode(line));
+    while (logEl.childNodes.length > 200) logEl.lastChild.remove();
+  }
+  function summarize(type, d) {
+    switch (type) {
+      case 'news': return d.title + (d.credibility ? ' [' + d.credibility.level + ']' : '');
+      case 'decision': return d.signal + ' ' + d.confidence + ' via ' + d.trigger + ' ' + d.requestId;
+      case 'alert': return d.id + ' ' + d.signal + ': ' + d.text;
+      case 'order': return d.orderId + ' ' + (d.isBuy ? 'buy ' : 'sell ') + d.coin + ' ' + usd(d.sizeUsd) + ' ' + d.status;
+      case 'episode': return '#' + d.seq + ' ' + d.outcome + ' ' + d.requestId;
+      default: return '';
+    }
+  }
+  $('clearLog').addEventListener('click', () => logEl.replaceChildren());
+
+  function setConn(on) {
+    $('conn').classList.toggle('on', on);
+    $('connText').textContent = on ? 'events: live' : 'events: reconnecting';
+  }
+
+  const es = new EventSource('/events');
+  es.onopen = () => setConn(true);
+  es.onerror = () => setConn(false);
+  es.addEventListener('state', (e) => render(JSON.parse(e.data)));
+  es.addEventListener('alert', (e) => onAlert(JSON.parse(e.data)));
+  for (const type of ['news', 'decision', 'alert', 'order', 'episode']) {
+    es.addEventListener(type, (e) => log(type, JSON.parse(e.data)));
+  }
+
+  fetch('/health').then((r) => r.json()).then((hl) => { $('version').textContent = 'server ' + hl.version; }).catch(() => {});
+})();
+</script>
+</body>
+</html>
