@@ -121,6 +121,8 @@ curl localhost:3000/health
 
 Every provider ships as a deterministic stub, so the server runs with an empty `.env`.
 
+No pod yet? Open http://localhost:3000/sim for the virtual pod (hold-to-talk, inject headlines, confirm trades, live state), or use `npm run pod -- help`. See [docs/simulator.md](docs/simulator.md).
+
 ## Sketch roadmap
 
 | # | Sketch | What it proves | Status |
