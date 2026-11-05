@@ -16,6 +16,7 @@ import { FakePolymarketProvider } from './news/polymarket.js';
 import { FakeRssProvider } from './news/rss.js';
 import { Pipeline, type PipelineDeps } from './pipeline.js';
 import { isBrainOnline } from './safety/safeStop.js';
+import { InjectedNewsProvider } from './sim/injected.js';
 import { registerSimRoutes } from './sim/routes.js';
 import { PodState } from './sim/state.js';
 import { VERSION } from './version.js';
@@ -60,7 +61,10 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
   const state = new PodState(opts.scorer ?? new FakeEthosScorer(), {
     safeStop: config.SAFE_STOP_ENABLED && config.SIMULATE_BRAIN_OFFLINE,
   });
-  const pipeline = new Pipeline({ ...defaultDeps(config), ...opts.deps, observer: state });
+  // Headlines posted to /news/inject join whatever news providers are configured.
+  const injected = new InjectedNewsProvider();
+  const deps = { ...defaultDeps(config), ...opts.deps };
+  const pipeline = new Pipeline({ ...deps, news: [...deps.news, injected], observer: state });
   const app = Fastify({ logger: opts.logger ?? false });
 
   // Fill the news panel before the first decision. Never block startup on a slow feed.
@@ -130,7 +134,14 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
     return pipeline.handleButton(parsed.data.action);
   });
 
-  registerSimRoutes(app, { state, safeStopEngaged: async () => !(await brainOnline()) });
+  registerSimRoutes(app, {
+    state,
+    pipeline,
+    injected,
+    safeStopEngaged: async () => !(await brainOnline()),
+    requireDevice,
+    requireBrain,
+  });
 
   return app;
 }
