@@ -9,6 +9,18 @@ export interface NewsItem {
   publishedAt: string;
   /** X handle of the author or outlet, used for Ethos credibility scoring. */
   handle?: string;
+  /** Publisher domain without www (coindesk.com), used for the static source-credibility table. */
+  domain?: string;
+  /** Short description or post text when the provider has one. */
+  summary?: string;
+  /** CryptoPanic community votes collapsed to 0 (bearish) .. 1 (bullish); 0.5 = neutral/no votes. */
+  sentiment?: number;
+  /** Polymarket: implied probability (0..1) of the market's "Yes" outcome. */
+  probability?: number;
+  /** Polymarket: 24 h change of that probability, in probability units (-1..1). */
+  probabilityChange24h?: number;
+  /** 0.2..1.0 weight attached by credibility/weightItems (Ethos score and/or source table). */
+  credibility?: number;
 }
 
 export interface NewsProvider {
