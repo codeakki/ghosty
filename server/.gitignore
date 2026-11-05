@@ -2,5 +2,5 @@ node_modules/
 dist/
 .env
 *.log
-# News aggregator state (last-seen ids)
+# Runtime state: news seen ids, 0G memory/episode index, x402 spend, HCS topic
 .ghosty/

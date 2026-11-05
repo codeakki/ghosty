@@ -46,7 +46,30 @@ const ConfigSchema = z.object({
 
   HEDERA_ACCOUNT_ID: optional,
   HEDERA_PRIVATE_KEY: optional,
+  /** Only used when HEDERA_PRIVATE_KEY is raw hex; DER keys carry their own type. */
+  HEDERA_KEY_TYPE: z.enum(['ecdsa', 'ed25519']).default('ecdsa').catch('ecdsa'),
+  HEDERA_NETWORK: z.enum(['testnet', 'mainnet']).default('testnet').catch('testnet'),
+  /** Pin an existing HCS audit topic instead of creating one (cached in server/.ghosty/hcs.json). */
+  HEDERA_HCS_TOPIC_ID: optional,
   X402_FACILITATOR_URL: z.string().default('https://x402.org/facilitator'),
+  /** Merchant account that receives /signal payments. Defaults to HEDERA_ACCOUNT_ID; must differ from the payer. */
+  X402_PAY_TO: optional,
+  /** Price of one GET /signal in tinybars (1 HBAR = 100,000,000). Default 0.01 HBAR. */
+  X402_SIGNAL_PRICE_TINYBAR: z.coerce.number().int().positive().default(1_000_000).catch(1_000_000),
+  /** Agent-side cap on a single payment, in tinybars. Default 0.1 HBAR. */
+  X402_MAX_PER_CALL_TINYBAR: z.coerce.number().int().positive().default(10_000_000).catch(10_000_000),
+  /** Agent-side cap on total spend per UTC day, in tinybars. Default 1 HBAR. */
+  X402_MAX_SPEND_TINYBAR: z.coerce.number().int().positive().default(100_000_000).catch(100_000_000),
+  /** Comma-separated hosts (optionally host:port) the agent may pay. */
+  X402_ALLOWED_HOSTS: z
+    .string()
+    .default('localhost,127.0.0.1')
+    .transform((v) =>
+      v
+        .split(',')
+        .map((h) => h.trim().toLowerCase())
+        .filter((h) => h.length > 0),
+    ),
 
   HL_MASTER_ADDRESS: optional,
   HL_AGENT_PRIVATE_KEY: optional,

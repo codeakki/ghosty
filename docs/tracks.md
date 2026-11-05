@@ -91,12 +91,14 @@ Details, endpoints and gas numbers: [research/0g.md → Implementation notes](re
 
 ### 2. Hedera x402
 
-- [ ] x402 endpoint (`GET /signal`) settling on `hedera:testnet` through a listed facilitator
-- [ ] Agent wallet pays at least once with **no human approval**
-- [ ] Settled **tx ID** in README with HashScan link
-- [ ] Architecture + payment-flow diagram in README
+- [x] x402 endpoint (`GET /signal`) settling on `hedera:testnet` through a listed facilitator. Evidence: `server/src/payments/x402Server.ts` (`registerPaidRoutes`; `@x402/core` resource server + `@x402/hedera` exact scheme, facilitator `https://x402.org/facilitator`); 402 payload in [api.md](api.md#get-signal-x402-on-hedera); tests in `server/test/x402.test.ts`. Live settlement needs a funded account (see next item).
+- [ ] Agent wallet pays at least once with **no human approval**. Code done: `server/src/payments/x402Client.ts` (`@x402/fetch` + Hedera signer). To finish: fund two testnet accounts, run `npm run x402:demo`, and a row lands in [evidence.md](evidence.md).
+- [ ] Settled **tx ID** in README with HashScan link (copy the first row of [evidence.md](evidence.md))
+- [ ] Architecture + payment-flow diagram in README (flow diagram ready in [api.md](api.md#get-signal-x402-on-hedera))
 - [ ] Video **≤ 5 min** showing the HashScan link
-- [ ] Extra credit (pick what is cheap): spend cap / `payTo` allowlist, HCS audit topic for payments, USDC via HTS, Agent Kit
+- [x] Extra credit: spend controls, done in `server/src/payments/spendControls.ts` + `x402Client.ts`. Covers the host allowlist `X402_ALLOWED_HOSTS`, the per-call cap `X402_MAX_PER_CALL_TINYBAR` and the daily cap `X402_MAX_SPEND_TINYBAR`, persisted in `server/.ghosty/spend.json`. The agent also refuses to pay its own account.
+- [x] Extra credit: HCS audit topic, done in `server/src/payments/hcsAudit.ts`. Each payment and each trade decision becomes one message; the topic link is printed by `x402:demo`. Not yet run on testnet.
+- [ ] Extra credit, not done: USDC via HTS, Agent Kit
 
 ### 3. Uniswap
 
