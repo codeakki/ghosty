@@ -9,13 +9,22 @@ const bool = (fallback: boolean) =>
 
 const optional = z.string().optional();
 
+/** Positive integer with a fallback for missing or malformed values. */
+const posInt = (fallback: number) => z.coerce.number().int().positive().default(fallback).catch(fallback);
+
 const ConfigSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(3000).catch(3000),
   HOST: z.string().default('0.0.0.0'),
   DEVICE_TOKEN: optional,
 
   GROQ_API_KEY: optional,
+  GROQ_STT_MODEL: z.string().default('whisper-large-v3-turbo'),
   ELEVENLABS_API_KEY: optional,
+  // "George", the voice used throughout the ElevenLabs API reference examples.
+  ELEVENLABS_VOICE_ID: z.string().default('JBFqnCBsd6RMkjVDRZzb'),
+  ELEVENLABS_MODEL_ID: z.string().default('eleven_flash_v2_5'),
+  // TTS fallback only (gpt-4o-mini-tts, 24 kHz PCM resampled to 16 kHz). Used when ELEVENLABS_API_KEY is unset.
+  OPENAI_API_KEY: optional,
 
   OG_ROUTER_URL: z.string().default('https://router-api-testnet.integratenetwork.work/v1'),
   OG_API_KEY: optional,
@@ -36,8 +45,31 @@ const ConfigSchema = z.object({
   EVM_RPC_URL: optional,
 
   CRYPTOPANIC_TOKEN: optional,
+  // v1 is gone; valid paths are /api/{growth|growth_weekly|enterprise}/v2/posts/ (probed 2026-11-06).
+  CRYPTOPANIC_API_URL: z.string().default('https://cryptopanic.com/api/growth/v2'),
   ETHOS_CLIENT: z.string().default('ghosty@0.1.0'),
+  // Ethos needs no key; off by default so local dev and tests stay offline and deterministic.
+  ETHOS_ENABLED: bool(false),
+  ETHOS_API_URL: z.string().default('https://api.ethos.network/api/v2'),
   XAI_API_KEY: optional,
+  XAI_MODEL: z.string().default('grok-4.7'),
+  /** Comma-separated X handles (no @, max 20) passed as allowed_x_handles. Empty = built-in list. */
+  XAI_X_HANDLES: optional,
+  /** Minimum seconds between paid x_search calls; the poller reuses the cached result in between. */
+  XAI_MIN_INTERVAL_SECONDS: posInt(300),
+
+  /** true = use the keyless real providers (RSS, Polymarket). CryptoPanic/Grok switch on with their keys. */
+  NEWS_LIVE: bool(false),
+  /** Comma-separated feeds, each `name=url` or a bare url. Empty = CoinDesk, Cointelegraph, The Block, Decrypt. */
+  NEWS_RSS_FEEDS: optional,
+  NEWS_POLYMARKET_KEYWORDS: z.string().default('war,strike,ceasefire,invasion,sanction,missile,nuclear'),
+  /** Optional Gamma tag_slug to narrow /events (e.g. geopolitics). */
+  NEWS_POLYMARKET_TAG: optional,
+  NEWS_WINDOW_MINUTES: posInt(120),
+  NEWS_POLL_SECONDS: posInt(60),
+  NEWS_PROVIDER_TIMEOUT_MS: posInt(8000),
+  /** Where the aggregator persists last-seen ids, relative to the server's working directory. */
+  NEWS_SEEN_PATH: z.string().default('.ghosty/news-seen.json'),
 
   SAFE_STOP_ENABLED: bool(true),
   SIMULATE_BRAIN_OFFLINE: bool(false),
