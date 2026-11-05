@@ -84,12 +84,23 @@ Source: https://ethglobal.com/events/mumbai/prizes, fetched 2026-11-05. Requirem
 
 ### 3. Uniswap
 
-- [ ] At least one real call path through the Uniswap stack (Trading API: `check_approval` → `quote` → `swap`, signed with viem)
+- [x] At least one real call path through the Uniswap stack (Trading API: `check_approval` → `quote` → `swap`, signed with viem). Code + mocked tests done; live run pending an API key.
 - [ ] A real swap tx hash from the demo
 - [ ] Public repo
-- [ ] `FEEDBACK.md` filled with real friction we hit
+- [ ] `FEEDBACK.md` filled with real friction we hit (docs-based notes in; live-testing items marked TODO)
 - [ ] Feedback form submitted: https://developers.uniswap.org/hackathon-feedback
-- [ ] README points at the exact Uniswap code lines (file + line range)
+- [ ] README points at the exact Uniswap code lines (file + line range). Line ranges are in `FEEDBACK.md`; copy them to the README.
+
+#### Uniswap evidence
+
+| Item | Where | Status |
+|---|---|---|
+| Trading API flow (`check_approval` → approve → `quote` → Permit2 sign → `swap` → send) | [`server/src/wallet/uniswap.ts` L176–L239](../server/src/wallet/uniswap.ts#L176-L239) | Implemented, unit-tested with mocked API + wallet |
+| viem account / chain (derived address, `EVM_CHAIN_ID` default 84532) | [`server/src/wallet/account.ts`](../server/src/wallet/account.ts) | Implemented |
+| Spot leg runs before the perp legs | [`server/src/execution/executor.ts`](../server/src/execution/executor.ts), `planSteps` in [`playbook.ts`](../server/src/execution/playbook.ts) | Implemented; pipeline wiring is a follow-up |
+| Tests | [`server/test/uniswap.test.ts`](../server/test/uniswap.test.ts) | Approval and no-approval paths, errors |
+| Swap tx hash (Base Sepolia) | _TODO: BaseScan link_ | Needs `UNISWAP_API_KEY` + funded `EVM_PRIVATE_KEY` |
+| Feedback | [`FEEDBACK.md`](../FEEDBACK.md) | Draft; live-testing TODOs |
 
 ### Stretch: Arkiv from scratch + Swarm bonus
 

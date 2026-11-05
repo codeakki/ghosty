@@ -54,7 +54,7 @@ async function post(path: string, body: unknown) {
   return r.json();
 }
 
-// Request/response field names: check the docs; shapes here are placeholders (UNVERIFIED)
+// Placeholder sketch from research. Real shapes: see "Implementation notes" below.
 const approval = await post('/check_approval', { /* token, amount, walletAddress, chainId */ });
 if (approval.approval) await wallet.sendTransaction(approval.approval);
 
@@ -98,9 +98,35 @@ Write it as we go, not at the end:
 - Approval / Permit2 friction
 - Docs gaps
 
+## Implementation notes (2026-11-06)
+
+Code: `server/src/wallet/uniswap.ts` (`UniswapSpotLeg`), viem account in `server/src/wallet/account.ts`. Shapes come from the OpenAPI spec (`https://trade-api.gateway.uniswap.org/v1/api.json`) and the integration guide, which replace the placeholders above.
+
+| Step | Request | Response we read |
+|---|---|---|
+| `POST /check_approval` | `{ walletAddress, token, amount, chainId, tokenOut, tokenOutChainId }` | `approval` and `cancel` (each a `TransactionRequest` or `null`). Send `cancel` first if present. |
+| `POST /quote` | `{ type: 'EXACT_INPUT', amount, tokenIn, tokenOut, tokenInChainId, tokenOutChainId, swapper, slippageTolerance, routingPreference: 'BEST_PRICE', protocols: ['V2','V3','V4'] }` | `routing`, `quote` (`quoteId`, `routeString`, `output.amount`), `permitData` (or `null`) |
+| sign | `signTypedData({ domain, types, primaryType, message: values })` | `primaryType` is not returned; we take the type no other type references (`PermitSingle`) |
+| `POST /swap` | `{ quote }`, or `{ quote, signature, permitData }` (both or neither) | `swap: { to, from, data, value, chainId, gasLimit }` |
+
+Differences from the research notes:
+- There is a **Permit2 signature step** between quote and swap whenever `permitData` is non-null.
+- `/check_approval` may return a **revoke (`cancel`) tx** as well as the approval.
+- `/quote` can already contain `swapTransaction` (when no permit is needed); we still call `/swap` so the flow is the same in both cases.
+- `protocols` pins AMM routing. Without it, mainnet quotes can come back as UniswapX (`DUTCH_V2/V3`, `PRIORITY`), which go to `/order`, not `/swap`.
+- Proxy (no-Permit2) flow via `x-permit2-disabled`: **not deployed on Base Sepolia** (only Unichain Sepolia, Sepolia, Monad testnet). We use Permit2.
+- Optional headers: `x-universal-router-version` (default 2.1.2 where deployed; Base Sepolia 2.1.2 router is `0x8702463e73f74d0b6765aBceb314Ef07aCb92650`), `x-agent-info` (agent attribution).
+- Error bodies: 404 has `errorCode` (`NoRouteFoundError`, `QuoteAmountTooLowError`, `UnsupportedTokenError`, …). Only `UpstreamTimeoutError` is worth retrying unchanged.
+
+Safety checks before broadcasting every API-built tx: valid `to`, non-empty `data`, `chainId` matches the wallet. Gas limit from the API is passed through; fees are left to viem.
+
+Demo pair (config, verify before the event): WETH `0x4200000000000000000000000000000000000006` → USDC `0x036CbD53842c5426634e7929541eC2318f3dCF7e` on Base Sepolia, 0.0001 WETH (`UNISWAP_DEMO_AMOUNT`). The spot leg runs before the perp legs when `UNISWAP_SPOT_LEG=true` (`planSteps` + `executePlan`).
+
 ## Unverified
 
-- Request/response field names for `/check_approval`, `/quote`, `/swap` (snippet uses placeholders).
-- Which testnet pairs have usable liquidity on 2026-11-06.
+- A live quote/swap: needs `UNISWAP_API_KEY` and a funded Base Sepolia wallet.
+- Which testnet pairs have usable liquidity on 2026-11-06 (WETH/USDC on Base Sepolia assumed).
+- The Base Sepolia USDC address above (Circle testnet USDC; confirm on BaseScan).
+- Whether `permitData.domain.chainId` comes back as a number or a string (viem signs either; checked locally).
 - Trading API support for PAXG/XAUT routes on Arbitrum / Base.
 - xStocks pool size (~$240k) is a point-in-time figure from research.
