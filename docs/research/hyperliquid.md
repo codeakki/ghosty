@@ -20,7 +20,7 @@ asset = 100000 + perp_dex_index * 10000 + index_in_meta
 - Native (non-HIP-3) perps like BTC keep their normal small asset ids from the default `meta`.
 - Docs: https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/asset-ids
 
-Coin names look like `xyz:GOLD`, `xyz:TSLA`. **Exact tickers are UNVERIFIED** — always read them from `meta` at runtime, never hard-code.
+Coin names look like `xyz:GOLD`, `xyz:TSLA`. Tickers verified 2026-11-06 (see below); still read them from `meta` at runtime, never hard-code asset ids.
 
 ### Discovery calls (info endpoint)
 
@@ -77,7 +77,7 @@ agent key --signs order--> exchange endpoint --> fills on master's account
 3. Approve a testnet API wallet from the master.
 4. Run `perpDexs` and `meta(dex:"xyz")` on **testnet** to see whether stock/gold markets exist there.
 
-Whether `xyz` stock/gold markets exist on testnet is **UNVERIFIED**. Fallbacks, in order:
+`xyz` stock/gold/oil markets **do exist on testnet** (verified 2026-11-06, see below). Fallbacks if a market is missing or illiquid, in order:
 - BTC perp on testnet (the "short BTC" half of the war playbook still demos).
 - Mainnet, minimum size, same code path (only the base URL and keys change).
 
@@ -102,9 +102,44 @@ All sizes are capped by user memory (risk limits on 0G Storage) and a hard serve
 
 Spot gold on Uniswap (PAXG / XAUT) is the realistic safe-haven **spot** leg; Hyperliquid carries the directional trade.
 
+## Verified on 2026-11-06 (live info calls, no keys)
+
+`npm run hl:check` (see `server/src/scripts/hlCheck.ts`) against both networks:
+
+| | Testnet | Mainnet |
+|---|---|---|
+| `perpDexs` length | 277 (index 0 = `null`, then `test`, `unit`, …) | 11 (`xyz`, `flx`, `vntl`, `hyna`, …) |
+| `xyz` dex index | **65** → asset ids `750000 + metaIdx` | **1** → asset ids `110000 + metaIdx` |
+| Gold | `xyz:GOLD` (metaIdx 3, szDecimals 4) | `xyz:GOLD` (3, 4) |
+| WTI crude | `xyz:CL` (29, 3). No `xyz:WTI` ticker. | `xyz:CL` (29, 3) |
+| Brent | `xyz:BRENTOIL` **delisted** | `xyz:BRENTOIL` (49, 2) |
+| TSLA | `xyz:TSLA` (1, 3) | `xyz:TSLA` (1, 3) |
+| BTC (main dex) | asset **3** (not 0) | asset 0 |
+
+So **xyz gold/oil/stock markets exist on testnet**. Liquidity there is thin: on 2026-11-06 `xyz:CL` had no `midPx` in `metaAndAssetCtxs` (allMids still returned 88.671), and `xyz:TSLA` mid was 439 vs mark 379. An IOC at mid ± 1% may not fill on testnet; the venue returns `status: 'rejected'` with the exchange's message instead of throwing.
+
+Other facts confirmed:
+- `meta({dex})` universe names already carry the prefix (`xyz:GOLD`). `allMids({dex:'xyz'})` keys are prefixed too.
+- `@nktkas/hyperliquid` 0.33.3: `new HttpTransport({ isTestnet })`, `InfoClient.perpDexs()`, `meta({ dex })`, `allMids({ dex })`, `clearinghouseState({ user, dex })`, `userAbstraction({ user })`, `ExchangeClient({ transport, wallet }).order({ orders: [{ a, b, p, s, r, t: { limit: { tif: 'Ioc' } } }], grouping: 'na' })`. Utils: `formatPrice(px, szDecimals, 'perp')` (5 significant figures, ≤ 6 − szDecimals decimals), `formatSize`. The SDK throws `ApiRequestError` when a status is `{ error }`.
+- Asset id rules (docs): perps = index in `meta`; builder dexes = `100000 + perp_dex_index * 10000 + index_in_meta`; spot = `10000 + spotIndex`.
+- Agent wallets: query with the master address (agent address returns empty); nonces are per signer; do not reuse deregistered agent keys.
+
+## Implementation notes (server/src/execution/hyperliquid.ts)
+
+- **Market map**: `perpDexs()` + `meta({dex})` for the main dex and `HL_DEXES` only (default `xyz`). Loading all 277 testnet dexes would hit info rate limits. Cached 5 minutes.
+- **Alias resolution** (`resolveCoin`): exact coin → alias pattern on the ticker → `HL_FALLBACK_COINS`. Patterns are anchored: an unanchored `/CL/` matches `xyz:CRCL` (Circle, index 18) before `xyz:CL` (index 29). `GOLD → xyz:GOLD`, `WTI`/`xyz:WTI → xyz:CL`, `BTC → BTC`. Delisted markets are skipped. Fallback orders carry `fallback: true` and `requestedCoin`.
+- **Orders**: mid from `allMids({dex})`; size = `sizeUsd / mid` rounded to szDecimals; IOC limit at mid ± `slippageBps` (default 100). Under $10 is rejected before any network call. If rounding lands just under $10 (checked at the worse of mid and limit price), the size is bumped by one lot, so a $10 leg can cost a few cents more.
+- **Never throws** from `placeMarketOrder`: unknown market, missing mid, exchange error → `status: 'rejected'` with `error`, so one bad leg does not abort the others.
+- **Factory** `createPerpVenue(config)`: real only when `HL_AGENT_PRIVATE_KEY` and `HL_MASTER_ADDRESS` are both valid; otherwise `FakeHyperliquid`.
+
+### HIP-3 collateral (new pre-event item)
+
+HIP-3 dexes keep **separate margin**. A test call on 2026-11-06 for a funded testnet address showed `main: 1451 USDC`, `xyz: 0`. Before trading `xyz:*`, either move USDC into the xyz dex (`sendAsset`, or the app's transfer) or switch the master to `unifiedAccount` (`userSetAbstraction`, or the app setting). In that mode, HIP-3 actions pull collateral automatically. `hl:check` prints the abstraction mode and flags an unfunded dex.
+
 ## Unverified
 
-- Exact `xyz:` tickers (`xyz:GOLD`, `xyz:WTI`, `xyz:TSLA` are illustrative).
-- Whether `xyz` stock/gold markets exist on testnet.
-- `@nktkas/hyperliquid` method names used in the snippet (`perpDexs`, `meta({dex})`).
+- Order placement end to end (needs a funded master + approved agent key). The `order` request shape matches the SDK types and docs, but no testnet order has been sent yet.
+- Whether HL's $10 minimum is checked at the limit price or the mid (we satisfy both).
+- Whether an IOC fills on thin testnet xyz books at 1% slippage; may need `slippageBps` 300+ on testnet.
+- The `/explorer/address/<master>` link format on the testnet app.
 - trade.xyz share of HIP-3 OI (91–97%) is a point-in-time figure.
