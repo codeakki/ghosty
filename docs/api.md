@@ -20,7 +20,7 @@ Contract between the pod (ESP32) and the server. Base URL during development is 
 | GET | `/health` | none | Liveness + safe-stop state |
 | POST | `/voice` | device token | Push-to-talk: WAV in, spoken answer out |
 | POST | `/button` | device token | Confirm or cancel the last suggested trade |
-| GET | `/signal` | x402 payment | Future: premium signal, paid per call on Hedera |
+| GET | `/signal` | x402 payment | Premium signal, paid per call in HBAR on Hedera testnet |
 
 ---
 
@@ -161,54 +161,134 @@ curl -s -X POST http://localhost:3000/button \
 
 ---
 
-## Future: GET /signal (x402 on Hedera)
+## GET /signal (x402 on Hedera)
 
-A premium signal endpoint behind an x402 paywall. The agent's own Hedera wallet pays for it on every call with no human approval. This is the Hedera track requirement. See [research/hedera-x402.md](research/hedera-x402.md).
+A premium signal endpoint behind an x402 paywall. The agent's own Hedera account pays for it on every call with no human approval; this is the Hedera track requirement. Code: `server/src/payments/x402Server.ts` (`registerPaidRoutes`), client `server/src/payments/x402Client.ts`. Notes: [research/hedera-x402.md](research/hedera-x402.md).
+
+Protocol: x402 **v2** as spoken by `@x402/core` / `@x402/fetch` 2.30. Scheme `exact`, network `hedera:testnet`, asset HBAR `0.0.0`, amount in tinybars.
 
 **Flow**
 
 ```
-Client (agent wallet)                    Server /signal                 Facilitator (hedera:testnet)
-   | GET /signal                            |                                 |
+Agent (X402Payer)                        Server GET /signal                Facilitator (x402.org, hedera:testnet)
+   | GET /signal                            |  (first call: GET /supported → feePayer, cached)
    |--------------------------------------->|                                 |
-   |<-- 402 Payment Required ---------------|                                 |
-   |    body: accepts[{scheme:"exact",      |                                 |
-   |      network:"hedera:testnet",         |                                 |
-   |      price, payTo:"0.0.X", asset}]     |                                 |
-   | sign partial TransferTransaction       |                                 |
-   | GET /signal  + X-Payment: <payload>    |                                 |
-   |--------------------------------------->|-- verify + settle ------------->|
-   |                                        |<-- ok, tx ID -------------------|
-   |<-- 200 { signal ... } -----------------|                                 |
+   |<-- 402 + PAYMENT-REQUIRED header ------|                                 |
+   |    body: { x402Version: 2, accepts:[{scheme:"exact", network:"hedera:testnet",
+   |            amount:"1000000", asset:"0.0.0", payTo, extra:{feePayer}}] }
+   | policy checks (host allowlist, HBAR only, per-call + daily cap)
+   | sign TransferTransaction (payer −amount, payTo +amount, tx id paid by feePayer)
+   | GET /signal + PAYMENT-SIGNATURE         |                                 |
+   |--------------------------------------->|-- POST /verify ---------------->|
+   |                                        |<-- { isValid: true } -----------|
+   |                                        |   getSignal()                   |
+   |                                        |-- POST /settle ---------------->|  submits to Hedera
+   |                                        |<-- { success, transaction } ----|
+   |<-- 200 + PAYMENT-RESPONSE, x-payment-tx-id, signal JSON                  |
 ```
 
-1. First request has no payment and gets `402` with the payment requirements (scheme `exact`, network `hedera:testnet`, price, `payTo` account, asset: HBAR `0.0.0` in tinybars or testnet USDC `0.0.429274`).
-2. The client signs a partial Hedera `TransferTransaction` and retries with the `X-Payment` header.
-3. The server's middleware hands the payload to a listed facilitator, which verifies and settles.
-4. The server returns `200` with the signal. The settlement tx ID is logged and goes in the README with its HashScan link.
+### Request headers
 
-The exact 402 body fields and response header names follow whatever `@x402/express` emits; read them from the library rather than hand-rolling.
+| Header | When | Value |
+|---|---|---|
+| `PAYMENT-SIGNATURE` | paid retry (x402 v2, what `@x402/fetch` sends) | base64 JSON `PaymentPayload` |
+| `X-PAYMENT` | accepted as an alias (x402 v1 header name) | same base64 JSON `PaymentPayload` |
 
-**Planned 200 body**
+`PaymentPayload` (decoded):
 
 ```json
 {
-  "id": "sig_01",
-  "class": "geopolitical",
-  "headline": "...",
-  "sources": [{ "name": "cointelegraph", "ethosScore": 1800 }],
-  "confidence": 0.72,
-  "paidTxId": "0.0.X@1730000000.000000000"
+  "x402Version": 2,
+  "resource": { "url": "http://localhost:3000/signal", "description": "...", "mimeType": "application/json" },
+  "accepted": { "scheme": "exact", "network": "hedera:testnet", "amount": "1000000", "asset": "0.0.0", "payTo": "0.0.5005", "maxTimeoutSeconds": 180, "extra": { "feePayer": "0.0.9185802" } },
+  "payload": { "transaction": "<base64 partially signed Hedera TransferTransaction>" }
 }
 ```
 
-```bash
-# Unpaid request: expect 402 and the payment requirements
-curl -s -i http://localhost:3000/signal
+### 402 Payment Required
 
-# Paid request is made by the agent with @x402/fetch, not curl.
-# A manual retry would look like:
-curl -s -i http://localhost:3000/signal -H "X-Payment: <base64 payment payload>"
+Sent when there is no payment header, or when the payment is malformed, does not match the current requirements, fails `/verify`, or fails `/settle`. The body is the `PaymentRequired` object; the same object is base64-encoded in the `PAYMENT-REQUIRED` header (that is what `@x402/fetch` reads). `error` says why.
+
+| Header | Value |
+|---|---|
+| `PAYMENT-REQUIRED` | base64 JSON of the body below |
+| `Cache-Control` | `no-store` |
+
+```json
+{
+  "x402Version": 2,
+  "error": "payment required",
+  "resource": {
+    "url": "http://localhost:3000/signal",
+    "description": "Ghosty premium market signal (credibility-weighted, decided on 0G Compute)",
+    "mimeType": "application/json"
+  },
+  "accepts": [
+    {
+      "scheme": "exact",
+      "network": "hedera:testnet",
+      "amount": "1000000",
+      "asset": "0.0.0",
+      "payTo": "0.0.5005",
+      "maxTimeoutSeconds": 180,
+      "extra": { "feePayer": "0.0.9185802" }
+    }
+  ]
+}
 ```
 
-**Spend controls (extra credit):** per-call price cap and a daily budget in the client wrapper, an allowlist of `payTo` accounts, and an HCS topic that records every payment.
+| Field | Source |
+|---|---|
+| `amount` | `X402_SIGNAL_PRICE_TINYBAR` (default `1000000` = 0.01 HBAR) |
+| `asset` | `0.0.0` = HBAR. (A `"$0.01"` price would mean testnet USDC `0.0.429274`, not HBAR.) |
+| `payTo` | `X402_PAY_TO`, falling back to `HEDERA_ACCOUNT_ID`. Must not be the payer's account. |
+| `extra.feePayer` | Facilitator's fee-payer account from its `GET /supported` (x402.org: `0.0.9185802`) |
+
+`error` values: `payment required` (no header), `invalid_payment_header`, `no_matching_payment_requirements`, any facilitator `invalidReason` (e.g. `invalid_exact_hedera_payload_signature_invalid`, `invalid_exact_hedera_payload_preflight_failed`), or a settle `errorReason` (e.g. `transaction_failed`).
+
+### 200 OK
+
+| Header | Value |
+|---|---|
+| `PAYMENT-RESPONSE` | base64 JSON `SettleResponse` (x402 v2) |
+| `X-PAYMENT-RESPONSE` | same value (v1 name) |
+| `x-payment-tx-id` | settled Hedera transaction id, e.g. `0.0.9185802@1762400000.123456789` |
+
+Decoded `SettleResponse`: `{ "success": true, "transaction": "0.0.9185802@1762400000.123456789", "network": "hedera:testnet", "payer": "0.0.1001" }`.
+
+Body:
+
+```json
+{
+  "signal": "geopolitical_shock",
+  "confidence": 0.72,
+  "actions": [{ "venue": "hyperliquid", "coin": "xyz:GOLD", "side": "long", "sizeUsd": 5, "reason": "..." }],
+  "requestId": "og-req-…",
+  "paidTxId": "0.0.9185802@1762400000.123456789",
+  "hashscanUrl": "https://hashscan.io/testnet/transaction/0.0.9185802-1762400000-123456789"
+}
+```
+
+`signal`, `confidence`, `actions`, `requestId` come from the injected `getSignal()` (the latest agent decision; `decisionToSignal(decision)` maps a `Decision`). Until the agent wiring passes one, the route returns `{"signal":"none","confidence":0,"actions":[],"requestId":"no-decision-yet"}` behind the same paywall. The handler runs after `/verify` and before `/settle`, so a broken handler never charges the payer.
+
+### Other errors
+
+| Status | When | Body |
+|---|---|---|
+| 503 | No `X402_PAY_TO` / `HEDERA_ACCOUNT_ID` configured | `{"error":"payments_not_configured"}` |
+| 503 | Facilitator `/supported` unreachable (retried on the next request) | `{"error":"facilitator_unavailable","facilitator":"https://x402.org/facilitator"}` |
+
+### Try it
+
+```bash
+# Unpaid request: 402 + requirements (body and PAYMENT-REQUIRED header)
+curl -s -i http://localhost:3000/signal
+
+# Decode the header
+curl -s -D - -o /dev/null http://localhost:3000/signal | awk -F': ' 'tolower($1)=="payment-required"{print $2}' | tr -d '\r' | base64 -d | jq
+
+# Paid request: made by the agent (@x402/fetch + Hedera signer), not curl
+cd server && npm run x402:demo        # prints tx id + HashScan link, appends docs/evidence.md
+```
+
+**Spend controls (agent side, before signing):** host allowlist `X402_ALLOWED_HOSTS`; HBAR on the configured network only; never pays its own account; per-payment cap `X402_MAX_PER_CALL_TINYBAR`; daily cap `X402_MAX_SPEND_TINYBAR` persisted in `server/.ghosty/spend.json`. Each payment is also written to an HCS audit topic (`server/src/payments/hcsAudit.ts`).
