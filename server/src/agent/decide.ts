@@ -238,6 +238,7 @@ export function toPlannedActions(
   const actions = kept
     .map((a) => ({
       venue: 'hyperliquid' as const,
+      kind: 'perp' as const,
       coin: a.coin,
       side: a.side,
       sizeUsd: Math.floor(budget * (a.sizePct / 100) * scale * 100) / 100,

@@ -141,7 +141,7 @@ const decision = (requestId: string): Decision => ({
   signal: 'geopolitical_shock',
   confidence: 0.8,
   rationale: 'test',
-  suggestedActions: [{ venue: 'hyperliquid', coin: 'BTC', side: 'short', sizeUsd: 5, reason: 'test' }],
+  suggestedActions: [{ venue: 'hyperliquid', kind: 'perp', coin: 'BTC', side: 'short', sizeUsd: 5, reason: 'test' }],
   requestId,
   newsIds: ['rss:reuters:1'],
 });

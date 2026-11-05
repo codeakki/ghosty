@@ -37,7 +37,11 @@ describe('virtual pod', () => {
     assert.equal(state.lastDecision.trigger, 'inject');
     assert.equal(state.lastDecision.headline, WAR);
     assert.equal(state.alerts[0].id, body.alert.id);
-    assert.equal(state.plannedActions.length, 3);
+    // $25 cap, balanced profile: one $12.50 gold leg (every leg must clear the $10 venue minimum).
+    assert.deepEqual(
+      state.plannedActions.map((a: { coin: string; side: string; sizeUsd: number }) => [a.coin, a.side, a.sizeUsd]),
+      [['xyz:GOLD', 'long', 12.5]],
+    );
     const injected = state.news.find((n: { title: string }) => n.title === WAR);
     assert.equal(injected.credibility.level, 'exemplary');
     assert.equal(injected.signal, 'geopolitical_shock');
