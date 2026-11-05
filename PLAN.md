@@ -103,6 +103,7 @@ Mirrors the GitHub issues. Labels in brackets.
 - [ ] Polymarket Gamma signal [server, P1]
 - [ ] Ethos credibility weight per handle / address [server, P1]
 - [ ] Grok x_search provider (optional) [server, P1]
+- [ ] Virtual pod simulator (UI + CLI): `/sim` page, `npm run pod`, pod state + SSE, headline inject, alert queue [server, P1]
 
 ### M3 — Agent + 0G memory (Nov 7)
 

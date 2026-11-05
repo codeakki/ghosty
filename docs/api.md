@@ -22,6 +22,19 @@ Contract between the pod (ESP32) and the server. Base URL during development is 
 | POST | `/button` | device token | Confirm or cancel the last suggested trade |
 | GET | `/signal` | x402 payment | Future: premium signal, paid per call on Hedera |
 
+Sim-only routes for the [virtual pod](simulator.md). The firmware does not call them; they do not change the device contract above.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/sim` | none | Virtual pod web UI (static HTML) |
+| GET | `/state` | none | Pod state snapshot |
+| GET | `/events` | none | Server-sent events: `state`, `news`, `decision`, `alert`, `order`, `episode` |
+| POST | `/voice/text` | device token | Text turn: decide + TTS without STT, JSON out |
+| POST | `/news/inject` | device token | Add a headline and run the decision loop; queues an alert when actionable |
+| GET | `/alerts/next` | device token | Pop the oldest pending alert, or `204` (meant for a later firmware poll) |
+| POST | `/alerts/:id/ack` | device token | Acknowledge an alert |
+| POST | `/sim/safe-stop` | device token | Simulate 0G offline at runtime |
+
 ---
 
 ## GET /health
@@ -158,6 +171,104 @@ curl -s -X POST http://localhost:3000/button \
   -H "X-Device-Token: $DEVICE_TOKEN" \
   -d '{"action":"cancel"}'
 ```
+
+---
+
+## Virtual pod (sim-only)
+
+> **Sim-only, not used by firmware.** These routes back the browser simulator at `/sim` and the `npm run pod` CLI
+> ([simulator.md](simulator.md)). `GET /alerts/next` is shaped so the firmware can poll it later, but no sketch calls
+> it today. State is in memory and resets on restart.
+
+"Device token" below means the same `X-Device-Token` check as `/voice`: enforced only when `DEVICE_TOKEN` is set.
+The read-only routes (`/sim`, `/state`, `/events`) are open because `EventSource` cannot send headers.
+Routes that run the decision loop (`/voice/text`, `/news/inject`) return `503 {"error":"brain_offline"}` during safe-stop, like `/voice`.
+
+### GET /sim
+
+The virtual pod page, `text/html`. Open `http://localhost:3000/sim`. The microphone only works on `localhost` or HTTPS.
+
+### GET /state
+
+**200**: the whole pod state. Lists are newest first.
+
+```json
+{
+  "news": [{ "id": "rss:coindesk:fake-1", "source": "rss", "title": "Missile strike near ...", "url": "...", "publishedAt": "...",
+             "handle": "CoinDesk", "credibility": { "handle": "CoinDesk", "score": 1850, "level": "reputable", "weight": 1 },
+             "signal": "geopolitical_shock" }],
+  "credibility": { "CoinDesk": { "handle": "CoinDesk", "score": 1850, "level": "reputable", "weight": 1 } },
+  "lastDecision": { "requestId": "fake-…", "signal": "geopolitical_shock", "confidence": 0.95, "rationale": "...",
+                    "trigger": "inject", "transcript": "", "headline": "War breaks out ...", "at": "..." },
+  "plannedActions": [{ "venue": "hyperliquid", "coin": "xyz:GOLD", "side": "long", "sizeUsd": 5, "reason": "..." }],
+  "orders": [{ "orderId": "fake-hl-000001", "coin": "xyz:GOLD", "isBuy": true, "sizeUsd": 5, "status": "simulated", "requestId": "fake-…", "at": "..." }],
+  "episodes": [{ "seq": 1, "at": "...", "outcome": "proposed", "requestId": "fake-…", "actions": [], "decision": {} }],
+  "safeStop": false,
+  "alerts": [{ "id": "alert-1", "text": "...", "signal": "geopolitical_shock", "actions": [], "requestId": "fake-…",
+               "confidence": 0.95, "headline": "...", "status": "pending", "createdAt": "..." }]
+}
+```
+
+`trigger` is `voice`, `text`, `button` or `inject`. `plannedActions` empties after a button press. Alert `status` goes `pending` → `delivered` (popped by `/alerts/next`) → `acked`.
+
+### GET /events
+
+`text/event-stream`. On connect: a `retry: 2000` hint and one `state` event with the full snapshot. Then, as the pipeline runs:
+
+| Event | `data` |
+|---|---|
+| `state` | Full snapshot (same as `/state`), coalesced after changes |
+| `news` | A newly seen news entry, with `credibility` and `signal` |
+| `decision` | `lastDecision` plus `actions` |
+| `alert` | A new alert |
+| `order` | One order entry |
+| `episode` | One episode record |
+
+A `: ping` comment every 15 s keeps the connection open.
+
+```bash
+curl -N http://localhost:3000/events
+```
+
+### POST /voice/text
+
+Body `{"text": "<1–2000 chars>"}`. Runs the voice loop without STT. **200**:
+
+```json
+{ "transcript": "is anything moving gold?", "requestId": "fake-…", "signal": "geopolitical_shock", "confidence": 0.95,
+  "rationale": "...", "actions": [ ... ], "sampleRate": 16000, "audioBytes": 16000, "audioBase64": "<PCM s16le>" }
+```
+
+Errors: `400 bad_request`, `401`, `503 brain_offline`.
+
+### POST /news/inject
+
+Body `{"title": string, "source"?: string, "url"?: string}`. `source` is the outlet or X handle (e.g. `Reuters`) and is used for credibility scoring. The headline joins the news feed and the decision loop runs with it first. An actionable decision (`signal` not `none`) is queued as an alert and becomes the pending trade for `/button`. **200**:
+
+```json
+{ "item": { "id": "inject:1", "source": "inject", "title": "...", "url": "", "publishedAt": "...", "handle": "Reuters" },
+  "decision": { "requestId": "fake-…", "signal": "geopolitical_shock", "confidence": 0.95, "rationale": "...", "actions": [ ... ] },
+  "alert": { "id": "alert-1", "status": "pending", ... } }
+```
+
+`alert` is `null` when the decision is `none`. Errors: `400 bad_request`, `401`, `503 brain_offline`.
+
+```bash
+curl -s -X POST localhost:3000/news/inject -H 'content-type: application/json' \
+  -d '{"title":"War breaks out: missile strikes hit Gulf oil terminals","source":"Reuters"}'
+```
+
+### GET /alerts/next
+
+Pops the oldest pending alert and marks it `delivered`. **200** `{id, text, signal, actions, requestId, confidence, headline, createdAt}`, or **204** with no body when the queue is empty. `401` on a bad token.
+
+### POST /alerts/:id/ack
+
+**200** `{"ok": true, "alert": {...}}` with `status: "acked"`. **404** `{"error":"not_found"}`.
+
+### POST /sim/safe-stop
+
+Body `{"enabled": boolean}`. `true` simulates 0G being unreachable (the runtime twin of `SIMULATE_BRAIN_OFFLINE`): `/health` reports `safeStop: true` and `/voice`, `/button`, `/voice/text` and `/news/inject` answer `503 brain_offline`. **200** `{"safeStop": true, "simulateOffline": true}`. With `SAFE_STOP_ENABLED=false` the check is bypassed and `safeStop` stays `false`.
 
 ---
 
