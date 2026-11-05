@@ -19,7 +19,9 @@ export interface SourceCredibility {
   weight: number;
 }
 
-export interface NewsEntry extends NewsItem {
+export interface NewsEntry extends Omit<NewsItem, 'credibility'> {
+  /** 0.2..1.0 weight from credibility/weightItems (NewsItem.credibility), when the aggregator attached one. */
+  weight?: number;
   /** Credibility of `handle`, or null when the item has no handle. */
   credibility: SourceCredibility | null;
   /** Keyword pre-classification of the title alone. */
@@ -235,7 +237,8 @@ export class PodState implements PipelineObserver {
       credibility = { handle: s.handle, score: s.score, level: s.level, weight: credibilityWeight(s.level) };
       this.credibility[s.handle] = credibility;
     }
-    return { ...item, credibility, signal: classifyText(item.title) };
+    const { credibility: weight, ...rest } = item;
+    return { ...rest, ...(weight === undefined ? {} : { weight }), credibility, signal: classifyText(item.title) };
   }
 
   /** Emit a typed event; by default also schedule a coalesced `state` snapshot. */
