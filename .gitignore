@@ -1,0 +1,37 @@
+# Local tooling databases (never commit)
+ruvector.db
+agentdb.rvf
+agentdb.rvf.lock
+
+# Secrets
+firmware/**/secrets.h
+.env
+.env.*
+!.env.example
+
+# Firmware build output
+firmware/**/build/
+*.bin
+*.elf
+*.map
+*.hex
+.pio/
+
+# Node
+node_modules/
+dist/
+coverage/
+*.log
+npm-debug.log*
+
+# Audio captures (keep docs assets)
+*.wav
+*.mp3
+!docs/**/*.wav
+!docs/**/*.mp3
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
