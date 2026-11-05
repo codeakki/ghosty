@@ -1,7 +1,9 @@
 import type { ServerResponse } from 'node:http';
 import type { FastifyInstance, preHandlerAsyncHookHandler } from 'fastify';
 import { z } from 'zod';
+import { OUTPUT_SAMPLE_RATE } from '../audio/tts.js';
 import type { Pipeline } from '../pipeline.js';
+import type { BrainSwitch } from '../safety/safeStop.js';
 import type { InjectedNewsProvider } from './injected.js';
 import type { PodEvent, PodState } from './state.js';
 
@@ -13,6 +15,8 @@ export interface SimRouteContext {
   state: PodState;
   pipeline: Pipeline;
   injected: InjectedNewsProvider;
+  /** Runtime override for SIMULATE_BRAIN_OFFLINE, flipped by POST /sim/safe-stop. */
+  brain: BrainSwitch;
   /** Current safe-stop state (true = trading blocked), same source as /health. */
   safeStopEngaged: () => Promise<boolean>;
   /** X-Device-Token check, same as /voice and /button. */
@@ -28,6 +32,10 @@ const InjectBody = z.object({
 });
 
 const AlertParams = z.object({ id: z.string().min(1).max(100) });
+
+const TextBody = z.object({ text: z.string().trim().min(1).max(2000) });
+
+const SafeStopBody = z.object({ enabled: z.boolean() });
 
 /** Keep idle proxies and browsers from dropping the stream. */
 const SSE_PING_MS = 15_000;
@@ -118,6 +126,38 @@ export function registerSimRoutes(app: FastifyInstance, ctx: SimRouteContext): v
     const alert = parsed.success ? state.ackAlert(parsed.data.id) : undefined;
     if (!alert) return reply.code(404).send({ error: 'not_found' });
     return { ok: true, alert };
+  });
+
+  // Text turn: the voice loop without STT. JSON out, with the TTS reply as base64 PCM s16le.
+  app.post('/voice/text', guarded, async (req, reply) => {
+    const parsed = TextBody.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'bad_request', message: 'body must be {"text": string}' });
+    const result = await pipeline.handleText(parsed.data.text);
+    req.log.info({ requestId: result.decision.requestId, signal: result.decision.signal }, 'text decision');
+    return {
+      transcript: result.transcript,
+      requestId: result.decision.requestId,
+      signal: result.decision.signal,
+      confidence: result.decision.confidence,
+      rationale: result.decision.rationale,
+      actions: result.decision.suggestedActions,
+      sampleRate: OUTPUT_SAMPLE_RATE,
+      audioBytes: result.audio.length,
+      audioBase64: result.audio.toString('base64'),
+    };
+  });
+
+  // Flip the simulated "0G unreachable" flag at runtime. enabled=true engages safe-stop:
+  // /voice, /button, /voice/text and /news/inject answer 503 brain_offline until it is turned off.
+  // With SAFE_STOP_ENABLED=false the check is bypassed and safe-stop stays off.
+  app.post('/sim/safe-stop', { preHandler: ctx.requireDevice }, async (req, reply) => {
+    const parsed = SafeStopBody.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'bad_request', message: 'body must be {"enabled": boolean}' });
+    ctx.brain.simulateOffline = parsed.data.enabled;
+    const safeStop = await ctx.safeStopEngaged();
+    state.setSafeStop(safeStop);
+    req.log.warn({ simulateOffline: parsed.data.enabled, safeStop }, 'sim safe-stop toggled');
+    return { safeStop, simulateOffline: parsed.data.enabled };
   });
 
   // Open streams would keep server.close() waiting forever; end them first.

@@ -15,7 +15,7 @@ import { FakeGrokProvider } from './news/grok.js';
 import { FakePolymarketProvider } from './news/polymarket.js';
 import { FakeRssProvider } from './news/rss.js';
 import { Pipeline, type PipelineDeps } from './pipeline.js';
-import { isBrainOnline } from './safety/safeStop.js';
+import { BrainSwitch, isBrainOnline } from './safety/safeStop.js';
 import { InjectedNewsProvider } from './sim/injected.js';
 import { registerSimRoutes } from './sim/routes.js';
 import { PodState } from './sim/state.js';
@@ -56,7 +56,9 @@ function tokenMatches(got: string, expected: string): boolean {
 
 export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
   const config = opts.config ?? loadConfig();
-  const brainOnline = () => isBrainOnline(config);
+  // Starts from SIMULATE_BRAIN_OFFLINE; POST /sim/safe-stop flips it at runtime.
+  const brain = new BrainSwitch(config.SIMULATE_BRAIN_OFFLINE);
+  const brainOnline = () => isBrainOnline(config, brain);
   // Virtual pod state: the pipeline reports every step into it; /state and /events read it.
   const state = new PodState(opts.scorer ?? new FakeEthosScorer(), {
     safeStop: config.SAFE_STOP_ENABLED && config.SIMULATE_BRAIN_OFFLINE,
@@ -138,6 +140,7 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
     state,
     pipeline,
     injected,
+    brain,
     safeStopEngaged: async () => !(await brainOnline()),
     requireDevice,
     requireBrain,
