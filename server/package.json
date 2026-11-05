@@ -14,7 +14,8 @@
     "build": "tsc -p tsconfig.build.json",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "node --test --import tsx test/*.test.ts"
+    "test": "node --test --import tsx test/*.test.ts",
+    "hl:check": "tsx src/scripts/hlCheck.ts"
   },
   "dependencies": {
     "@nktkas/hyperliquid": "^0.33.3",
