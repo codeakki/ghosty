@@ -1,0 +1,52 @@
+name: Bug
+description: Something is broken in firmware, server, hardware, or CI
+title: "fix(<scope>): "
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - fw
+        - server
+        - hw
+        - docs
+        - ci
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Include serial monitor output, server logs, or error messages.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Flash 03_MicTest
+        2. Power from LiPo through boost
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: Sketch / commit, esp32 core version, power source (USB / LiPo), Node version, OS.
+  - type: checkboxes
+    id: secrets
+    attributes:
+      label: Secrets
+      options:
+        - label: I removed keys, private keys, and WiFi passwords from the logs above.
+          required: true

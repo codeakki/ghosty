@@ -1,0 +1,60 @@
+name: Task
+description: A unit of work on the hackathon task board
+title: "<type>(<scope>): "
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - fw
+        - server
+        - hw
+        - docs
+        - ci
+    validations:
+      required: true
+  - type: dropdown
+    id: track
+    attributes:
+      label: Track
+      options:
+        - none
+        - track:0g
+        - track:hedera
+        - track:uniswap
+        - track:arkiv
+        - venue:hyperliquid
+    validations:
+      required: false
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - P0 (needed for demo)
+        - P1 (nice to have)
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What this task delivers and why.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Checkable conditions. The task is done when all are true.
+      value: |
+        - [ ]
+        - [ ]
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Pins, docs links, files to touch, dependencies on other issues.

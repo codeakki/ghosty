@@ -1,0 +1,5 @@
+* @codeakki
+# Replace with team handles once the team is set.
+# Later rules take precedence over earlier ones.
+/firmware/ @codeakki
+/server/ @codeakki
