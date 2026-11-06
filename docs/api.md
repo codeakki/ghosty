@@ -10,7 +10,7 @@ Contract between the pod (ESP32) and the server. Base URL during development is 
 | Errors | JSON `{ "error": "<code>" }`, sometimes with a `"message"` |
 | Audio in | `audio/wav` (also `audio/x-wav`, `audio/wave`, `application/octet-stream`): PCM WAV, 16-bit signed little-endian, mono, 16 000 Hz expected. Body limit 4 MB. |
 | Audio out | `application/octet-stream`, raw s16le, 16 000 Hz, mono, no header |
-| Safe-stop | When the brain (0G Compute) is unreachable, `/voice` and `/button` return `503 {"error":"brain_offline"}` and nothing is executed. |
+| Safe-stop | When the brain (0G Compute) is unreachable, `/voice` and `/button` return `503 {"error":"brain_offline"}` and nothing is executed. A 0G call that fails mid-request (`BrainOfflineError`) gives the same 503, with `reason` and the router `requestId`. If the encrypted memory on 0G Storage cannot be loaded or decrypted (`MemoryUnavailableError`), the answer is `503 {"error":"memory_unavailable"}`. The server never falls back to a fake decision. |
 | Transport | Plain `http://` on the LAN for dev. HTTPS off-LAN (device uses `WiFiClientSecure::setInsecure()` for the demo only). |
 
 ## Routes
@@ -34,6 +34,15 @@ Sim-only routes for the [virtual pod](simulator.md). The firmware does not call 
 | GET | `/alerts/next` | device token | Pop the oldest pending alert, or `204` (meant for a later firmware poll) |
 | POST | `/alerts/:id/ack` | device token | Acknowledge an alert |
 | POST | `/sim/safe-stop` | device token | Simulate 0G offline at runtime |
+| POST | `/sim/pay-signal` | device token | The agent pays our own `GET /signal` through x402 (fake payer without Hedera keys) |
+
+Integration status routes (read-only, no auth). Used by the dashboard; the firmware does not call them.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/zerog/status` | none | 0G Compute/Storage mode, brain online, last request id, memory root, episode count, explorer links |
+| GET | `/x402/status` | none | x402 spend today vs daily cap, allowlist, HCS topic link, last payment |
+| GET | `/execution/markets` | none | Hyperliquid markets, playbook aliases resolved to real tickers, Uniswap spot-leg config |
 
 ---
 
@@ -132,7 +141,7 @@ X-Device-Token: <secret>
 
 | `action` | Meaning |
 |---|---|
-| `confirm` | Execute the suggested actions (Hyperliquid market orders; the Uniswap spot leg is a TODO) |
+| `confirm` | Execute the plan: the Uniswap spot leg first (only with `UNISWAP_SPOT_LEG=true`), then the confirmed Hyperliquid perp legs |
 | `cancel` | Drop them; logged to the episode log as `cancelled` |
 
 There is no "nothing pending" error. If no decision is pending (for example a press right after boot), the server decides from the current news alone and acts on that. The fake news feed already contains a geopolitical headline, so a bare `confirm` produces a trade plan.
@@ -145,12 +154,13 @@ There is no "nothing pending" error. If no decision is pending (for example a pr
   "requestId": "fake-3f2c…",
   "signal": "geopolitical_shock",
   "executed": true,
-  "actions": [{ "venue": "hyperliquid", "coin": "xyz:GOLD", "side": "long", "sizeUsd": 5, "reason": "..." }],
-  "orders": [{ "orderId": "fake-hl-000001", "coin": "xyz:GOLD", "isBuy": true, "sizeUsd": 5, "status": "simulated" }]
+  "actions": [{ "venue": "hyperliquid", "kind": "perp", "coin": "xyz:GOLD", "side": "long", "sizeUsd": 12.5, "reason": "..." }],
+  "orders": [{ "orderId": "fake-hl-000001", "coin": "xyz:GOLD", "isBuy": true, "sizeUsd": 12.5, "status": "simulated" }],
+  "swaps": []
 }
 ```
 
-Values above are illustrative. `executed` is true only for `confirm` with at least one order. Real `xyz:` tickers come from `meta(dex:"xyz")` at runtime.
+Values above are illustrative. With the default `MAX_TRADE_USD=25` and a balanced profile the playbook gives one $12.50 gold leg, because every Hyperliquid leg must be at least $10. `executed` is true only for `confirm` with at least one order or swap. Real tickers come from `meta(dex:"xyz")` at runtime (`WTI` resolves to `xyz:CL`). A real order adds `assetId`, `filled`, `avgPx`, `url` (Hyperliquid explorer) and `fallback: true` when `HL_FALLBACK_COINS` replaced a missing market; a rejected leg has `status: "rejected"` and `error`. `swaps[]` entries are `{action, result: {quoteId, txHash, status, explorerUrl, route}}` or `{action, error}`.
 
 **Errors**
 
@@ -159,6 +169,7 @@ Values above are illustrative. `executed` is true only for `confirm` with at lea
 | 400 | Body is not JSON or `action` is not `confirm`/`cancel` | `{"error":"bad_request","message":"..."}` |
 | 401 | `DEVICE_TOKEN` is set and `X-Device-Token` is missing or wrong | `{"error":"unauthorized"}` |
 | 503 | Safe-stop: brain (0G Compute) offline, no order is sent | `{"error":"brain_offline"}` |
+| 503 | 0G memory blob could not be loaded or decrypted | `{"error":"memory_unavailable","message":"..."}` |
 
 ```bash
 curl -s -X POST http://localhost:3000/button \
@@ -200,8 +211,9 @@ The virtual pod page, `text/html`. Open `http://localhost:3000/sim`. The microph
   "credibility": { "CoinDesk": { "handle": "CoinDesk", "score": 1850, "level": "reputable", "weight": 1 } },
   "lastDecision": { "requestId": "fake-…", "signal": "geopolitical_shock", "confidence": 0.95, "rationale": "...",
                     "trigger": "inject", "transcript": "", "headline": "War breaks out ...", "at": "..." },
-  "plannedActions": [{ "venue": "hyperliquid", "coin": "xyz:GOLD", "side": "long", "sizeUsd": 5, "reason": "..." }],
-  "orders": [{ "orderId": "fake-hl-000001", "coin": "xyz:GOLD", "isBuy": true, "sizeUsd": 5, "status": "simulated", "requestId": "fake-…", "at": "..." }],
+  "plannedActions": [{ "venue": "hyperliquid", "kind": "perp", "coin": "xyz:GOLD", "side": "long", "sizeUsd": 12.5, "reason": "..." }],
+  "orders": [{ "orderId": "fake-hl-000001", "coin": "xyz:GOLD", "isBuy": true, "sizeUsd": 12.5, "status": "simulated", "requestId": "fake-…", "at": "..." }],
+  "swaps": [],
   "episodes": [{ "seq": 1, "at": "...", "outcome": "proposed", "requestId": "fake-…", "actions": [], "decision": {} }],
   "safeStop": false,
   "alerts": [{ "id": "alert-1", "text": "...", "signal": "geopolitical_shock", "actions": [], "requestId": "fake-…",
@@ -209,7 +221,7 @@ The virtual pod page, `text/html`. Open `http://localhost:3000/sim`. The microph
 }
 ```
 
-`trigger` is `voice`, `text`, `button` or `inject`. `plannedActions` empties after a button press. Alert `status` goes `pending` → `delivered` (popped by `/alerts/next`) → `acked`.
+`trigger` is `voice`, `text`, `button` or `inject`. News items carry `credibility` (the Ethos object for `handle`) and, from the live aggregator, `weight` (0.2–1.0). `swaps` lists Uniswap spot legs (`UNISWAP_SPOT_LEG=true`). `plannedActions` empties after a button press. Alert `status` goes `pending` → `delivered` (popped by `/alerts/next`) → `acked`.
 
 ### GET /events
 
@@ -269,6 +281,96 @@ Pops the oldest pending alert and marks it `delivered`. **200** `{id, text, sign
 ### POST /sim/safe-stop
 
 Body `{"enabled": boolean}`. `true` simulates 0G being unreachable (the runtime twin of `SIMULATE_BRAIN_OFFLINE`): `/health` reports `safeStop: true` and `/voice`, `/button`, `/voice/text` and `/news/inject` answer `503 brain_offline`. **200** `{"safeStop": true, "simulateOffline": true}`. With `SAFE_STOP_ENABLED=false` the check is bypassed and `safeStop` stays `false`.
+
+---
+
+## Integration status
+
+Read-only snapshots for the dashboard. No device token. Each one works with an empty `.env` and reports `fake` modes.
+
+### GET /zerog/status
+
+```json
+{
+  "computeOnline": true,
+  "computeMode": "0g",
+  "storageMode": "0g",
+  "model": "glm-4.7",
+  "routerUrl": "https://router-api.0g.ai/v1",
+  "lastRequestId": "<x_0g_trace.request_id of the last 0G decision>",
+  "lastDecisionRequestId": "<request id of the latest decision, 0G or fake>",
+  "lastDecisionAt": "2026-11-07T09:00:05.000Z",
+  "memoryRootHash": "0x…",
+  "memoryTxHash": "0x…",
+  "episodeCount": 3,
+  "lastEpisodeRoot": "0x…",
+  "lastEpisodeTxHash": "0x…",
+  "pendingEpisodes": 0,
+  "lastStorageError": null,
+  "links": {
+    "storagescan": "https://storagescan-galileo.0g.ai",
+    "memoryTx": "https://chainscan-galileo.0g.ai/tx/0x…",
+    "lastEpisodeTx": "https://chainscan-galileo.0g.ai/tx/0x…"
+  }
+}
+```
+
+`computeOnline` follows the same probe as `/health` (router `GET /models`, cached 10 s) and the `/sim/safe-stop` switch. `computeMode` is `fake` without `OG_API_KEY`; `storageMode` is `memory` without `OG_PRIVATE_KEY`. Explorer links point at Galileo unless `OG_RPC_URL` is a mainnet RPC.
+
+### GET /x402/status
+
+```json
+{
+  "mode": "real",
+  "network": "hedera:testnet",
+  "payer": "0.0.1001",
+  "payTo": "0.0.5005",
+  "priceTinybar": 1000000,
+  "maxPerCallTinybar": 10000000,
+  "spentToday": 1000000,
+  "cap": 100000000,
+  "remainingToday": 99000000,
+  "allowedHosts": ["localhost", "127.0.0.1"],
+  "hcsTopicUrl": "https://hashscan.io/testnet/topic/0.0.…",
+  "lastPayment": { "mode": "real", "txId": "0.0.1001@…", "hashscanUrl": "https://hashscan.io/testnet/transaction/…", "amountTinybar": 1000000, "requestId": "…", "at": "…" }
+}
+```
+
+`mode` is `fake` without `HEDERA_ACCOUNT_ID` + `HEDERA_PRIVATE_KEY`; the fake payer is charged against an in-memory cap so the numbers still move. The real cap is persisted in `server/.ghosty/spend.json` (UTC day). `hcsTopicUrl` is `null` until the first audit message creates the topic (or `HEDERA_HCS_TOPIC_ID` is set).
+
+### POST /sim/pay-signal
+
+Device token. No body. The agent pays `http://127.0.0.1:$PORT/signal` with no human approval (`payForSignal` → x402 → facilitator → Hedera), then `/x402/status.lastPayment` shows the HashScan link.
+
+**200** `{"mode","txId","hashscanUrl","amountTinybar","requestId","at","status","body","audit"}` where `body` is the paid `/signal` payload.
+
+| Status | When | Body |
+|---|---|---|
+| 409 | Refused before signing: daily or per-call cap, host not allowlisted, payTo equals the payer | `{"error":"payment_refused","message":"..."}` |
+| 502 | `/signal` did not settle (402 after retry, facilitator down, verify/settle failure) | `{"error":"payment_failed","message":"...","status":402,"reason":"..."}` |
+
+### GET /execution/markets
+
+Query: `dex` (`""` = main dex, `xyz`), `q` (substring of the coin), `limit` (default 100).
+
+```json
+{
+  "perpMode": "real",
+  "spotMode": "fake",
+  "testnet": true,
+  "dexes": ["xyz"],
+  "spotLeg": null,
+  "resolved": [
+    { "alias": "GOLD", "coin": "xyz:GOLD", "assetId": 750003, "dex": "xyz", "fallback": false, "error": null },
+    { "alias": "WTI", "coin": "xyz:CL", "assetId": 750029, "dex": "xyz", "fallback": false, "error": null },
+    { "alias": "BTC", "coin": "BTC", "assetId": 3, "dex": "", "fallback": false, "error": null }
+  ],
+  "count": 1,
+  "markets": [{ "coin": "xyz:GOLD", "dex": "xyz", "dexIndex": 65, "metaIndex": 3, "assetId": 750003, "szDecimals": 4, "delisted": false }]
+}
+```
+
+`perpMode` is `fake` without `HL_AGENT_PRIVATE_KEY` + `HL_MASTER_ADDRESS`, `spotMode` is `fake` without `UNISWAP_API_KEY` + `EVM_PRIVATE_KEY`. `spotLeg` is the configured demo pair when `UNISWAP_SPOT_LEG=true`. **502** `{"error":"venue_unavailable"}` when the Hyperliquid info API fails. Asset ids above are illustrative.
 
 ---
 
@@ -380,7 +482,7 @@ Body:
 }
 ```
 
-`signal`, `confidence`, `actions`, `requestId` come from the injected `getSignal()` (the latest agent decision; `decisionToSignal(decision)` maps a `Decision`). Until the agent wiring passes one, the route returns `{"signal":"none","confidence":0,"actions":[],"requestId":"no-decision-yet"}` behind the same paywall. The handler runs after `/verify` and before `/settle`, so a broken handler never charges the payer.
+`signal`, `confidence`, `actions`, `requestId` come from the latest decision in the pod state (`buildApp` passes `getSignal: () => decisionToSignal(state.latestDecision())`). Before the first decision the route returns `{"signal":"none","confidence":0,"actions":[],"requestId":"no-decision-yet"}` behind the same paywall. The handler runs after `/verify` and before `/settle`, so a broken handler never charges the payer.
 
 ### Other errors
 

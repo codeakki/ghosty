@@ -119,7 +119,25 @@ npm run dev
 curl localhost:3000/health
 ```
 
-Every provider ships as a deterministic stub, so the server runs with an empty `.env`.
+Every provider ships as a deterministic stub, so the server runs with an empty `.env`. Each real provider switches on when its keys are in `server/.env` (template: [`server/.env.example`](server/.env.example)); the rest stay fake.
+
+| Provider | Keys that enable it | Where to get them | Without them |
+|---|---|---|---|
+| Speech-to-text (Groq Whisper) | `GROQ_API_KEY` | https://console.groq.com/keys | Fixed fake transcript |
+| Text-to-speech (ElevenLabs) | `ELEVENLABS_API_KEY` (optional `ELEVENLABS_VOICE_ID`) | https://elevenlabs.io/app/settings/api-keys | OpenAI TTS if `OPENAI_API_KEY` is set, else a tone |
+| Text-to-speech fallback (OpenAI) | `OPENAI_API_KEY` | https://platform.openai.com/api-keys | Tone |
+| Live news (RSS + Polymarket) | `NEWS_LIVE=true` (no key) | n/a | Fake headlines with fixed timestamps |
+| CryptoPanic | `CRYPTOPANIC_TOKEN` | https://cryptopanic.com/developers/api/ | Fake (or left out when `NEWS_LIVE=true`) |
+| Grok x_search (X posts) | `XAI_API_KEY` | https://console.x.ai | Fake (or left out when `NEWS_LIVE=true`) |
+| Ethos credibility | `ETHOS_ENABLED=true` (no key) | n/a | Fixed fake scores |
+| 0G Compute decider | `OG_API_KEY` (+ `OG_ROUTER_URL`, `OG_MODEL`) | https://pc.0g.ai (mainnet) or https://pc.testnet.0g.ai | Keyword `FakeDecider`; safe-stop probe skipped |
+| 0G Storage memory + episode log | `OG_PRIVATE_KEY` (optional `OG_MEMORY_KEY`) | Any EVM key, funded at https://faucet.0g.ai | In-memory store |
+| Hedera x402 payer + HCS audit | `HEDERA_ACCOUNT_ID`, `HEDERA_PRIVATE_KEY` | https://portal.hedera.com (testnet faucet) | Fake payer, fake tx id |
+| Paid `GET /signal` (merchant) | `X402_PAY_TO` (a **second** testnet account) | https://portal.hedera.com | `503 payments_not_configured` |
+| Hyperliquid perps | `HL_MASTER_ADDRESS`, `HL_AGENT_PRIVATE_KEY` (+ `HL_TESTNET`, `HL_DEXES`, `HL_FALLBACK_COINS`) | API wallet approved at https://app.hyperliquid-testnet.xyz/API | Fake venue, simulated orders |
+| Uniswap spot leg | `UNISWAP_API_KEY`, `EVM_PRIVATE_KEY`, `UNISWAP_SPOT_LEG=true` (+ `EVM_RPC_URL`, `EVM_CHAIN_ID`) | https://developers.uniswap.org/dashboard | Fake swap hash (no spot step unless `UNISWAP_SPOT_LEG=true`) |
+
+Status endpoints show which mode each integration is in: `GET /zerog/status`, `GET /x402/status`, `GET /execution/markets` (see [docs/api.md](docs/api.md#integration-status)). Pre-flight checks: `npm run hl:check` (Hyperliquid markets and margin, read-only) and `npm run x402:demo` (one real paid `/signal`, appended to [docs/evidence.md](docs/evidence.md)).
 
 No pod yet? Open http://localhost:3000/sim for the virtual pod (hold-to-talk, inject headlines, confirm trades, live state), or use `npm run pod -- help`. See [docs/simulator.md](docs/simulator.md).
 

@@ -97,30 +97,51 @@ Mirrors the GitHub issues. Labels in brackets.
 ### M2 — Voice loop end-to-end (Nov 6)
 
 - [ ] `06_CloudVoice`: hold button → POST WAV → stream PCM reply [fw, server, P0]
-- [ ] Server STT via Groq whisper [server, P0]
-- [ ] TTS → raw PCM s16le 16 kHz stream [server, P0]
-- [ ] RSS + CryptoPanic ingest [server, P1]
-- [ ] Polymarket Gamma signal [server, P1]
-- [ ] Ethos credibility weight per handle / address [server, P1]
-- [ ] Grok x_search provider (optional) [server, P1]
-- [ ] Virtual pod simulator (UI + CLI): `/sim` page, `npm run pod`, pod state + SSE, headline inject, alert queue [server, P1]
+- [x] Server STT via Groq whisper [server, P0]
+- [x] TTS → raw PCM s16le 16 kHz stream [server, P0]
+- [x] RSS + CryptoPanic ingest [server, P1]
+- [x] Polymarket Gamma signal [server, P1]
+- [x] Ethos credibility weight per handle / address [server, P1]
+- [x] Grok x_search provider (optional) [server, P1]
+- [x] Virtual pod simulator (UI + CLI): `/sim` page, `npm run pod`, pod state + SSE, headline inject, alert queue [server, P1]
 
 ### M3 — Agent + 0G memory (Nov 7)
 
-- [ ] 0G Compute decision call, request ID captured [server, track:0g, P0]
-- [ ] 0G Storage encrypted memory [server, track:0g, P0]
-- [ ] Episode log per decision on 0G Storage [server, track:0g, P0]
-- [ ] Safe-stop: 0G unreachable → "brain offline", trade blocked [server, fw, track:0g, P0]
-- [ ] Signal → action playbook (war/geopolitical → long GOLD/WTI + short BTC, etc.) [server, P0]
+- [x] 0G Compute decision call, request ID captured [server, track:0g, P0]
+- [x] 0G Storage encrypted memory [server, track:0g, P0]
+- [x] Episode log per decision on 0G Storage [server, track:0g, P0]
+- [ ] Safe-stop: 0G unreachable → "brain offline", trade blocked [server, fw, track:0g, P0] (server done: probe + `BrainOfflineError` → 503; firmware still has to speak it)
+- [x] Signal → action playbook (war/geopolitical → long GOLD/WTI + short BTC, etc.) [server, P0]
 
 ### M4 — Payments + trade (Nov 7)
 
-- [ ] x402 server endpoint `/signal` on Hedera testnet [server, track:hedera, P0]
-- [ ] x402 client autonomous payment, tx ID in README [server, track:hedera, P0]
-- [ ] HCS audit topic (extra credit) [server, track:hedera, P1]
-- [ ] Hyperliquid API-wallet approval + market order [server, venue:hyperliquid, P0]
-- [ ] viem wallet + Uniswap Trading API spot leg [server, track:uniswap, P0]
+- [x] x402 server endpoint `/signal` on Hedera testnet [server, track:hedera, P0]
+- [ ] x402 client autonomous payment, tx ID in README [server, track:hedera, P0] (client done; needs a settled tx, see Live verification)
+- [x] HCS audit topic (extra credit) [server, track:hedera, P1]
+- [ ] Hyperliquid API-wallet approval + market order [server, venue:hyperliquid, P0] (venue code done; approval + live order pending)
+- [x] viem wallet + Uniswap Trading API spot leg [server, track:uniswap, P0]
 - [ ] One-button trade from the device [fw, server, P0]
+
+### Integration (Nov 7)
+
+Ticked items above are merged and tested offline with fakes; real keys are checked in the next list.
+
+- [x] Merge the track branches (#34 virtual pod, #38 audio/news, #36 0G, #35 Hedera x402, #37 execution) into one integration PR [server]
+- [x] Wire integrations: `createAgent` (0G decider/memory/episodes), STT/TTS factories, news aggregator + poller (`NEWS_LIVE=true`), `registerPaidRoutes` with the latest decision, `createPerpVenue` + `executePlan(planSteps…)`, `BrainOfflineError`/`MemoryUnavailableError` → 503, `agent.flush()` on shutdown [server, P0]
+- [x] Status endpoints for the dashboard: `GET /zerog/status`, `GET /x402/status`, `GET /execution/markets`, `POST /sim/pay-signal` [server, P1]
+
+### Live verification with keys
+
+Each item needs real keys in `server/.env`; record the proof in [docs/evidence.md](docs/evidence.md).
+
+- [ ] Groq STT and ElevenLabs TTS on a real `/voice` round trip (check whether `pcm_16000` needs a paid ElevenLabs tier) [server, P0]
+- [ ] `NEWS_LIVE=true`: poller pulls RSS/Polymarket (Polymarket needs a VPN on Indian ISPs), a shock headline queues an alert [server, P1]
+- [ ] 0G Compute decision with a real request id (try the testnet router; fall back to `https://router-api.0g.ai/v1` if TLS fails) [server, track:0g, P0]
+- [ ] 0G Storage upload of memory and an episode, root hash opened on storagescan-galileo [server, track:0g, P0]
+- [ ] Safe-stop live: kill 0G access, `/voice` answers 503 `brain_offline` [server, track:0g, P0]
+- [ ] `npm run x402:demo` settles one payment on hedera:testnet with two funded accounts (payer ≠ `X402_PAY_TO`), HCS topic created [server, track:hedera, P0]
+- [ ] `npm run hl:check`, move USDC into the `xyz` dex margin, one confirmed order on `xyz:GOLD` (oil is `xyz:CL`) [server, venue:hyperliquid, P0]
+- [ ] Uniswap spot leg on Base Sepolia (`UNISWAP_SPOT_LEG=true`), tx on the explorer [server, track:uniswap, P0]
 
 ### M5 — Demo, video, submission (Nov 8)
 

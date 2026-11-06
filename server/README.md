@@ -4,8 +4,9 @@ The brain behind the Ghosty pod. The device posts a push-to-talk WAV, the server
 weighs source credibility, decides on 0G Compute, and answers with raw PCM the pod plays through its speaker.
 A button press confirms or cancels the suggested trade.
 
-Every provider is a deterministic fake today, so `npm run dev` works on day one with no keys.
-Real integrations are tracked as GitHub issues and marked `TODO(<area>)` in the code.
+Every provider has a real implementation and a deterministic fake. The factories in `src/app.ts` (`createProviders`)
+pick the real one when its keys are set in `.env`, so `npm run dev` still works with no keys. The key table is in the
+[root README](../README.md#server-quick-start).
 
 ## Run
 
@@ -85,14 +86,19 @@ See [`.env.example`](.env.example) for every variable with a comment. All keys a
 |---|---|---|---|
 | `GET` | `/health` | none | `{"ok":true,"version":"0.1.0","safeStop":false}`. `safeStop: true` means 0G is unreachable and trading is blocked. |
 | `POST` | `/voice` | Body: WAV, 16-bit mono (16 kHz expected). `Content-Type: audio/wav` or `application/octet-stream`. Header `X-Device-Token` when `DEVICE_TOKEN` is set. | `200 application/octet-stream`: raw PCM s16le, mono, 16 kHz, no header. Headers `x-sample-rate`, `x-request-id` (0G inference id), `x-signal`. `400 bad_wav` for stereo or non-16-bit input, `401 unauthorized`, `503 {"error":"brain_offline"}`. |
-| `POST` | `/button` | JSON `{"action":"confirm"}` or `{"action":"cancel"}`, same token header | `200 {action, requestId, signal, executed, actions[], orders[]}`. Acts on the last spoken decision; with none pending it decides from the news alone. `400` on a bad body, `503 brain_offline`. |
+| `POST` | `/button` | JSON `{"action":"confirm"}` or `{"action":"cancel"}`, same token header | `200 {action, requestId, signal, executed, actions[], orders[], swaps[]}`. Acts on the last spoken decision; with none pending it decides from the news alone. Confirm runs the Uniswap spot leg (if `UNISWAP_SPOT_LEG=true`) then the perp legs. `400` on a bad body, `503 brain_offline` or `503 memory_unavailable`. |
+| `GET` | `/signal` | x402 payment header | `402` with Hedera payment requirements, then `200` with the latest decision once paid. |
 
 Sim-only (not used by the firmware): `GET /sim`, `GET /state`, `GET /events`, `POST /voice/text`, `POST /news/inject`,
-`GET /alerts/next`, `POST /alerts/:id/ack`, `POST /sim/safe-stop`. Shapes in [docs/api.md](../docs/api.md#virtual-pod-sim-only).
+`GET /alerts/next`, `POST /alerts/:id/ack`, `POST /sim/safe-stop`, `POST /sim/pay-signal`. Shapes in [docs/api.md](../docs/api.md#virtual-pod-sim-only).
+
+Integration status (read-only): `GET /zerog/status`, `GET /x402/status`, `GET /execution/markets`. See
+[docs/api.md](../docs/api.md#integration-status).
 
 The fake TTS answers every `/voice` call with 0.5 s of a 440 Hz tone (16000 bytes), so the speaker audibly works before
 ElevenLabs is wired. The fake news feed contains a missile-strike headline, so the fake decider returns
-`geopolitical_shock` and the playbook suggests long `xyz:GOLD`, long `xyz:WTI`, short `BTC`.
+`geopolitical_shock`. With `MAX_TRADE_USD=25` and a balanced profile the playbook gives one $12.50 long `xyz:GOLD`
+(every leg must clear the $10 Hyperliquid minimum); raise `MAX_TRADE_USD` to get the gold, oil (`xyz:CL`) and BTC legs.
 
 ## Folder map
 
@@ -128,12 +134,13 @@ server/
 | Signal credibility (optional) | [`src/news/`](src/news), [`src/credibility/`](src/credibility) | Fake providers → RSS, CryptoPanic, Polymarket Gamma, Grok `x_search`; `FakeEthosScorer` → Ethos API v2. |
 | Speech | [`src/audio/`](src/audio) | `FakeStt` → Groq `whisper-large-v3-turbo`; `ToneTts` → ElevenLabs `eleven_flash_v2_5` with `pcm_16000`. |
 
-To swap a provider, change one line in `defaultDeps()` in [`src/app.ts`](src/app.ts). Tests pass their own deps through `buildApp({ deps })`.
+The table is historical: each row now has its real implementation, selected by keys in `createProviders()` in
+[`src/app.ts`](src/app.ts). Tests pass their own deps through `buildApp({ deps, agent, executor, payments, x402 })`.
+`index.ts` starts the news poller (`NEWS_LIVE=true` only) and flushes 0G uploads on shutdown.
 
 ## Notes
 
-- Hyperliquid rejects orders under $10 notional. With the defaults (`MAX_TRADE_USD=25`, balanced profile) the
-  geopolitical legs are $5 / $3.75 / $3.75, fine for the fake venue but too small for the real one. Raise
-  `MAX_TRADE_USD` or set the risk profile to `aggressive` before going live, and enforce venue minimums in the executor.
-- Memory and episodes live in process memory until the 0G Storage issue lands; a restart clears them.
-  So do the virtual pod state, alerts and injected headlines.
+- Hyperliquid rejects orders under $10 notional. The playbook drops the smallest legs until each clears $10. Legs
+  proposed by the 0G model are scaled to the budget but not re-split, so a sub-$10 leg comes back `rejected`.
+- Without `OG_PRIVATE_KEY`, memory and episodes live in process memory; a restart clears them. The virtual pod
+  state, alerts and injected headlines are always in memory.
