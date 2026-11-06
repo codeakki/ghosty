@@ -134,6 +134,20 @@ describe('selectors', () => {
     expect(blocked).toEqual(['brain', 'confirm', 'execute']);
   });
 
+  it('pipeline: live mode without keys says not configured, not simulated', () => {
+    const s: TerminalState = {
+      ...initialState,
+      execution: { perpMode: 'not_configured', spotMode: 'not_configured', testnet: false, dexes: ['xyz'], spotLeg: null, resolved: [], count: 0 },
+      x402: { ...({} as NonNullable<TerminalState['x402']>), mode: 'not_configured', lastPayment: null },
+      zeroG: { ...({} as NonNullable<TerminalState['zeroG']>), computeMode: '0g', storageMode: 'not_configured', computeOnline: true },
+    };
+    const stages = Object.fromEntries(selectStages(s, T0).map((x) => [x.id, x]));
+    expect(stages.execute!.detail).toMatch(/^Not configured: set HL_MASTER_ADDRESS/);
+    expect(stages.log!.detail).toBe('Not configured: set OG_PRIVATE_KEY');
+    expect(stages.pay!.detail).toMatch(/^Not configured/);
+    for (const id of ['execute', 'log', 'pay'] as const) expect(stages[id]!.stub).toBe(false);
+  });
+
   it('proofs: simulated ids are labelled and never linked', () => {
     const s = fold([
       sse('order', { orderId: 'fake-hl-1', coin: 'BTC', isBuy: false, sizeUsd: 10, status: 'simulated', url: 'https://app.hyperliquid.xyz', requestId: 'r', at: '2026-11-06T10:00:02Z' }),

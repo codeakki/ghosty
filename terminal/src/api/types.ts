@@ -225,8 +225,8 @@ export interface SafeStopResult {
 
 export interface ZeroGStatus {
   computeOnline: boolean;
-  computeMode: '0g' | 'fake';
-  storageMode: '0g' | 'memory';
+  computeMode: '0g' | 'fake' | 'not_configured';
+  storageMode: '0g' | 'memory' | 'not_configured';
   model: string | null;
   routerUrl: string;
   lastRequestId: string | null;
@@ -252,7 +252,7 @@ export interface LastPayment {
 }
 
 export interface X402Status {
-  mode: 'real' | 'fake';
+  mode: 'real' | 'fake' | 'not_configured';
   network: string;
   payer: string | null;
   payTo: string | null;
@@ -281,8 +281,9 @@ export interface ResolvedMarket {
 }
 
 export interface ExecutionMarkets {
-  perpMode: 'real' | 'fake';
-  spotMode: 'real' | 'fake';
+  /** 'not_configured': live mode without keys (orders answer 503); 'fake' only exists in test mode. */
+  perpMode: 'real' | 'fake' | 'not_configured';
+  spotMode: 'real' | 'fake' | 'not_configured';
   testnet: boolean;
   dexes: string[];
   spotLeg: unknown;

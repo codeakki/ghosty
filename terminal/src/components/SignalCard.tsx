@@ -85,6 +85,14 @@ function Ticket({ actions, spotLeg }: { actions: PlannedAction[]; spotLeg: boole
   );
 }
 
+function venueLabel(execution: TerminalState['execution']): string {
+  if (!execution) return '…';
+  const net = execution.testnet ? 'testnet' : 'mainnet';
+  if (execution.perpMode === 'real') return `Hyperliquid ${net} (real orders)`;
+  if (execution.perpMode === 'not_configured') return `Hyperliquid ${net}, not configured (no HL keys): Confirm answers 503 and no order is sent`;
+  return 'simulated (test mode)';
+}
+
 function DecisionHead({ d, stub, now }: { d: DecisionEntry; stub: boolean; now: number }) {
   return (
     <div className="signal-head">
@@ -215,7 +223,7 @@ export const SignalCard = memo(function SignalCard(props: {
       <p id="pod-button-help" className="field-help">
         Mirrors the pod's one button (POST /button).{' '}
         {pending.length === 0 && !safeStop ? 'Nothing pending: Confirm decides from current news first. ' : ''}
-        Orders use the server's venue: {state.execution ? (state.execution.perpMode === 'real' ? 'Hyperliquid (real)' : 'simulated (no HL keys)') : '…'}.
+        Orders use the server's venue: {venueLabel(state.execution)}.
       </p>
       <p className={`outcome ${outcome ? (outcome.ok ? 'outcome-ok' : 'outcome-bad') : ''}`} aria-live="polite">
         {outcome?.message ?? ''}

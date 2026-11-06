@@ -137,7 +137,9 @@ export function selectStages(state: TerminalState, now: number): Stage[] {
         ? `req ${shortId(d.requestId, 8, 4)}${brainStub ? ' · stub decider' : ''}`
         : brainStub
           ? 'Stub decider: set OG_API_KEY for 0G Compute'
-          : 'Runs on the next headline or button press',
+          : state.zeroG?.computeMode === 'not_configured'
+            ? 'Not configured: set OG_API_KEY'
+            : 'Runs on the next headline or button press',
     stub: brainStub,
   });
 
@@ -179,13 +181,16 @@ export function selectStages(state: TerminalState, now: number): Stage[] {
       ? `${order.orderId ? `oid ${shortId(order.orderId, 8, 4)}` : order.error ?? ''}${swap ? ` · swap ${swap.result?.status ?? 'failed'}` : ''}`
       : perpStub
         ? 'Simulated venue: set HL_AGENT_PRIVATE_KEY'
-        : 'Hyperliquid perps + Uniswap spot leg',
+        : state.execution?.perpMode === 'not_configured'
+          ? 'Not configured: set HL_MASTER_ADDRESS + HL_AGENT_PRIVATE_KEY'
+          : 'Hyperliquid perps + Uniswap spot leg',
     stub: perpStub || order?.status === 'simulated',
   });
 
   // 7. Log
   const ep = snap?.episodes[0];
   const storageStub = state.zeroG?.storageMode === 'memory';
+  const storageOff = state.zeroG?.storageMode === 'not_configured';
   const logStage = make('log', {
     status: ep ? 'done' : 'idle',
     value: ep ? `Episode #${ep.seq} · ${ep.outcome}` : 'No episode yet',
@@ -197,7 +202,9 @@ export function selectStages(state: TerminalState, now: number): Stage[] {
           : 'Uploading to 0G Storage…'
       : storageStub
         ? 'In-memory log: set OG_PRIVATE_KEY'
-        : 'One record per decision',
+        : storageOff
+          ? 'Not configured: set OG_PRIVATE_KEY'
+          : 'One record per decision',
     stub: storageStub,
   });
 
@@ -211,7 +218,9 @@ export function selectStages(state: TerminalState, now: number): Stage[] {
       ? `tx ${shortId(payment.txId, 10, 6)}${payment.mode === 'fake' ? ' · simulated' : ''}`
       : payStub
         ? 'Simulated payer: set HEDERA_ACCOUNT_ID + key'
-        : 'Pays /signal per call',
+        : state.x402?.mode === 'not_configured'
+          ? 'Not configured: set HEDERA_ACCOUNT_ID + key'
+          : 'Pays /signal per call',
     stub: payStub,
   });
 
