@@ -240,6 +240,22 @@ describe('provider registry', () => {
     assert.equal(calls.length, n);
   });
 
+  it('points mainnet setups at mainnet funding, not testnet faucets', async () => {
+    const { fetch } = mockFetch(() => undefined);
+    const mainnet = { ...env, HEDERA_NETWORK: 'mainnet', OG_RPC_URL: 'https://evmrpc.0g.ai', HL_TESTNET: 'false' };
+    const status = await new ProviderRegistry({ config: loadConfig(mainnet), fetch }).status();
+    const by = Object.fromEntries(status.providers.map((p) => [p.id, p]));
+    for (const id of ['hedera-payer', 'hedera-merchant', '0g-storage']) {
+      const hint = by[id]?.nextAction ?? '';
+      assert.match(hint, /mainnet/, id);
+      assert.doesNotMatch(hint, /testnet|faucet/i, id);
+    }
+    const testnet = await new ProviderRegistry({ config: loadConfig(env), fetch }).status();
+    const tby = Object.fromEntries(testnet.providers.map((p) => [p.id, p]));
+    assert.match(tby['hedera-payer']?.nextAction ?? '', /testnet account at https:\/\/portal\.hedera\.com/);
+    assert.match(tby['0g-storage']?.nextAction ?? '', /faucet\.0g\.ai/);
+  });
+
   it('times out a hanging probe at the deadline and emits changes only', async () => {
     const hanging = mockFetch(() => undefined);
     const probes = [

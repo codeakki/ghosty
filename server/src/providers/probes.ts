@@ -121,6 +121,20 @@ function shortAddr(a: string): string {
   return `${a.slice(0, 6)}…${a.slice(-4)}`;
 }
 
+/** Where to get an account / funds for the configured network (faucets and portal.hedera.com are testnet-only). */
+function hederaAccountHint(config: Config, what: string): string {
+  return config.HEDERA_NETWORK === 'mainnet'
+    ? `Create a Hedera mainnet account (any Hedera wallet, e.g. HashPack) funded with real HBAR and set ${what}`
+    : `Create a ${config.HEDERA_NETWORK} account at https://portal.hedera.com and set ${what}`;
+}
+
+function zeroGFundHint(config: Config, address?: string): string {
+  const who = address ?? 'it';
+  return /testnet|galileo/i.test(config.OG_RPC_URL)
+    ? `Fund ${who} at https://faucet.0g.ai`
+    : `Fund ${who} with a little mainnet 0G (storage uploads pay gas in 0G)`;
+}
+
 function mirrorBase(config: Config): string {
   return config.HEDERA_NETWORK === 'mainnet' ? 'https://mainnet-public.mirrornode.hedera.com' : 'https://testnet.mirrornode.hedera.com';
 }
@@ -232,12 +246,12 @@ const zeroGStorage: ProviderProbe = {
   track: '0g',
   async run(ctx) {
     const key = normalizePrivateKey(ctx.config.OG_PRIVATE_KEY);
-    const next = 'Set OG_PRIVATE_KEY (any EVM key) and fund it at https://faucet.0g.ai';
+    const next = `Set OG_PRIVATE_KEY (any EVM key). ${zeroGFundHint(ctx.config)}`;
     if (!key) return notConfigured(['OG_PRIVATE_KEY'], 'memory and episode log answer 503 not_configured', next);
     const address = privateKeyToAccount(key).address;
     const wei = await evmBalance(ctx, ctx.config.OG_RPC_URL, address);
     const bal = `${formatUnits18(wei)} 0G`;
-    if (wei === 0n) return { state: 'degraded', detail: `${shortAddr(address)} has 0 0G: uploads will fail`, nextAction: `Fund ${address} at https://faucet.0g.ai` };
+    if (wei === 0n) return { state: 'degraded', detail: `${shortAddr(address)} has 0 0G: uploads will fail`, nextAction: zeroGFundHint(ctx.config, address) };
     return { state: 'live', detail: `${shortAddr(address)} balance ${bal}` };
   },
 };
@@ -261,13 +275,13 @@ const hederaPayer: ProviderProbe = {
   track: 'hedera',
   async run(ctx) {
     const miss = missing(ctx.config, ['HEDERA_ACCOUNT_ID', 'HEDERA_PRIVATE_KEY']);
-    const next = 'Create a testnet account at https://portal.hedera.com and set HEDERA_ACCOUNT_ID + HEDERA_PRIVATE_KEY';
+    const next = hederaAccountHint(ctx.config, 'HEDERA_ACCOUNT_ID + HEDERA_PRIVATE_KEY');
     if (miss.length > 0) return notConfigured(miss, 'POST /sim/pay-signal answers 503 not_configured', next);
     const id = ctx.config.HEDERA_ACCOUNT_ID as string;
     const acct = await hederaAccount(ctx, id);
     if (!acct.ok) return { state: 'offline', detail: acct.detail, nextAction: next };
     if (acct.tinybar < ctx.config.X402_SIGNAL_PRICE_TINYBAR) {
-      return { state: 'degraded', detail: `${id} balance ${hbar(acct.tinybar)} is below one /signal payment`, nextAction: 'Fund it at https://portal.hedera.com/faucet' };
+      return { state: 'degraded', detail: `${id} balance ${hbar(acct.tinybar)} is below one /signal payment`, nextAction: ctx.config.HEDERA_NETWORK === 'mainnet' ? `Send HBAR to ${id}` : 'Fund it at https://portal.hedera.com/faucet' };
     }
     return { state: 'live', detail: `${id} balance ${hbar(acct.tinybar)}` };
   },
@@ -279,7 +293,7 @@ const hederaMerchant: ProviderProbe = {
   track: 'hedera',
   async run(ctx) {
     const payTo = ctx.config.X402_PAY_TO;
-    const next = 'Create a second testnet account at https://portal.hedera.com and set X402_PAY_TO';
+    const next = hederaAccountHint(ctx.config, 'X402_PAY_TO (a second account)');
     if (!payTo) return notConfigured(['X402_PAY_TO'], 'GET /signal answers 503 payments_not_configured', next);
     if (payTo === ctx.config.HEDERA_ACCOUNT_ID) {
       return { state: 'degraded', detail: 'X402_PAY_TO equals the payer: the agent refuses a self-transfer', missingEnv: [], nextAction: next };
@@ -304,7 +318,10 @@ const x402Facilitator: ProviderProbe = {
       return {
         state: 'degraded',
         detail: `facilitator does not list ${network}`,
-        nextAction: 'Try X402_FACILITATOR_URL=https://testnet.facilitator.launa.dev or https://api.testnet.blocky402.com',
+        nextAction:
+          ctx.config.HEDERA_NETWORK === 'mainnet'
+            ? 'Pick a facilitator that lists hedera:mainnet in /supported, e.g. X402_FACILITATOR_URL=https://api.blocky402.com'
+            : 'Try X402_FACILITATOR_URL=https://testnet.facilitator.launa.dev or https://api.testnet.blocky402.com',
       };
     }
     return { state: 'live', detail: `${network} supported (${kinds.length} kinds)` };
