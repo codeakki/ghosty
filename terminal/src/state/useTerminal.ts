@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react';
 import { describeError, GhostyClient, type ClientSettings } from '../api/client';
 import type { ApiResult, SseEventType } from '../api/types';
-import { initialState, reducer } from './reducer';
+import { initialState, reducer, type Action } from './reducer';
 
 const SSE_EVENTS: SseEventType[] = ['state', 'news', 'decision', 'alert', 'order', 'episode', 'market', 'providers'];
 
@@ -20,9 +20,19 @@ export type ActionOutcome = { ok: true; message: string } | { ok: false; message
  * Connects the terminal to the Ghosty server: one SSE stream, a few slow polls for status routes
  * that have no events, and the action callbacks the panels call.
  */
-export function useTerminal(settings: ClientSettings) {
-  const [state, dispatch] = useReducer(reducer, initialState);
+export function useTerminal(settings: ClientSettings, tap?: (action: Action) => void) {
+  const [state, rawDispatch] = useReducer(reducer, initialState);
   const client = useMemo(() => new GhostyClient(settings), [settings]);
+
+  // Optional observer of every action (the Live feed folds the same stream). Kept in a ref so it never re-subscribes.
+  const tapRef = useRef(tap);
+  useEffect(() => {
+    tapRef.current = tap;
+  }, [tap]);
+  const dispatch = useCallback((action: Action) => {
+    rawDispatch(action);
+    tapRef.current?.(action);
+  }, []);
 
   // ---- SSE ----------------------------------------------------------------
   useEffect(() => {
@@ -48,7 +58,7 @@ export function useTerminal(settings: ClientSettings) {
       for (const [event, fn] of handlers) es.removeEventListener(event, fn as EventListener);
       es.close();
     };
-  }, [client]);
+  }, [client, dispatch]);
 
   // ---- Status polls ---------------------------------------------------------
   useEffect(() => {
@@ -112,7 +122,7 @@ export function useTerminal(settings: ClientSettings) {
       alive = false;
       timers.forEach(clearInterval);
     };
-  }, [client]);
+  }, [client, dispatch]);
 
   // ---- Actions ----------------------------------------------------------------
   // Refreshing status right after an action makes the strip and badges move without waiting for a poll.
@@ -128,13 +138,13 @@ export function useTerminal(settings: ClientSettings) {
     dispatch({ type: 'health', result: health, at });
     if (zeroG.ok) dispatch({ type: 'zerog', data: zeroG.data });
     if (x402.ok) dispatch({ type: 'x402', data: x402.data, at });
-  }, []);
+  }, [dispatch]);
 
   const fail = useCallback((what: string, r: Extract<ApiResult<unknown>, { ok: false }>): ActionOutcome => {
     const message = describeError(r);
     dispatch({ type: 'log', level: 'error', summary: `${what} → ${r.status || 'network'} ${r.kind}: ${message}`, at: Date.now() });
     return { ok: false, message };
-  }, []);
+  }, [dispatch]);
 
   const injectNews = useCallback(
     async (title: string, source?: string): Promise<ActionOutcome> => {
@@ -144,7 +154,7 @@ export function useTerminal(settings: ClientSettings) {
       void refreshStatus();
       return { ok: true, message: r.data.alert ? `Decision made, ${r.data.alert.id} queued` : 'Decision made: no actionable signal' };
     },
-    [fail, refreshStatus],
+    [dispatch, fail, refreshStatus],
   );
 
   const pressButton = useCallback(
@@ -160,7 +170,7 @@ export function useTerminal(settings: ClientSettings) {
           action === 'cancel' ? 'Cancelled. Logged to the episode log.' : r.data.executed ? `Executed ${r.data.orders.length} order(s)` : 'Nothing to execute',
       };
     },
-    [fail, refreshStatus],
+    [dispatch, fail, refreshStatus],
   );
 
   const setSafeStop = useCallback(
@@ -171,7 +181,7 @@ export function useTerminal(settings: ClientSettings) {
       void refreshStatus();
       return { ok: true, message: r.data.safeStop ? 'Safe-stop engaged' : 'Brain back online' };
     },
-    [fail, refreshStatus],
+    [dispatch, fail, refreshStatus],
   );
 
   const paySignal = useCallback(async (): Promise<ActionOutcome> => {
@@ -181,7 +191,7 @@ export function useTerminal(settings: ClientSettings) {
     dispatch({ type: 'payment', result: r.data, at: Date.now() });
     void refreshStatus();
     return { ok: true, message: `Paid · tx ${r.data.txId}` };
-  }, [fail, refreshStatus]);
+  }, [dispatch, fail, refreshStatus]);
 
   const ackAlert = useCallback(
     async (id: string): Promise<ActionOutcome> => {
@@ -190,14 +200,14 @@ export function useTerminal(settings: ClientSettings) {
       if (!r.ok) return fail(`POST /alerts/${id}/ack`, r);
       return { ok: true, message: `${id} acknowledged` };
     },
-    [fail],
+    [dispatch, fail],
   );
 
-  const dismissAlert = useCallback((id: string) => dispatch({ type: 'banner/dismiss', id }), []);
+  const dismissAlert = useCallback((id: string) => dispatch({ type: 'banner/dismiss', id }), [dispatch]);
 
   const logLine = useCallback(
     (level: 'ui' | 'error', summary: string) => dispatch({ type: 'log', level, summary, at: Date.now() }),
-    [],
+    [dispatch],
   );
 
   const actions = useMemo(

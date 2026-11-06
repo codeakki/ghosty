@@ -1,0 +1,170 @@
+/*
+ * Ghosty design tokens for the Live view. Source of truth: docs/design/ghosty-design.md.
+ * Prefixed (--color-*, --space-*, ...) so they never collide with the /pro terminal's tokens.
+ * Dark is the default; light follows prefers-color-scheme.
+ */
+:root {
+  /* Surfaces */
+  --color-bg: #07090d;
+  --color-surface: #0f1319;
+  --color-raised: #161b23;
+  --color-line: #222a35;
+  --color-line-strong: #313b48;
+
+  /* Text (AA on bg / surface / raised) */
+  --color-text: #eef2f7;
+  --color-muted: #9ba6b5;
+
+  /* Brand: the ghost glow */
+  --color-ghost: #a6f4e0;
+  --color-ghost-ink: #06201a;
+  --color-ghost-tint: rgb(166 244 224 / 0.1);
+  --color-ghost-glow: rgb(166 244 224 / 0.55);
+
+  /* Direction (always with ▲/▼ and a sign) */
+  --color-up: #3ddc97;
+  --color-down: #ff7a85;
+  --color-up-tint: rgb(61 220 151 / 0.12);
+  --color-down-tint: rgb(255 122 133 / 0.12);
+
+  /* Status */
+  --color-warn: #f5b84a;
+  --color-warn-ink: #241500;
+  --color-warn-tint: rgb(245 184 74 / 0.13);
+  --color-warn-glow: rgb(245 184 74 / 0.55);
+
+  /* Sponsor tracks: 3px borders + text labels only */
+  --color-track-0g: #c69bff;
+  --color-track-hedera: #93a3ff;
+  --color-track-uniswap: #ff85c0;
+  --color-track-hyperliquid: #5fd4f4;
+
+  /* Type */
+  --font-sans: 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --text-xs: 12px;
+  --text-sm: 14px;
+  --text-md: 16px;
+  --text-lg: 20px;
+  --text-xl: 28px;
+  --leading-xs: 16px;
+  --leading-sm: 20px;
+  --leading-md: 24px;
+  --leading-lg: 28px;
+  --leading-xl: 34px;
+
+  /* Space: the only spacing values components may use (4 / 8 / 12 / 16 / 24 / 32 / 48 / 64) */
+  --space-0: 2px; /* hairline nudges only: chip insets, sub-pixel optical alignment */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  /* Component spacing, built from the scale */
+  --card-pad-y: var(--space-4);
+  --card-pad-x: var(--space-4);
+  --card-gap: var(--space-3);
+  --stack-gap: var(--space-4);
+
+  /* Sizes (controls, tags, icons) */
+  --size-icon: 20px;
+  --size-tag: 24px;
+  --size-control-sm: 32px;
+  --size-control: 44px; /* minimum touch target */
+  --size-control-lg: 72px;
+  --size-control-xl: 88px;
+  --size-card-min: 104px; /* skeleton + headline card */
+  --size-card-brain: 152px; /* reserved so thinking → decision does not push the list */
+  --size-ticker: 8.5rem; /* min width of a pulse tile, so digits never reflow neighbours */
+
+  /* Radius */
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+  --radius-pill: 999px;
+
+  /* Elevation: dark mode leans on surface steps + hairlines */
+  --shadow-1: inset 0 0 0 1px var(--color-line);
+  --shadow-2: 0 0 0 1px var(--color-line), 0 8px 24px rgb(0 0 0 / 0.35);
+
+  /* Motion */
+  --dur-fast: 120ms;
+  --dur-base: 200ms;
+  --dur-enter: 320ms;
+  --dur-breathe: 4.2s;
+  --dur-orbit: 1.6s;
+  --dur-ripple: 1.4s;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-pop: cubic-bezier(0.34, 1.4, 0.64, 1);
+  /* Spring-like settle (slight overshoot, no wobble). linear() where supported, cubic-bezier otherwise. */
+  --ease-spring: cubic-bezier(0.3, 1.3, 0.5, 1);
+  --dur-spring: 520ms;
+  --dur-flash: 600ms;
+  --dur-glow: 4s;
+  --stagger: 40ms;
+  /* Price ticks repaint at most twice a second per ticker. */
+  --tick-min-interval: 500ms;
+
+  /* Layout */
+  --nav-h: 56px;
+  --gutter: 16px;
+}
+
+@supports (transition-timing-function: linear(0, 1)) {
+  :root {
+    --ease-spring: linear(0, 0.08 4%, 0.3 9%, 0.62 16%, 0.88 24%, 1.02 32%, 1.05 38%, 1.04 46%, 1.01 60%, 1);
+  }
+}
+
+@media (min-width: 900px) {
+  :root {
+    --gutter: 24px;
+    --card-pad-y: var(--space-4);
+    --card-pad-x: var(--space-5);
+  }
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --color-bg: #f5f7fa;
+    --color-surface: #ffffff;
+    --color-raised: #eef1f5;
+    --color-line: #dfe4ea;
+    --color-line-strong: #c9d1db;
+    --color-text: #0d1117;
+    --color-muted: #566170;
+    --color-ghost: #0b7363;
+    --color-ghost-ink: #ffffff;
+    --color-ghost-tint: rgb(11 115 99 / 0.09);
+    --color-ghost-glow: rgb(20 170 145 / 0.45);
+    --color-up: #047857;
+    --color-down: #c0263e;
+    --color-up-tint: rgb(4 120 87 / 0.1);
+    --color-down-tint: rgb(192 38 62 / 0.09);
+    --color-warn: #a35200;
+    --color-warn-ink: #ffffff;
+    --color-warn-tint: rgb(163 82 0 / 0.1);
+    --color-warn-glow: rgb(230 150 40 / 0.5);
+    --color-track-0g: #7c2fd0;
+    --color-track-hedera: #4150d6;
+    --color-track-uniswap: #b8226a;
+    --color-track-hyperliquid: #0b6e8c;
+    --shadow-1: 0 0 0 1px var(--color-line), 0 1px 2px rgb(13 17 23 / 0.06);
+    --shadow-2: 0 0 0 1px var(--color-line), 0 1px 2px rgb(13 17 23 / 0.06), 0 4px 12px rgb(13 17 23 / 0.05);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur-base: 0ms;
+    --dur-enter: 0ms;
+    --dur-spring: 0ms;
+    --stagger: 0ms;
+  }
+}

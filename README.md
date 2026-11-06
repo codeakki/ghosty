@@ -150,20 +150,44 @@ Status endpoints show which mode each integration is in: `GET /zerog/status`, `G
 
 No pod yet? Open http://localhost:3000/sim for the virtual pod (hold-to-talk, inject headlines, confirm trades, live state), or use `npm run pod -- help`. See [docs/simulator.md](docs/simulator.md).
 
-## Terminal
+## Live view (web UI)
 
-The market intelligence terminal is the web UI for driving and explaining the whole system, with or without the pod.
+No hardware yet, so the web UI stands in for the pod. Open it and you see two things: **the device** (a ghost orb that listens, thinks on 0G, speaks and alerts, with one big button) and **the feed** (cards that keep popping in: market moves, headlines, the agent's decisions, transactions). Everything comes from the running server; nothing is made up.
 
-![Ghosty terminal: pipeline strip, alert, signal card, provider health and proof log](docs/assets/terminal.png)
+![Ghosty Live view: device on the left, live feed on the right](docs/assets/ui-split.png)
+
+| Route | What it is |
+|---|---|
+| `/` | Split view: Device (left) + Feed (right). Stacks on phones, device first |
+| `/device` | The pod, full screen. Open it on a phone as the pod stand-in |
+| `/feed` | The feed only |
+| `/pro` | The dense terminal (every panel at once, described below) |
 
 ```bash
 # terminal 1: the server (port 3000)
 cd server && npm run dev
-# terminal 2: the terminal UI (http://localhost:5173, proxies API calls to the server)
+# terminal 2: the web UI (http://localhost:5173, proxies API calls to the server)
 cd terminal && npm i && npm run dev
 ```
 
-Point it at another server with `VITE_GHOSTY_URL=http://192.168.1.50:3000 npm run dev`, or set the server URL and device token under **Settings** (kept in the browser). `npm run build` writes `terminal/dist/` for the server to serve at `/`.
+**Device.** Hold the button (or the space bar) to talk: the orb follows your mic level, then "Thinking on 0G…", then speaks the reply with the orb pulsing to the audio. When an alert arrives the orb ripples amber, chimes, buzzes (where the phone supports it) and reads the alert; a tap confirms the trade, "Not now" cancels. Without `GROQ_API_KEY` + `ELEVENLABS_API_KEY` it says so and you can type instead.
+
+**Feed cards.** *Market move* (a watched asset moved ≥ 0.25% in 60 s or broke its 1 h high/low, at most one card per asset per 2 min), *Headline* (source, age, Ethos credibility, shock tag, Polymarket odds), *Ghosty · 0G* (thinking, then the decision with confidence, rationale, suggested legs and the 0G request id, or why there was no decision), *Alert* (what the pod was told), *Transactions* (Hyperliquid orders, Uniswap swaps, Hedera x402 payments, 0G Storage episodes, with explorer links and a track label) and *System* (providers going on/offline, safe-stop). Filter with the chips; hover or scroll down to pause, then "N New" jumps back. `?moveThreshold=0.05` lowers the move threshold for a demo (the feed header flags it).
+
+Design system, references and tokens: [docs/design/ghosty-design.md](docs/design/ghosty-design.md).
+
+<p>
+  <img src="docs/assets/ui-device-mobile.png" alt="The device page on a phone: ghost orb, Hold to Talk button" width="260" />
+  <img src="docs/assets/ui-feed.png" alt="The feed page: live prices, filter chips and market move cards" width="560" />
+</p>
+
+## Terminal (`/pro`)
+
+The dense market intelligence terminal drives and explains the whole system in one screen, with or without the pod.
+
+![Ghosty terminal: pipeline strip, alert, signal card, provider health and proof log](docs/assets/terminal.png)
+
+Point the UI at another server with `VITE_GHOSTY_URL=http://192.168.1.50:3000 npm run dev`, or set the server URL and device token under **Settings** in `/pro` (kept in the browser). `npm run build` writes `terminal/dist/` for the server to serve at `/`.
 
 | Panel | What it shows |
 |---|---|
@@ -231,7 +255,7 @@ ghosty/
 │  ├─ sketches/01_…06_…        bring-up sketches, in test order
 │  └─ scripts/link-lib.sh      symlink the library into ~/Documents/Arduino/libraries
 ├─ server/             Node + TypeScript service (voice, news, agent, payments, execution)
-├─ terminal/           Vite + React web terminal: pipeline, signal, market, providers, proofs, virtual pod
+├─ terminal/           Vite + React web UI: Live view (device + feed) and the /pro terminal
 ├─ docs/               architecture, API, setup, troubleshooting, demo script, tracks, research
 └─ .github/            CI workflows, issue and PR templates
 ```

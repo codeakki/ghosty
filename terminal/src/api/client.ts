@@ -484,6 +484,10 @@ export class GhostyClient {
   ackAlert(id: string) {
     return this.request('POST', `/alerts/${encodeURIComponent(id)}/ack`, (b) => (isRecord(b) ? parseAlert(b.alert) : null), {});
   }
+  /** Pop the oldest pending alert (marks it delivered, like the pod's poll). `alert: null` on 204. */
+  alertsNext() {
+    return this.request<{ alert: Alert | null }>('GET', '/alerts/next', (b) => ({ alert: parseAlert(b) }));
+  }
   voiceText(text: string) {
     return this.request<TextTurnResult>(
       'POST',
