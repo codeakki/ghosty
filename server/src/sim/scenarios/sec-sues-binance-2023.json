@@ -1,0 +1,37 @@
+{
+  "id": "sec-sues-binance-2023",
+  "title": "SEC sues Binance, then Coinbase (5-6 Jun 2023)",
+  "description": "The SEC filed 13 charges against Binance and Changpeng Zhao on 5 June 2023 and sued Coinbase the next day. BTC fell about 5% on the Binance news.",
+  "category": "regulatory",
+  "start": "2023-06-05T12:00:00Z",
+  "end": "2023-06-06T20:00:00Z",
+  "interval": "15m",
+  "markets": [
+    { "coin": "BTC", "source": "binance", "symbol": "BTCUSDT" },
+    { "coin": "ETH", "source": "binance", "symbol": "ETHUSDT" }
+  ],
+  "headlines": [
+    {
+      "ts": "2023-06-05T15:00:00Z",
+      "title": "SEC Files 13 Charges Against Binance Entities and Founder Changpeng Zhao",
+      "source": "U.S. SEC",
+      "handle": "SECGov",
+      "url": "https://www.sec.gov/news/press-release/2023-101",
+      "tsNote": "Press release 2023-101 dated 5 Jun 2023; minute not verified (BTC's drop starts in the 15:00 UTC hour)."
+    },
+    {
+      "ts": "2023-06-06T14:30:00Z",
+      "title": "SEC Charges Coinbase for Operating as an Unregistered Securities Exchange, Broker, and Clearing Agency",
+      "source": "U.S. SEC",
+      "handle": "SECGov",
+      "url": "https://www.sec.gov/news/press-release/2023-102",
+      "tsNote": "Press release 2023-102 dated 6 Jun 2023; minute not verified."
+    }
+  ],
+  "sources": [
+    "https://www.sec.gov/news/press-release/2023-101",
+    "https://www.sec.gov/news/press-release/2023-102",
+    "https://fortune.com/crypto/2023/06/05/sec-sues-binance-securities-violations/",
+    "Prices: Binance public klines BTCUSDT and ETHUSDT, 15m (data-api.binance.vision)"
+  ]
+}

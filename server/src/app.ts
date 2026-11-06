@@ -5,7 +5,9 @@ import { fileURLToPath } from 'node:url';
 import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest, type FastifyServerOptions } from 'fastify';
 import { z } from 'zod';
-import { BrainOfflineError, createAgent, MemoryUnavailableError, type Agent } from './agent/index.js';
+import { BrainOfflineError, createAgent, MemoryUnavailableError, ZeroGBlobStore, type Agent, type BlobStore } from './agent/index.js';
+import { consoleLogger } from './agent/log.js';
+import { DEFAULT_DATA_DIR } from './agent/storage.js';
 import type { Decision } from './agent/decide.js';
 import { createStt } from './audio/stt.js';
 import { createTts, OUTPUT_SAMPLE_RATE } from './audio/tts.js';
@@ -13,7 +15,7 @@ import { parseWav, WavFormatError } from './audio/wav.js';
 import { loadConfig, type Config } from './config.js';
 import { createCredibilityScorer, type CredibilityScorer } from './credibility/ethos.js';
 import { createExecutor, type Executor } from './execution/executor.js';
-import { registerIntegrationRoutes } from './integrations.js';
+import { registerIntegrationRoutes, zeroGExplorers } from './integrations.js';
 import { createMarketService, type MarketService } from './market/service.js';
 import { registerMarketRoutes } from './market/routes.js';
 import { notConfiguredInfo, ProviderNotConfiguredError } from './mode.js';
@@ -25,7 +27,12 @@ import type { NewsItem } from './news/types.js';
 import { createPayments, decisionToSignal, registerPaidRoutes, type PaidRoutesOptions, type Payments, type SignalPayload } from './payments/index.js';
 import { Pipeline, type PipelineDeps } from './pipeline.js';
 import { BrainSwitch, isBrainOnline } from './safety/safeStop.js';
+import { createCandleLoader, type CandleLoader } from './sim/candles.js';
+import { SimEngine } from './sim/engine.js';
+import { SimEpisodeLog } from './sim/episodes.js';
 import { InjectedNewsProvider } from './sim/injected.js';
+import { registerSimRunRoutes } from './sim/runRoutes.js';
+import { loadScenarios, type Scenario } from './sim/scenarios.js';
 import { registerSimRoutes } from './sim/routes.js';
 import { PodState, type Alert } from './sim/state.js';
 import { VERSION } from './version.js';
@@ -65,6 +72,8 @@ export interface BuildAppOptions {
   /** GET /market/*. Default: Hyperliquid info API on MARKET_DATA_NETWORK (tests pass one with a mocked fetch). */
   market?: MarketService;
   logger?: FastifyServerOptions['logger'];
+  /** Simulation runs: candle loader (tests pass a fake), scenarios, 0G store for sim episodes (null = local only). */
+  sim?: { loadCandles?: CandleLoader; scenarios?: () => Scenario[]; store?: BlobStore | null; autoTick?: boolean; slippageBps?: number };
 }
 
 /** What the news poller did with one batch of fresh headlines. */
@@ -90,6 +99,8 @@ export interface GhostyRuntime {
   market: MarketService;
   /** Present only with NEWS_LIVE=true; index.ts polls it with NewsPoller. */
   aggregator?: NewsAggregator;
+  /** Scenario replay with paper execution (POST /sim/run). */
+  sim: SimEngine;
   /** NewsPoller listener: shockDetector → decision on the strongest headline → alert queue. */
   onFreshNews(items: NewsItem[]): Promise<FreshNewsOutcome>;
 }
@@ -106,6 +117,8 @@ export interface Providers {
   agent: Agent;
   executor: Executor;
   aggregator?: NewsAggregator;
+  /** The one 0G Storage client (shared by memory, live episodes and sim episodes so uploads never race on the nonce). */
+  blobStore?: BlobStore;
 }
 
 /**
@@ -117,7 +130,11 @@ export function createProviders(
   opts: Pick<BuildAppOptions, 'scorer' | 'agent' | 'executor'> & { logger?: FastifyInstance['log'] } = {},
 ): Providers {
   const scorer = opts.scorer ?? createCredibilityScorer(config);
-  const agent = opts.agent ?? createAgent(config, { logger: opts.logger, scorer });
+  const blobStore =
+    !opts.agent && config.OG_PRIVATE_KEY
+      ? new ZeroGBlobStore({ privateKey: config.OG_PRIVATE_KEY, rpcUrl: config.OG_RPC_URL, indexerUrl: config.OG_INDEXER_URL, logger: opts.logger ?? consoleLogger })
+      : undefined;
+  const agent = opts.agent ?? createAgent(config, { logger: opts.logger, scorer, blobStore });
   const executor = opts.executor ?? createExecutor(config);
   // Aggregate only live news: the fake headlines carry fixed timestamps and would fall out of the rolling window.
   const aggregator = config.NEWS_LIVE ? createNewsAggregator(config, { scorer }) : undefined;
@@ -126,6 +143,7 @@ export function createProviders(
     agent,
     executor,
     aggregator,
+    blobStore,
     deps: {
       stt: createStt(config),
       tts: createTts(config),
@@ -215,6 +233,26 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
     }
   };
 
+  // Simulation: real decider (0G in live mode), historical world, PaperVenue only. Sim episodes go to 0G Storage
+  // when OG_PRIVATE_KEY is set, else to <dataDir>/sim-episodes.jsonl labelled storage "local".
+  const dataDir = config.OG_DATA_DIR ?? DEFAULT_DATA_DIR;
+  const simStore = opts.sim?.store === null ? undefined : (opts.sim?.store ?? providers.blobStore);
+  const simLog = new SimEpisodeLog({ dataDir, store: simStore, logger: app.log });
+  const sim = new SimEngine({
+    decider: deps.decider,
+    memory: deps.memory,
+    episodes: simLog,
+    loadCandles: opts.sim?.loadCandles ?? createCandleLoader({ dataDir }),
+    scenarios: opts.sim?.scenarios ?? (() => loadScenarios()),
+    brainOnline,
+    publish: (type, data) => state.publishSim(type, data),
+    maxTradeUsd: config.MAX_TRADE_USD,
+    slippageBps: opts.sim?.slippageBps,
+    logger: app.log,
+    autoTick: opts.sim?.autoTick,
+  });
+  app.addHook('onClose', async () => sim.stop());
+
   const providerRegistry = opts.providerRegistry ?? new ProviderRegistry({ config });
   const market = opts.market ?? createMarketService(config, { logger: app.log });
 
@@ -228,6 +266,7 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
     providers: providerRegistry,
     market,
     aggregator: providers.aggregator,
+    sim,
     onFreshNews,
   } satisfies GhostyRuntime);
 
@@ -322,6 +361,8 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
     if (!parsed.success) {
       return reply.code(400).send({ error: 'bad_request', message: 'body must be {"action":"confirm"|"cancel"}' });
     }
+    // A pending SIM decision always takes the press, and only ever fills on the PaperVenue.
+    if (sim.hasPending()) return sim.press(parsed.data.action);
     // Live mode without Hyperliquid keys: refuse before the pending decision is consumed.
     const venue = notConfiguredInfo(deps.venue);
     if (parsed.data.action === 'confirm' && venue) return reply.code(503).send(new ProviderNotConfiguredError(venue).body());
@@ -356,6 +397,15 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
     safeStopEngaged: async () => !(await brainOnline()),
     requireDevice,
     requireBrain,
+  });
+
+  registerSimRunRoutes(app, {
+    engine: sim,
+    simLog,
+    liveEpisodes: providers.agent.episodes,
+    store: simStore,
+    storagescan: zeroGExplorers(config).storagescan,
+    requireDevice,
   });
 
   // Paid GET /signal (x402 on Hedera): serves the latest decision from the pod state.

@@ -88,7 +88,7 @@ export interface PodSnapshot {
 }
 
 /** `providers` and `market` come from index.ts (provider poller, market stream), never from the pipeline. */
-export type PodEventType = 'state' | 'news' | 'decision' | 'alert' | 'order' | 'episode' | 'providers' | 'market';
+export type PodEventType = 'state' | 'news' | 'decision' | 'alert' | 'order' | 'episode' | 'providers' | 'market' | 'sim';
 
 export interface PodEvent {
   id: number;
@@ -243,6 +243,14 @@ export class PodState implements PipelineObserver {
 
   /** Broadcast an event that is not part of the pod snapshot (provider health, market mids). */
   publish(type: 'providers' | 'market', data: unknown): void {
+    this.emit(type, data, false);
+  }
+
+  /**
+   * Broadcast a simulation-run event (data tagged `sim: true, runId` by the engine). Never touches the pod
+   * snapshot: sim news, decisions, alerts and orders stay out of /state, /signal and the live ticker.
+   */
+  publishSim(type: 'sim' | 'market' | 'news' | 'decision' | 'alert' | 'order' | 'episode', data: object): void {
     this.emit(type, data, false);
   }
 
