@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
-import { CACHE_TTL_MS, isBrainOnline, resetBrainHealthCache } from '../src/safety/safeStop.js';
+import { CACHE_TTL_MS, isBrainOnline, reportBrainFailure, resetBrainHealthCache } from '../src/safety/safeStop.js';
 
 const base = {
   SAFE_STOP_ENABLED: true,
@@ -51,8 +51,54 @@ describe('isBrainOnline', () => {
     assert.equal(p.urls.length, 1, 'cached');
 
     now += 2;
-    assert.equal(await isBrainOnline(base, opts), false, '503 → offline');
+    assert.equal(await isBrainOnline(base, opts), true, 'one 503 after a success is not enough to flip offline');
     assert.equal(p.urls.length, 2);
+  });
+
+  it('hysteresis: offline after 2 consecutive failures, back online after 1 success', async () => {
+    let now = 1_000;
+    const p = pinger([200, 503, 'throw', 503, 200]);
+    const opts = { fetch: p.impl, now: () => now };
+    const step = async () => {
+      const online = await isBrainOnline(base, opts);
+      now += CACHE_TTL_MS;
+      return online;
+    };
+    assert.equal(await step(), true, '200');
+    assert.equal(await step(), true, '503 (1st failure)');
+    assert.equal(await step(), false, 'network error (2nd failure) → offline');
+    assert.equal(await step(), false, 'still failing');
+    assert.equal(await step(), true, 'one success → online');
+    assert.equal(p.urls.length, 5);
+  });
+
+  it('a failed decide() counts as one failure', async () => {
+    let now = 1_000;
+    const p = pinger([200]);
+    const opts = { fetch: p.impl, now: () => now };
+    assert.equal(await isBrainOnline(base, opts), true);
+    reportBrainFailure(base.OG_ROUTER_URL, () => now);
+    assert.equal(await isBrainOnline(base, opts), true, 'one failure keeps a known-good brain online');
+    reportBrainFailure(base.OG_ROUTER_URL, () => now);
+    assert.equal(await isBrainOnline(base, opts), false, 'two in a row → offline');
+    now += CACHE_TTL_MS;
+  });
+
+  it('uses OG_HEALTH_TIMEOUT_MS for the probe', async () => {
+    let signal: AbortSignal | undefined;
+    const hang = (async (_url: string | URL | Request, init?: RequestInit) => {
+      signal = init?.signal ?? undefined;
+      return new Promise<Response>((_, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(Object.assign(new Error('timeout'), { name: 'TimeoutError' })));
+      });
+    }) as typeof fetch;
+    const started = Date.now();
+    // AbortSignal.timeout timers are unref'd: keep the event loop alive while the probe waits.
+    const keepAlive = setTimeout(() => undefined, 2_000);
+    assert.equal(await isBrainOnline({ ...base, OG_HEALTH_TIMEOUT_MS: 30 }, { fetch: hang }), false);
+    clearTimeout(keepAlive);
+    assert.ok(signal?.aborted);
+    assert.ok(Date.now() - started < 2_000);
   });
 
   it('treats a network error as offline', async () => {
