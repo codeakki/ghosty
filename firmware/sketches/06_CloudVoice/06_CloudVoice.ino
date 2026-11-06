@@ -17,8 +17,8 @@
  *   any other error: printed, then 5 slow blinks.
  */
 #include <GhostyBoard.h>
+#include <GhostyNet.h>
 #include <WiFi.h>
-#include <HTTPClient.h>
 #if __has_include(<secrets.h>)
 #include <secrets.h>
 #else
@@ -89,9 +89,8 @@ void sendVoice(size_t samples) {
   const uint32_t pcmBytes = samples * sizeof(int16_t);
   writeWavHeader(wav, pcmBytes, SAMPLE_RATE);
 
-  WiFiClient client;
   HTTPClient http;
-  http.begin(client, GHOSTY_SERVER_URL "/voice");
+  ghostyHttpBegin(http, GHOSTY_SERVER_URL "/voice");  // TLS when the URL is https://
   http.useHTTP10(true);  // no chunked encoding -> body is raw PCM on the socket
   http.setTimeout(30000);  // STT + agent + TTS can be slow
   http.addHeader("Content-Type", "audio/wav");

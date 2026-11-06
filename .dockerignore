@@ -1,0 +1,25 @@
+# Keep the Docker build context small and free of secrets.
+**/node_modules
+**/dist
+**/.env
+**/.env.*
+!**/.env.example
+**/.ghosty
+**/*.log
+.git
+firmware
+hardware
+docs
+models
+*.wav
+**/*.wav
+stream_play
+ghost_case
+*_test
+mic_*
+speak_hello
+speaker_*
+hello_psram
+pin_test
+wire_scan
+record.py
