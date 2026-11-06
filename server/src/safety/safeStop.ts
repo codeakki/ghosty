@@ -18,7 +18,8 @@ export class BrainSwitch {
  *   (`POST /sim/safe-stop`) overrides it at runtime when passed as `opts.sim`.
  * - OG_API_KEY unset: in test mode the brain is the local FakeDecider, so it counts as online. In live mode there
  *   is no brain at all, so safe-stop is engaged (no fake decisions).
- * - OG_API_KEY set: GET <OG_ROUTER_URL>/models with a 3 s timeout, cached for 10 s.
+ * - OG_API_KEY set: GET <OG_ROUTER_URL>/models with a 6 s timeout (status line only; the ~130 KB model list is not
+ *   downloaded), cached for 10 s. The mainnet router often needs 2-4 s from a cold TLS handshake, so 3 s flapped.
  *   A failed 0G decide() call also marks the brain offline for one cache window (reportBrainFailure).
  */
 export type SafeStopConfig = Pick<Config, 'SAFE_STOP_ENABLED' | 'SIMULATE_BRAIN_OFFLINE' | 'OG_ROUTER_URL'> &
@@ -31,7 +32,7 @@ export interface BrainProbeOptions {
   sim?: BrainSwitch;
 }
 
-export const PING_TIMEOUT_MS = 3_000;
+export const PING_TIMEOUT_MS = 6_000;
 export const CACHE_TTL_MS = 10_000;
 
 interface CacheEntry {
@@ -73,8 +74,8 @@ export async function isBrainOnline(config: SafeStopConfig, opts: BrainProbeOpti
 async function pingRouter(baseUrl: string, fetchImpl: typeof fetch): Promise<boolean> {
   try {
     const res = await fetchImpl(`${baseUrl}/models`, { method: 'GET', signal: AbortSignal.timeout(PING_TIMEOUT_MS) });
-    // Drain the body so the socket is released.
-    await res.arrayBuffer().catch(() => undefined);
+    // Only the status matters: cancel the (large) model list instead of downloading it under the timeout.
+    await res.body?.cancel().catch(() => undefined);
     return res.ok;
   } catch {
     return false;
