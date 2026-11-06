@@ -32,13 +32,16 @@ describe('safe-stop error mapping', () => {
     const app = buildApp({ config: loadConfig({}), deps: { decider: offlineDecider } });
     for (const [url, payload] of [
       ['/voice/text', { text: 'is gold moving?' }],
-      ['/button', { action: 'confirm' }],
       ['/news/inject', { title: WAR }],
     ] as const) {
       const res = await app.inject({ method: 'POST', url, payload });
       assert.equal(res.statusCode, 503, url);
       assert.equal(res.json().error, 'brain_offline', url);
     }
+    // No decision was ever presented, so a press has nothing to act on (and never asks 0G for a new one).
+    const press = await app.inject({ method: 'POST', url: '/button', payload: { action: 'confirm' } });
+    assert.equal(press.statusCode, 409);
+    assert.equal(press.json().error, 'nothing_pending');
     const voice = await app.inject({ method: 'POST', url: '/voice/text', payload: { text: 'hi' } });
     assert.equal(voice.json().requestId, 'router-req-1');
     // Nothing was decided, so nothing was ordered.

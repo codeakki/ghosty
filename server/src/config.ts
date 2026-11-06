@@ -206,6 +206,8 @@ const ConfigSchema = z.object({
   SAFE_STOP_ENABLED: bool(true),
   SIMULATE_BRAIN_OFFLINE: bool(false),
   MAX_TRADE_USD: z.coerce.number().positive().default(25).catch(25),
+  /** A presented decision (spoken reply or alert) can be confirmed for this long; later presses answer 409 alert_expired. */
+  PENDING_DECISION_TTL_SEC: posInt(120),
 
   /** Read-only Hyperliquid prices for the terminal. Independent of HL_TESTNET (which only drives execution). */
   MARKET_DATA_NETWORK: z.enum(['mainnet', 'testnet']).default('mainnet').catch('mainnet'),

@@ -1,4 +1,4 @@
-import { classifyText, type Decision } from '../agent/decide.js';
+import { classifyText, isActionable, type Decision } from '../agent/decide.js';
 import type { EpisodeRecord } from '../agent/episode.js';
 import { credibilityWeight, type CredibilityLevel, type CredibilityScorer } from '../credibility/ethos.js';
 import type { SpotOutcome } from '../execution/executor.js';
@@ -210,9 +210,9 @@ export class PodState implements PipelineObserver {
 
   // --- Alerts -------------------------------------------------------------
 
-  /** Queue a spoken alert for an actionable decision. Returns null when the signal is `none`. */
+  /** Queue a spoken alert for an actionable decision. Returns null when there is nothing to confirm (signal `none` or no legs). */
   enqueueAlert(decision: Decision, headline?: NewsItem): Alert | null {
-    if (decision.signal === 'none') return null;
+    if (!isActionable(decision)) return null;
     const alert: Alert = {
       id: `alert-${++this.alertSeq}`,
       text: decision.rationale,

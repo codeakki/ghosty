@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { SpeechToText } from './audio/stt.js';
 import type { TextToSpeech } from './audio/tts.js';
 import type { WavAudio } from './audio/wav.js';
-import type { Decider, Decision } from './agent/decide.js';
+import { isActionable, spokenRationale, type Decider, type Decision } from './agent/decide.js';
 import type { EpisodeInput, EpisodeLog, EpisodeRecord } from './agent/episode.js';
 import type { MemoryStore } from './agent/memory.js';
 import { executePlan, type SpotOutcome } from './execution/executor.js';
@@ -91,6 +91,46 @@ export interface PipelineDeps {
   assistant?: VoiceAssistant;
   /** Safe-stop check for the 0G path when the assistant is on (the route's preHandler no longer does it). */
   brainOnline?: () => Promise<boolean>;
+  /** How long a presented decision can still be confirmed (PENDING_DECISION_TTL_SEC). Default 120 000 ms. */
+  pendingTtlMs?: number;
+  /** Clock for the pending-decision TTL (tests). Default Date.now. */
+  now?: () => number;
+}
+
+/** Default PENDING_DECISION_TTL_SEC, in ms. */
+export const DEFAULT_PENDING_TTL_MS = 120_000;
+
+/** A decision the wearer was told about (spoken reply or alert) and can still confirm or cancel. */
+export interface PendingDecision {
+  decision: Decision;
+  /** Epoch ms when it was presented. */
+  presentedAt: number;
+  /** Epoch ms after which a press answers 409 alert_expired. */
+  expiresAt: number;
+}
+
+export const NOTHING_PENDING_MESSAGE = "Nothing to confirm. Ghosty only trades on an alert you've heard.";
+
+/**
+ * A button press with no presented decision to act on: nothing pending, or the alert expired. Mapped to 409.
+ * The press never triggers a fresh decision and never executes anything.
+ */
+export class NothingPendingError extends Error {
+  override readonly name = 'NothingPendingError';
+  constructor(
+    readonly code: 'nothing_pending' | 'alert_expired',
+    readonly requestId?: string,
+  ) {
+    super(
+      code === 'alert_expired'
+        ? 'Alert expired. Nothing was traded; wait for the next alert.'
+        : NOTHING_PENDING_MESSAGE,
+    );
+  }
+
+  body(): { error: string; message: string; requestId?: string } {
+    return { error: this.code, message: this.message, ...(this.requestId ? { requestId: this.requestId } : {}) };
+  }
 }
 
 /** Who produced the spoken reply: Claude (research, chit-chat) or the 0G trade path. */
@@ -148,15 +188,27 @@ export interface ButtonResult {
 }
 
 /**
- * Voice loop: STT → news → decide → TTS. The last decision waits for a button press.
- * Button: confirm → execute the planned actions; cancel → drop them. Every step is an episode.
+ * Voice loop: STT → news → decide → TTS. The last actionable decision waits for a button press, for at most
+ * pendingTtlMs. Button: confirm → execute the planned actions of THAT decision; cancel → drop them. A press with
+ * nothing pending (or an expired alert) throws NothingPendingError: it never decides or executes anything.
+ * Every step is an episode.
  */
 export class Pipeline {
-  private pending: Decision | undefined;
+  private pending: PendingDecision | undefined;
   private readonly userId: string;
+  private readonly pendingTtlMs: number;
+  private readonly now: () => number;
 
   constructor(private readonly deps: PipelineDeps) {
     this.userId = deps.userId ?? 'device-0';
+    this.pendingTtlMs = deps.pendingTtlMs ?? DEFAULT_PENDING_TTL_MS;
+    this.now = deps.now ?? Date.now;
+  }
+
+  /** The decision a press would act on right now, or undefined (none presented, or expired). */
+  pendingDecision(): PendingDecision | undefined {
+    const p = this.pending;
+    return p && this.now() <= p.expiresAt ? p : undefined;
   }
 
   async handleVoice(wav: WavAudio): Promise<VoiceResult> {
@@ -185,9 +237,13 @@ export class Pipeline {
   }
 
   async handleButton(action: 'confirm' | 'cancel'): Promise<ButtonResult> {
-    // No voice turn yet (e.g. a button press right after boot): decide from news alone.
-    const decision = this.pending ?? (await this.decide('', 'button'));
+    // Take the pending decision synchronously (no await before this) so two presses can never both execute it.
+    const pending = this.pending;
     this.pending = undefined;
+    // Only an alert the wearer has heard can trade. No pending decision → no new 0G decision, no execution.
+    if (!pending) throw new NothingPendingError('nothing_pending');
+    if (this.now() > pending.expiresAt) throw new NothingPendingError('alert_expired', pending.decision.requestId);
+    const { decision } = pending;
     const actions = decision.suggestedActions;
     const memory = await this.deps.memory.load(this.userId);
 
@@ -292,7 +348,7 @@ export class Pipeline {
 
   /** "yes" / "confirm" / "cancel" by voice: the button is the only way to act on a pending 0G decision. */
   private confirmHint(transcript: string, intent: VoiceIntent): Omit<VoiceResult, 'audio'> {
-    const pending = this.pending;
+    const pending = this.pendingDecision()?.decision;
     const reply = pending
       ? 'Use the button to confirm or cancel the pending trade. I never trade on voice alone.'
       : 'There is nothing waiting for confirmation right now.';
@@ -321,6 +377,8 @@ export class Pipeline {
       maxTradeUsd: this.deps.maxTradeUsd,
       ...(intel ? { paidIntel: { provider: intel.provider, txId: intel.txId, bundle: intel.bundle } } : {}),
     });
+    // Nothing to confirm → never say "Press to confirm" (spoken reply, alert text, episode, terminal).
+    decision.rationale = spokenRationale(decision);
     if (intel) {
       const check = await withTimeout(intel.verification, this.deps.verifyWaitMs ?? 3000);
       decision.paidIntel = {
@@ -342,7 +400,10 @@ export class Pipeline {
       ...(intel ? { receipts: [intel.txId] } : {}),
     });
     this.deps.audit?.({ kind: 'decision', requestId: decision.requestId, signal: decision.signal, txId: intel?.txId });
-    this.pending = decision.signal === 'none' ? undefined : decision;
+    // Only an actionable decision is presented as something to confirm. A newer non-actionable decision replaces
+    // (clears) an older pending one: the last thing the wearer heard was not a trade, so a press must not trade.
+    const at = this.now();
+    this.pending = isActionable(decision) ? { decision, presentedAt: at, expiresAt: at + this.pendingTtlMs } : undefined;
     return decision;
   }
 
