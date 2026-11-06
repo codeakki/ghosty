@@ -21,7 +21,7 @@ import { assertHostAllowed, SpendCap } from './spendControls.js';
  * Rules checked before anything is signed:
  * - host allowlist (X402_ALLOWED_HOSTS)
  * - right network, HBAR or our USDC token only, never paying our own account
- * - per-payment cap per asset (X402_MAX_PER_CALL_TINYBAR / _USDC_MICROS, enforced by @x402/core spendControls)
+ * - per-payment cap per asset (X402_MAX_PER_CALL_TINYBAR / _USDC_MICROS: checked here, and again by @x402/core spendControls)
  * - daily cap per asset (X402_MAX_SPEND_TINYBAR / _USDC_MICROS, SpendCap in server/.ghosty/spend.json)
  * - at most MAX_PENDING payments in flight; more are refused (PaymentQueueFullError), never queued forever
  */
@@ -189,6 +189,8 @@ export class X402Payer implements Payer {
     }
     if (!/^[1-9][0-9]*$/.test(req.amount)) return new PaymentPolicyError(`bad amount ${req.amount}`);
     const amount = BigInt(req.amount);
+    const perCall = BigInt(req.asset === HBAR_ASSET_ID ? this.config.X402_MAX_PER_CALL_TINYBAR : this.config.X402_MAX_PER_CALL_USDC_MICROS);
+    if (amount > perCall) return new PaymentPolicyError(`per-call cap: ${amount} > ${perCall} of ${req.asset}`);
     if (!this.spendCap.canSpend(req.asset, amount)) {
       return new PaymentPolicyError(
         `daily x402 spend cap reached for ${req.asset}: ${this.spendCap.spentToday(req.asset)} + ${amount} > ${this.spendCap.maxPerDay(req.asset)}`,

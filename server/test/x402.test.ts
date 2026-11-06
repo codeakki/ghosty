@@ -1,251 +1,161 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, beforeEach, describe, it } from 'node:test';
 import { PrivateKey, Transaction, TransferTransaction } from '@hiero-ledger/sdk';
-import {
-  decodePaymentRequiredHeader,
-  decodePaymentResponseHeader,
-  encodePaymentSignatureHeader,
-} from '@x402/core/http';
-import type { PaymentPayload, PaymentRequired } from '@x402/core/types';
+import { decodePaymentRequiredHeader } from '@x402/core/http';
+import type { PaymentRequired } from '@x402/core/types';
 import { createClientHederaSigner } from '@x402/hedera';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { loadConfig, type Config } from '../src/config.js';
-import { HcsAuditLog, auditMessage, type HcsTransport } from '../src/payments/hcsAudit.js';
-import { hashscanTxUrl } from '../src/payments/hedera.js';
+import { FakeEthosScorer } from '../src/credibility/ethos.js';
+import type { NewsItem, NewsProvider } from '../src/news/types.js';
+import { decodeAuditMessage, encodeAuditMessage, HcsAuditLog, readAuditLog, type HcsTransport } from '../src/payments/hcsAudit.js';
+import { formatAmount, hashscanTxUrl, toMirrorTxId } from '../src/payments/hedera.js';
 import { createPayments } from '../src/payments/index.js';
+import { checkTransfer, verifyPaymentOnMirror, type ExpectedTransfer } from '../src/payments/mirror.js';
+import { runSetup, type SetupOps } from '../src/payments/setup.js';
+import { buildSignalDeskApp, corroborate, IntelService, severityOf, type IntelBundle } from '../src/payments/signalDesk.js';
 import { HostNotAllowedError, isHostAllowed, SpendCap, SpendCapExceededError } from '../src/payments/spendControls.js';
-import { PaymentPolicyError, X402PaymentError, X402Payer } from '../src/payments/x402Client.js';
-import { registerPaidRoutes, type SettledPayment, type SignalPayload } from '../src/payments/x402Server.js';
+import { PaymentPolicyError, PaymentQueueFullError, X402PaymentError, X402Payer } from '../src/payments/x402Client.js';
 
 /**
- * No external network: the facilitator is a local Fastify stub on 127.0.0.1 that speaks the
- * x402 facilitator REST API (/supported, /verify, /settle), so the real HTTPFacilitatorClient,
- * x402ResourceServer, @x402/fetch and Hedera signer are all exercised end to end.
+ * No external network. The facilitator is a local Fastify stub on 127.0.0.1 speaking the x402 facilitator REST
+ * API (/supported, /verify, /settle), so the real HTTPFacilitatorClient, x402ResourceServer, @x402/fetch and the
+ * Hedera signer are exercised end to end. The mirror node is a mocked fetch; the HCS transport is a fake.
  */
 
 const FEE_PAYER = '0.0.9185802';
 const MERCHANT = '0.0.5005';
 const PAYER = '0.0.1001';
+const USDC = '0.0.429274';
 const SETTLED_TX = `${FEE_PAYER}@1762400000.123456789`;
-const SIGNAL: SignalPayload = { signal: 'geopolitical_shock', confidence: 0.72, actions: [{ coin: 'xyz:GOLD', side: 'long' }], requestId: 'og-req-1' };
-
-type VerifyMode = 'ok' | 'invalid' | 'http400';
-type SettleMode = 'ok' | 'fail';
+const HEADLINE = 'Missile strikes reported near Strait of Hormuz';
 
 interface FakeFacilitator {
   url: string;
-  verifyMode: VerifyMode;
-  settleMode: SettleMode;
+  verifyMode: 'ok' | 'invalid';
+  settleMode: 'ok' | 'fail';
   calls: { supported: number; verify: unknown[]; settle: unknown[] };
   close(): Promise<void>;
 }
 
 async function startFacilitator(): Promise<FakeFacilitator> {
   const app = Fastify();
-  const f: FakeFacilitator = {
-    url: '',
-    verifyMode: 'ok',
-    settleMode: 'ok',
-    calls: { supported: 0, verify: [], settle: [] },
-    close: () => app.close(),
-  };
+  const f: FakeFacilitator = { url: '', verifyMode: 'ok', settleMode: 'ok', calls: { supported: 0, verify: [], settle: [] }, close: () => app.close() };
   app.get('/supported', async () => {
     f.calls.supported++;
-    return {
-      kinds: [{ x402Version: 2, scheme: 'exact', network: 'hedera:testnet', extra: { feePayer: FEE_PAYER } }],
-      extensions: [],
-      signers: { 'hedera:*': [FEE_PAYER] },
-    };
+    return { kinds: [{ x402Version: 2, scheme: 'exact', network: 'hedera:testnet', extra: { feePayer: FEE_PAYER } }], extensions: [], signers: { 'hedera:*': [FEE_PAYER] } };
   });
-  app.post('/verify', async (req, reply) => {
+  app.post('/verify', async (req) => {
     f.calls.verify.push(req.body);
-    if (f.verifyMode === 'http400') return reply.code(400).send({ isValid: false, invalidReason: 'invalid_exact_hedera_payload_signature_invalid' });
-    if (f.verifyMode === 'invalid') return { isValid: false, invalidReason: 'insufficient_funds', payer: PAYER };
-    return { isValid: true, payer: PAYER };
+    return f.verifyMode === 'invalid' ? { isValid: false, invalidReason: 'insufficient_funds', payer: PAYER } : { isValid: true, payer: PAYER };
   });
   app.post('/settle', async (req) => {
     f.calls.settle.push(req.body);
     if (f.settleMode === 'fail') return { success: false, errorReason: 'transaction_failed', transaction: '', network: 'hedera:testnet' };
     return { success: true, transaction: SETTLED_TX, network: 'hedera:testnet', payer: PAYER };
   });
-  const address = await app.listen({ port: 0, host: '127.0.0.1' });
-  f.url = address;
+  f.url = await app.listen({ port: 0, host: '127.0.0.1' });
   return f;
 }
+
+const item = (title: string, domain: string, minutesAgo = 5): NewsItem => ({
+  id: `rss:${domain}:${title.length}`,
+  source: 'rss',
+  title,
+  url: `https://${domain}/a`,
+  domain,
+  publishedAt: new Date(Date.now() - minutesAgo * 60_000).toISOString(),
+});
+
+const NEWS: NewsItem[] = [
+  item('Missile strikes near the Strait of Hormuz rattle oil markets', 'reuters.com'),
+  item('Oil jumps as missile strikes hit Hormuz shipping lane', 'bloomberg.com'),
+  item('Hormuz missile strikes: tankers reroute', 'ft.com'),
+  item('Bitcoin ETF flows steady', 'coindesk.com'),
+];
+const newsProvider: NewsProvider = { name: 'test', fetchLatest: async () => NEWS };
+const intel = () => new IntelService({ news: [newsProvider], scorer: new FakeEthosScorer(), windowMinutes: 120 });
 
 function cfg(over: Record<string, string> = {}): Config {
   return loadConfig({ X402_PAY_TO: MERCHANT, ...over });
 }
 
-function paidApp(config: Config, extra: { getSignal?: () => SignalPayload; onSettled?: (p: SettledPayment) => void } = {}) {
-  const app = Fastify();
-  registerPaidRoutes(app, { config, getSignal: extra.getSignal ?? (() => SIGNAL), onSettled: extra.onSettled });
-  return app;
-}
-
-function paymentFor(required: PaymentRequired): PaymentPayload {
-  const accepted = required.accepts[0];
-  assert.ok(accepted);
-  return { x402Version: 2, resource: required.resource, accepted, payload: { transaction: Buffer.from('signed-transfer').toString('base64') } };
-}
-
-describe('x402 server: GET /signal', () => {
+describe('Signal Desk (x402 merchant)', () => {
   let fac: FakeFacilitator;
   before(async () => {
     fac = await startFacilitator();
   });
-  after(async () => {
-    await fac.close();
-  });
-  beforeEach(() => {
-    fac.verifyMode = 'ok';
-    fac.settleMode = 'ok';
-    fac.calls = { supported: 0, verify: [], settle: [] };
-  });
+  after(() => fac.close());
 
-  it('answers 402 with Hedera exact payment requirements (body and PAYMENT-REQUIRED header)', async () => {
-    const app = paidApp(cfg({ X402_FACILITATOR_URL: fac.url }));
-    const res = await app.inject({ method: 'GET', url: '/signal' });
+  it('answers 402 offering USDC (HTS, 6 decimals) and HBAR (tinybars) to its own account', async () => {
+    const desk = buildSignalDeskApp({ config: cfg({ X402_FACILITATOR_URL: fac.url }), intel: intel() });
+    const res = await desk.inject({ method: 'GET', url: `/intel?headline=${encodeURIComponent(HEADLINE)}` });
     assert.equal(res.statusCode, 402);
     const body = res.json() as PaymentRequired;
-    assert.equal(body.x402Version, 2);
-    assert.equal(body.accepts.length, 1);
-    assert.deepEqual(body.accepts[0], {
-      scheme: 'exact',
-      network: 'hedera:testnet',
-      amount: '1000000',
-      asset: '0.0.0',
-      payTo: MERCHANT,
-      maxTimeoutSeconds: 180,
-      extra: { feePayer: FEE_PAYER },
-    });
-    assert.match(body.resource.url, /\/signal$/);
-    const header = res.headers['payment-required'];
-    assert.equal(typeof header, 'string');
-    assert.deepEqual(decodePaymentRequiredHeader(header as string), body);
-    assert.equal(fac.calls.verify.length, 0);
+    assert.deepEqual(decodePaymentRequiredHeader(String(res.headers['payment-required'])), body);
+    assert.deepEqual(
+      body.accepts.map((a) => [a.network, a.asset, a.amount, a.payTo]),
+      [
+        ['hedera:testnet', USDC, '10000', MERCHANT],
+        ['hedera:testnet', '0.0.0', '1000000', MERCHANT],
+      ],
+    );
+    assert.equal(body.accepts[0]?.extra?.feePayer, FEE_PAYER);
+    await desk.close();
   });
 
-  it('uses X402_SIGNAL_PRICE_TINYBAR and falls back to HEDERA_ACCOUNT_ID for payTo', async () => {
-    const app = Fastify();
-    registerPaidRoutes(app, { config: loadConfig({ X402_FACILITATOR_URL: fac.url, HEDERA_ACCOUNT_ID: '0.0.777', X402_SIGNAL_PRICE_TINYBAR: '2500000' }) });
-    const res = await app.inject({ method: 'GET', url: '/signal' });
-    const accepted = (res.json() as PaymentRequired).accepts[0];
-    assert.equal(accepted?.amount, '2500000');
-    assert.equal(accepted?.payTo, '0.0.777');
+  it('400 without a headline (before asking for money), 503 without a merchant account or facilitator', async () => {
+    const desk = buildSignalDeskApp({ config: cfg({ X402_FACILITATOR_URL: fac.url }), intel: intel() });
+    assert.equal((await desk.inject({ method: 'GET', url: '/intel' })).statusCode, 400);
+    await desk.close();
+    const noPayTo = buildSignalDeskApp({ config: loadConfig({ X402_FACILITATOR_URL: fac.url }), intel: intel() });
+    assert.equal((await noPayTo.inject({ method: 'GET', url: '/intel?headline=x' })).json().error, 'payments_not_configured');
+    await noPayTo.close();
+    const down = buildSignalDeskApp({ config: cfg({ X402_FACILITATOR_URL: 'http://127.0.0.1:9' }), intel: intel() });
+    assert.equal((await down.inject({ method: 'GET', url: '/intel?headline=x' })).json().error, 'facilitator_unavailable');
+    await down.close();
   });
 
-  it('verify ok → settle ok → 200 with the signal and the settled tx id', async () => {
-    const settled: SettledPayment[] = [];
-    const app = paidApp(cfg({ X402_FACILITATOR_URL: fac.url }), { onSettled: (p) => void settled.push(p) });
-    const required = (await app.inject({ method: 'GET', url: '/signal' })).json() as PaymentRequired;
-
-    const res = await app.inject({ method: 'GET', url: '/signal', headers: { 'payment-signature': encodePaymentSignatureHeader(paymentFor(required)) } });
-    assert.equal(res.statusCode, 200);
-    const body = res.json();
-    assert.equal(body.signal, SIGNAL.signal);
-    assert.equal(body.confidence, SIGNAL.confidence);
-    assert.deepEqual(body.actions, SIGNAL.actions);
-    assert.equal(body.requestId, SIGNAL.requestId);
-    assert.equal(body.paidTxId, SETTLED_TX);
-    assert.equal(body.hashscanUrl, 'https://hashscan.io/testnet/transaction/0.0.9185802-1762400000-123456789');
-    assert.equal(res.headers['x-payment-tx-id'], SETTLED_TX);
-    assert.equal(decodePaymentResponseHeader(res.headers['payment-response'] as string).transaction, SETTLED_TX);
-    assert.equal(decodePaymentResponseHeader(res.headers['x-payment-response'] as string).transaction, SETTLED_TX);
-
-    assert.equal(fac.calls.verify.length, 1);
-    assert.equal(fac.calls.settle.length, 1);
-    const verifyReq = fac.calls.verify[0] as { paymentRequirements: { payTo: string; amount: string } };
-    assert.equal(verifyReq.paymentRequirements.payTo, MERCHANT);
-    assert.equal(verifyReq.paymentRequirements.amount, '1000000');
-    assert.equal(settled.length, 1);
-    assert.equal(settled[0]?.txId, SETTLED_TX);
-    assert.equal(settled[0]?.requestId, 'og-req-1');
-    assert.equal(fac.calls.supported, 1, '/supported is fetched once and cached');
+  it('builds a bundle from real inputs: Ethos score, corroborating outlets, shock category and severity', async () => {
+    const b = await intel().bundle({ headline: HEADLINE, handle: 'reuters', domain: 'cnbc.com' });
+    assert.equal(b.provider, 'ghosty-signal-desk');
+    assert.equal(b.source.ethos?.level, 'exemplary');
+    assert.deepEqual(b.corroboration.sources.sort(), ['bloomberg.com', 'ft.com', 'reuters.com']);
+    assert.equal(b.corroboration.count, 3);
+    assert.equal(b.shock.category, 'geopolitical_shock');
+    assert.equal(b.shock.severity, 'high');
   });
 
-  it('also accepts the payload in the v1 X-PAYMENT header', async () => {
-    const app = paidApp(cfg({ X402_FACILITATOR_URL: fac.url }));
-    const required = (await app.inject({ method: 'GET', url: '/signal' })).json() as PaymentRequired;
-    const res = await app.inject({ method: 'GET', url: '/signal', headers: { 'x-payment': encodePaymentSignatureHeader(paymentFor(required)) } });
-    assert.equal(res.statusCode, 200);
-    assert.equal(res.headers['x-payment-tx-id'], SETTLED_TX);
-  });
-
-  for (const mode of ['invalid', 'http400'] as const) {
-    it(`verify fail (${mode}) → 402 with the reason, nothing settled, handler not run`, async () => {
-      fac.verifyMode = mode;
-      let handlerRuns = 0;
-      const app = paidApp(cfg({ X402_FACILITATOR_URL: fac.url }), { getSignal: () => (handlerRuns++, SIGNAL) });
-      const required = (await app.inject({ method: 'GET', url: '/signal' })).json() as PaymentRequired;
-      const res = await app.inject({ method: 'GET', url: '/signal', headers: { 'payment-signature': encodePaymentSignatureHeader(paymentFor(required)) } });
-      assert.equal(res.statusCode, 402);
-      const expected = mode === 'invalid' ? 'insufficient_funds' : 'invalid_exact_hedera_payload_signature_invalid';
-      assert.equal((res.json() as PaymentRequired).error, expected);
-      assert.equal(decodePaymentRequiredHeader(res.headers['payment-required'] as string).error, expected);
-      assert.equal(fac.calls.verify.length, 1);
-      assert.equal(fac.calls.settle.length, 0);
-      assert.equal(handlerRuns, 0);
-    });
-  }
-
-  it('settle fail → 402 and no tx id', async () => {
-    fac.settleMode = 'fail';
-    const app = paidApp(cfg({ X402_FACILITATOR_URL: fac.url }));
-    const required = (await app.inject({ method: 'GET', url: '/signal' })).json() as PaymentRequired;
-    const res = await app.inject({ method: 'GET', url: '/signal', headers: { 'payment-signature': encodePaymentSignatureHeader(paymentFor(required)) } });
-    assert.equal(res.statusCode, 402);
-    assert.equal(res.headers['x-payment-tx-id'], undefined);
-    assert.equal((res.json() as PaymentRequired).error, 'transaction_failed');
-  });
-
-  it('garbage or mismatched payment header → 402 without calling the facilitator', async () => {
-    const app = paidApp(cfg({ X402_FACILITATOR_URL: fac.url }));
-    const required = (await app.inject({ method: 'GET', url: '/signal' })).json() as PaymentRequired;
-    const bad = await app.inject({ method: 'GET', url: '/signal', headers: { 'payment-signature': 'not-base64-json' } });
-    assert.equal(bad.statusCode, 402);
-    assert.equal((bad.json() as PaymentRequired).error, 'invalid_payment_header');
-
-    const cheap = paymentFor(required);
-    cheap.accepted = { ...cheap.accepted, amount: '1' };
-    const res = await app.inject({ method: 'GET', url: '/signal', headers: { 'payment-signature': encodePaymentSignatureHeader(cheap) } });
-    assert.equal(res.statusCode, 402);
-    assert.equal((res.json() as PaymentRequired).error, 'no_matching_payment_requirements');
-    assert.equal(fac.calls.verify.length, 0);
-  });
-
-  it('503 when no payTo account or the facilitator is unreachable', async () => {
-    const noPayTo = Fastify();
-    registerPaidRoutes(noPayTo, { config: loadConfig({ X402_FACILITATOR_URL: fac.url }) });
-    assert.equal((await noPayTo.inject({ method: 'GET', url: '/signal' })).statusCode, 503);
-
-    const down = paidApp(cfg({ X402_FACILITATOR_URL: 'http://127.0.0.1:9' }));
-    const res = await down.inject({ method: 'GET', url: '/signal' });
-    assert.equal(res.statusCode, 503);
-    assert.equal(res.json().error, 'facilitator_unavailable');
+  it('corroboration ignores the source itself and unrelated stories; severity follows the rule', () => {
+    const { sources } = corroborate({ headline: HEADLINE, domain: 'reuters.com' }, NEWS);
+    assert.ok(!sources.includes('reuters.com'));
+    assert.ok(!sources.includes('coindesk.com'));
+    assert.equal(severityOf(0, 5, 'exemplary'), 'none');
+    assert.equal(severityOf(1, 0, 'neutral'), 'low');
+    assert.equal(severityOf(1, 2, 'neutral'), 'medium');
+    assert.equal(severityOf(2, 2, 'reputable'), 'high');
   });
 });
 
-describe('x402 client: autonomous payment with @x402/fetch + Hedera exact scheme', () => {
+describe('x402 client: the agent pays the Signal Desk', () => {
   let fac: FakeFacilitator;
-  let server: FastifyInstance;
-  let signalUrl: string;
+  let desk: FastifyInstance;
+  let url: string;
   let dir: string;
-  const key = PrivateKey.generateECDSA();
-  const signer = createClientHederaSigner(PAYER, key, { network: 'hedera:testnet' });
+  const signer = createClientHederaSigner(PAYER, PrivateKey.generateECDSA(), { network: 'hedera:testnet' });
+  const verified: ExpectedTransfer[] = [];
 
   before(async () => {
     fac = await startFacilitator();
-    server = paidApp(cfg({ X402_FACILITATOR_URL: fac.url }));
-    const address = await server.listen({ port: 0, host: '127.0.0.1' });
-    signalUrl = `${address}/signal`;
+    desk = buildSignalDeskApp({ config: cfg({ X402_FACILITATOR_URL: fac.url }), intel: intel() });
+    url = `${await desk.listen({ port: 0, host: '127.0.0.1' })}/intel?headline=${encodeURIComponent(HEADLINE)}`;
     dir = mkdtempSync(join(tmpdir(), 'ghosty-x402-'));
   });
   after(async () => {
-    await server.close();
+    await desk.close();
     await fac.close();
     rmSync(dir, { recursive: true, force: true });
   });
@@ -253,209 +163,328 @@ describe('x402 client: autonomous payment with @x402/fetch + Hedera exact scheme
     fac.verifyMode = 'ok';
     fac.settleMode = 'ok';
     fac.calls = { supported: 0, verify: [], settle: [] };
+    verified.length = 0;
   });
 
-  const payer = (over: Record<string, string> = {}, maxPerDay = 100_000_000) =>
-    new X402Payer({
-      config: cfg(over),
+  const payer = (over: Record<string, string> = {}, extra: { fetch?: typeof fetch } = {}) => {
+    const config = cfg(over);
+    return new X402Payer({
+      config,
       signer,
-      spendCap: new SpendCap({ maxPerDayTinybar: maxPerDay, file: join(dir, `spend-${Math.random()}.json`) }),
+      fetch: extra.fetch,
+      spendCap: new SpendCap({
+        maxPerDay: { '0.0.0': BigInt(config.X402_MAX_SPEND_TINYBAR), [USDC]: BigInt(config.X402_MAX_SPEND_USDC_MICROS) },
+        file: join(dir, `spend-${Math.random()}.json`),
+      }),
+      verify: async (expected) => {
+        verified.push(expected);
+        return { verified: true, consensusTimestamp: '1762400001.0', checkedAt: 'now' };
+      },
     });
+  };
 
-  it('pays the 402, gets the signal and the settled tx id', async () => {
+  it('prefers USDC: signs an HTS token transfer agent → desk, gets the bundle and a verified receipt', async () => {
     const p = payer();
-    const paid = await p.payForSignal(signalUrl);
-    assert.equal(paid.status, 200);
+    const paid = await p.pay(url);
     assert.equal(paid.txId, SETTLED_TX);
     assert.equal(paid.hashscanUrl, hashscanTxUrl(SETTLED_TX));
-    assert.equal((paid.body as SignalPayload).requestId, 'og-req-1');
-    assert.equal(paid.amountTinybar, 1_000_000);
-    assert.equal(paid.payTo, MERCHANT);
-    assert.equal(p.spendCap.spentToday(), 1_000_000);
+    assert.equal(paid.asset, USDC);
+    assert.equal(paid.amount, '10000');
+    assert.equal((paid.body as IntelBundle).shock.category, 'geopolitical_shock');
+    assert.equal(p.spendCap.spentToday(USDC), 10_000n);
+    assert.equal(p.spendCap.spentToday('0.0.0'), 0n);
+    assert.deepEqual(await paid.verification, { verified: true, consensusTimestamp: '1762400001.0', checkedAt: 'now' });
+    assert.deepEqual(verified[0], { txId: SETTLED_TX, payer: PAYER, payTo: MERCHANT, asset: USDC, amount: '10000' });
 
-    // The facilitator received a real, payer-signed Hedera TransferTransaction: -amount payer, +amount merchant, fee payer in the tx id.
-    const verifyReq = fac.calls.verify[0] as { paymentPayload: { x402Version: number; payload: { transaction: string } } };
-    assert.equal(verifyReq.paymentPayload.x402Version, 2);
+    const verifyReq = fac.calls.verify[0] as { paymentPayload: { payload: { transaction: string } } };
     const tx = Transaction.fromBytes(Buffer.from(verifyReq.paymentPayload.payload.transaction, 'base64'));
     assert.ok(tx instanceof TransferTransaction);
-    const transfers = new Map([...tx.hbarTransfers].map(([acct, hbar]) => [acct.toString(), hbar.toTinybars().toString()]));
-    assert.equal(transfers.get(PAYER), '-1000000');
-    assert.equal(transfers.get(MERCHANT), '1000000');
-    assert.equal(tx.transactionId?.accountId?.toString(), FEE_PAYER);
+    const moves = new Map([...(tx.tokenTransfers.get(USDC) ?? new Map())].map(([acct, n]) => [acct.toString(), n.toString()]));
+    assert.equal(moves.get(PAYER), '-10000');
+    assert.equal(moves.get(MERCHANT), '10000');
   });
 
-  it('refuses once the daily spend cap would be exceeded, without signing', async () => {
-    const p = payer({}, 1_500_000);
-    await p.payForSignal(signalUrl);
-    await assert.rejects(p.payForSignal(signalUrl), (err: unknown) => err instanceof PaymentPolicyError && /spend cap/.test(err.message));
+  it('pays HBAR when X402_PREFERRED_ASSET=hbar', async () => {
+    const p = payer({ X402_PREFERRED_ASSET: 'hbar' });
+    const paid = await p.pay(url);
+    assert.equal(paid.asset, '0.0.0');
+    assert.equal(paid.amount, '1000000');
+    assert.equal(p.spendCap.spentToday('0.0.0'), 1_000_000n);
+  });
+
+  it('per-asset daily cap: refuses before signing once the USDC budget is used up', async () => {
+    const p = payer({ X402_MAX_SPEND_USDC_MICROS: '15000' });
+    await p.pay(url);
+    await assert.rejects(p.pay(url), (err: unknown) => err instanceof PaymentPolicyError && /spend cap/.test(err.message));
     assert.equal(fac.calls.verify.length, 1);
-    assert.equal(p.spendCap.spentToday(), 1_000_000);
+    assert.equal(p.spendCap.spentToday(USDC), 10_000n);
   });
 
-  it('refuses a price above the per-call cap (@x402/core spendControls)', async () => {
-    const p = payer({ X402_MAX_PER_CALL_TINYBAR: '999999' });
-    await assert.rejects(p.payForSignal(signalUrl), /maxAmountPerPayment/);
+  it('per-call cap: an over-priced asset is skipped (falls back to HBAR); with both over, nothing is signed', async () => {
+    const paid = await payer({ X402_MAX_PER_CALL_USDC_MICROS: '9999' }).pay(url);
+    assert.equal(paid.asset, '0.0.0', 'USDC over its per-call cap, HBAR within');
+    fac.calls.verify = [];
+    await assert.rejects(
+      payer({ X402_MAX_PER_CALL_USDC_MICROS: '9999', X402_MAX_PER_CALL_TINYBAR: '999999' }).pay(url),
+      /per-call cap|maxAmountPerPayment|No payment requirements/i,
+    );
     assert.equal(fac.calls.verify.length, 0);
   });
 
   it('refuses hosts that are not allowlisted, before any request', async () => {
-    const p = payer({ X402_ALLOWED_HOSTS: 'signals.ghosty.example' });
-    await assert.rejects(p.payForSignal(signalUrl), HostNotAllowedError);
+    await assert.rejects(payer({ X402_ALLOWED_HOSTS: 'desk.example' }).pay(url), HostNotAllowedError);
     assert.equal(fac.calls.supported + fac.calls.verify.length, 0);
   });
 
   it('refuses to pay its own account', async () => {
-    const self = Fastify();
-    registerPaidRoutes(self, { config: loadConfig({ X402_FACILITATOR_URL: fac.url, X402_PAY_TO: PAYER }) });
+    const self = buildSignalDeskApp({ config: cfg({ X402_FACILITATOR_URL: fac.url, X402_PAY_TO: PAYER }), intel: intel() });
     const address = await self.listen({ port: 0, host: '127.0.0.1' });
     try {
-      await assert.rejects(payer().payForSignal(`${address}/signal`), (err: unknown) => err instanceof PaymentPolicyError && /X402_PAY_TO/.test(err.message));
+      await assert.rejects(payer().pay(`${address}/intel?headline=x`), (err: unknown) => err instanceof PaymentPolicyError && /X402_PAY_TO/.test(err.message));
     } finally {
       await self.close();
     }
   });
 
-  it('surfaces a failed verification as X402PaymentError with the reason', async () => {
+  it('surfaces a failed verification or settlement as X402PaymentError, and never returns a receipt', async () => {
     fac.verifyMode = 'invalid';
-    await assert.rejects(payer().payForSignal(signalUrl), (err: unknown) => err instanceof X402PaymentError && err.status === 402 && err.reason === 'insufficient_funds');
+    await assert.rejects(payer().pay(url), (err: unknown) => err instanceof X402PaymentError && err.reason === 'insufficient_funds');
+    fac.verifyMode = 'ok';
+    fac.settleMode = 'fail';
+    await assert.rejects(payer().pay(url), (err: unknown) => err instanceof X402PaymentError && err.reason === 'transaction_failed');
+    assert.equal(verified.length, 0, 'nothing to verify without a settlement');
+  });
+
+  it('bounded queue: with 2 payments in flight a third is refused, not queued', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const slowFetch: typeof fetch = async (input, init) => {
+      await gate;
+      return fetch(input, init);
+    };
+    const p = payer({}, { fetch: slowFetch });
+    const first = p.pay(url);
+    const second = p.pay(url);
+    await assert.rejects(p.pay(url), PaymentQueueFullError);
+    release();
+    await Promise.all([first, second]);
+    assert.equal(fac.calls.settle.length, 2);
   });
 });
 
-describe('SpendCap', () => {
-  let dir: string;
-  before(() => {
-    dir = mkdtempSync(join(tmpdir(), 'ghosty-spend-'));
-  });
-  after(() => rmSync(dir, { recursive: true, force: true }));
-
-  it('adds up spend and refuses past the cap (boundary inclusive)', () => {
-    const cap = new SpendCap({ maxPerDayTinybar: 3_000_000, file: null });
-    cap.record(1_000_000);
-    cap.record(2_000_000);
-    assert.equal(cap.spentToday(), 3_000_000);
-    assert.equal(cap.remainingToday(), 0);
-    assert.equal(cap.canSpend(1), false);
-    assert.throws(() => cap.record(1), SpendCapExceededError);
-    assert.equal(cap.spentToday(), 3_000_000, 'a refused record changes nothing');
+describe('SpendCap (per asset, bigint)', () => {
+  it('tracks each asset separately and refuses past its cap', () => {
+    const cap = new SpendCap({ maxPerDay: { '0.0.0': 3_000_000n, [USDC]: 20_000n }, file: null });
+    cap.record(USDC, 10_000n);
+    cap.record('0.0.0', 3_000_000n);
+    assert.equal(cap.remainingToday(USDC), 10_000n);
+    assert.equal(cap.remainingToday('0.0.0'), 0n);
+    assert.throws(() => cap.record('0.0.0', 1n), SpendCapExceededError);
+    assert.equal(cap.canSpend('0.0.999', 1n), false, 'unlisted assets have no budget');
+    assert.equal(cap.canSpend(USDC, 0n), false);
+    assert.throws(() => new SpendCap({ maxPerDay: { [USDC]: 0n }, file: null }), RangeError);
   });
 
-  it('rejects zero, negative and fractional amounts and bad caps', () => {
-    const cap = new SpendCap({ maxPerDayTinybar: 10, file: null });
-    assert.equal(cap.canSpend(0), false);
-    assert.equal(cap.canSpend(-5), false);
-    assert.equal(cap.canSpend(1.5), false);
-    assert.throws(() => new SpendCap({ maxPerDayTinybar: 0, file: null }), RangeError);
-  });
-
-  it('persists across instances and resets on a new UTC day', () => {
+  it('persists across restarts and rolls over at UTC midnight', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ghosty-spend-'));
     const file = join(dir, 'spend.json');
-    let now = new Date('2026-11-06T23:59:00Z');
-    const a = new SpendCap({ maxPerDayTinybar: 5_000_000, file, now: () => now });
-    a.record(4_000_000, '0.0.5005');
-    const saved = JSON.parse(readFileSync(file, 'utf8'));
-    assert.equal(saved.day, '2026-11-06');
-    assert.equal(saved.spentTinybar, 4_000_000);
-    assert.equal(saved.payments[0].ref, '0.0.5005');
+    let now = new Date('2026-11-07T23:00:00Z');
+    new SpendCap({ maxPerDay: { [USDC]: 50_000n }, file, now: () => now }).record(USDC, 40_000n);
+    const b = new SpendCap({ maxPerDay: { [USDC]: 50_000n }, file, now: () => now });
+    assert.equal(b.spentToday(USDC), 40_000n);
+    now = new Date('2026-11-08T00:00:01Z');
+    assert.equal(b.spentToday(USDC), 0n);
+    rmSync(dir, { recursive: true, force: true });
+  });
 
-    const b = new SpendCap({ maxPerDayTinybar: 5_000_000, file, now: () => now });
-    assert.equal(b.spentToday(), 4_000_000);
-    assert.equal(b.canSpend(2_000_000), false);
-
-    now = new Date('2026-11-07T00:00:01Z');
-    assert.equal(b.spentToday(), 0);
-    assert.equal(b.canSpend(5_000_000), true);
-    assert.equal(JSON.parse(readFileSync(file, 'utf8')).day, '2026-11-07');
+  it('host allowlist', () => {
+    const allowed = ['localhost', '127.0.0.1:3101', '*.ghosty.dev'];
+    assert.equal(isHostAllowed('http://localhost:3101/intel', allowed), true);
+    assert.equal(isHostAllowed('http://127.0.0.1:3101/intel', allowed), true);
+    assert.equal(isHostAllowed('http://127.0.0.1:4000/intel', allowed), false);
+    assert.equal(isHostAllowed('https://desk.ghosty.dev/intel', allowed), true);
+    assert.equal(isHostAllowed('https://ghosty.dev.evil.com/intel', allowed), false);
+    assert.equal(isHostAllowed('ftp://localhost/intel', allowed), false);
   });
 });
 
-describe('host allowlist', () => {
-  const allowed = ['localhost', '127.0.0.1:3000', '*.ghosty.dev'];
-  const cases: Array<[string, boolean]> = [
-    ['http://localhost:3000/signal', true],
-    ['http://LOCALHOST/signal', true],
-    ['http://127.0.0.1:3000/signal', true],
-    ['http://127.0.0.1:4000/signal', false],
-    ['https://api.ghosty.dev/signal', true],
-    ['https://ghosty.dev.evil.com/signal', false],
-    ['https://evil.com/signal', false],
-    ['ftp://localhost/signal', false],
-    ['not a url', false],
-  ];
-  for (const [url, ok] of cases) {
-    it(`${ok ? 'allows' : 'refuses'} ${url}`, () => assert.equal(isHostAllowed(url, allowed), ok));
-  }
-  it('parses X402_ALLOWED_HOSTS from config', () => {
-    assert.deepEqual(loadConfig({}).X402_ALLOWED_HOSTS, ['localhost', '127.0.0.1']);
-    assert.deepEqual(loadConfig({ X402_ALLOWED_HOSTS: ' A.com, b.com:8080 ,' }).X402_ALLOWED_HOSTS, ['a.com', 'b.com:8080']);
+describe('mirror-node verification', () => {
+  const expected: ExpectedTransfer = { txId: SETTLED_TX, payer: PAYER, payTo: MERCHANT, asset: USDC, amount: '10000' };
+  const usdcTx = (amount: number, result = 'SUCCESS') => ({
+    result,
+    consensus_timestamp: '1762400001.000000001',
+    transfers: [{ account: FEE_PAYER, amount: -100_000 }],
+    token_transfers: [
+      { token_id: USDC, account: PAYER, amount: -amount },
+      { token_id: USDC, account: MERCHANT, amount },
+    ],
+  });
+  const mirror = (responses: Array<{ status: number; body?: unknown }>) => {
+    const urls: string[] = [];
+    const f: typeof fetch = async (input) => {
+      urls.push(String(input));
+      const r = responses[Math.min(urls.length - 1, responses.length - 1)] ?? { status: 404 };
+      return new Response(r.body === undefined ? '{}' : JSON.stringify(r.body), { status: r.status });
+    };
+    return { f, urls };
+  };
+  const fastClock = () => {
+    let t = 0;
+    return { now: () => t, sleep: async (ms: number) => void (t += ms) };
+  };
+
+  it('success: polls the dashed tx id until the transfer shows up with the right asset and amount', async () => {
+    const { f, urls } = mirror([{ status: 404 }, { status: 200, body: { transactions: [usdcTx(10_000)] } }]);
+    const v = await verifyPaymentOnMirror(expected, { mirrorUrl: 'https://mirror.test', fetch: f, ...fastClock() });
+    assert.equal(v.verified, true);
+    assert.equal(urls.length, 2);
+    assert.equal(urls[0], `https://mirror.test/api/v1/transactions/${toMirrorTxId(SETTLED_TX)}`);
+    assert.equal(toMirrorTxId(SETTLED_TX), '0.0.9185802-1762400000-123456789');
+  });
+
+  it('wrong amount or failed result: not verified, with the reason, no more polling', async () => {
+    const { f, urls } = mirror([{ status: 200, body: { transactions: [usdcTx(9_999)] } }]);
+    const v = await verifyPaymentOnMirror(expected, { mirrorUrl: 'https://mirror.test', fetch: f, ...fastClock() });
+    assert.equal(v.verified, false);
+    assert.match(v.verified ? '' : v.reason, /received 9999, expected 10000/);
+    assert.equal(urls.length, 1);
+    assert.match(checkTransfer(usdcTx(10_000, 'INSUFFICIENT_PAYER_BALANCE'), expected) ?? '', /INSUFFICIENT/);
+    assert.match(checkTransfer(usdcTx(10_000), { ...expected, asset: '0.0.0' }) ?? '', /received 0/, 'HBAR expected, token moved');
+  });
+
+  it('timeout: never on the mirror node within the window → not verified', async () => {
+    const { f, urls } = mirror([{ status: 404 }]);
+    const v = await verifyPaymentOnMirror(expected, { mirrorUrl: 'https://mirror.test', fetch: f, timeoutMs: 5000, intervalMs: 1000, ...fastClock() });
+    assert.equal(v.verified, false);
+    assert.match(v.verified ? '' : v.reason, /^timeout/);
+    assert.equal(urls.length, 6);
+  });
+
+  it('formats amounts without floats', () => {
+    assert.equal(formatAmount(USDC, '10000', USDC), '0.01 USDC');
+    assert.equal(formatAmount('0.0.0', '1000000', USDC), '0.01 HBAR');
+    assert.equal(formatAmount('0.0.0', 250_000_000n, USDC), '2.5 HBAR');
   });
 });
 
 describe('HCS audit log', () => {
-  let dir: string;
-  before(() => {
-    dir = mkdtempSync(join(tmpdir(), 'ghosty-hcs-'));
-  });
-  after(() => rmSync(dir, { recursive: true, force: true }));
-
   function fakeTransport() {
-    const state = { created: 0, messages: [] as Array<{ topicId: string; message: string }> };
+    const messages: Array<{ topicId: string; message: string }> = [];
     const transport: HcsTransport = {
-      async createTopic() {
-        state.created++;
-        return '0.0.4242';
-      },
-      async submit(topicId: string, message: string) {
-        state.messages.push({ topicId, message });
-        return { sequenceNumber: String(state.messages.length), txId: `0.0.1001@1762400000.${state.messages.length}` };
+      async submit(topicId, message) {
+        messages.push({ topicId, message });
+        return { sequenceNumber: String(messages.length), txId: `${PAYER}@1762400000.${messages.length}` };
       },
     };
-    return Object.assign(state, { transport });
+    return { messages, transport };
   }
 
-  it('creates the topic once, caches it, and writes {ts, kind, txId, requestId, summary}', async () => {
-    const stateFile = join(dir, 'hcs.json');
+  it('writes structured v1 JSON to the pinned topic (no topic creation in the hot path)', async () => {
     const t = fakeTransport();
-    const now = () => new Date('2026-11-07T10:00:00Z');
-    const log = new HcsAuditLog({ transport: t.transport, stateFile, now });
-    assert.equal(log.topicUrl(), undefined);
-    const [r1, r2] = await Promise.all([
-      log.record({ kind: 'payment', txId: SETTLED_TX, requestId: 'og-req-1', summary: 'paid 1000000 tinybar' }),
-      log.record({ kind: 'decision', requestId: 'og-req-1', summary: 'long xyz:GOLD' }),
-    ]);
-    assert.equal(t.created, 1);
-    assert.equal(r1.topicId, '0.0.4242');
-    assert.equal(r2.sequenceNumber, '2');
-    assert.equal(log.topicUrl(), 'https://hashscan.io/testnet/topic/0.0.4242');
+    const log = new HcsAuditLog({ transport: t.transport, topicId: '0.0.4242', now: () => new Date('2026-11-07T10:00:00Z') });
+    const r = await log.record({ kind: 'payment', txId: SETTLED_TX, asset: USDC, amount: '10000', payTo: MERCHANT, verified: true });
+    assert.deepEqual(r, { topicId: '0.0.4242', sequenceNumber: '1', txId: `${PAYER}@1762400000.1` });
     assert.deepEqual(JSON.parse(t.messages[0]?.message ?? ''), {
-      ts: '2026-11-07T10:00:00.000Z',
+      v: 1,
       kind: 'payment',
+      ts: '2026-11-07T10:00:00.000Z',
       txId: SETTLED_TX,
-      requestId: 'og-req-1',
-      summary: 'paid 1000000 tinybar',
+      asset: USDC,
+      amount: '10000',
+      payTo: MERCHANT,
+      verified: true,
     });
-
-    const again = new HcsAuditLog({ transport: fakeTransport().transport, stateFile });
-    assert.equal(again.topicUrl(), 'https://hashscan.io/testnet/topic/0.0.4242', 'topic id reloaded from hcs.json');
+    assert.equal(log.topicUrl(), 'https://hashscan.io/testnet/topic/0.0.4242');
   });
 
-  it('caps the summary length', () => {
-    assert.equal(auditMessage({ kind: 'decision', summary: 'x'.repeat(2000) }).summary.length, 512);
+  it('stops at the daily message cap', async () => {
+    const t = fakeTransport();
+    const log = new HcsAuditLog({ transport: t.transport, topicId: '0.0.4242', maxMessagesPerDay: 2 });
+    await log.record({ kind: 'decision', requestId: 'a' });
+    await log.record({ kind: 'decision', requestId: 'b' });
+    assert.equal(await log.record({ kind: 'decision', requestId: 'c' }), undefined);
+    assert.equal(t.messages.length, 2);
   });
 
-  it('is a no-op without Hedera keys', async () => {
-    const log = HcsAuditLog.fromConfig(loadConfig({}));
+  it('every message stays a single HCS chunk; long fields are trimmed', () => {
+    const text = encodeAuditMessage({ kind: 'trade', requestId: 'x'.repeat(5000), signal: 'y'.repeat(5000) });
+    assert.ok(Buffer.byteLength(text) <= 1024);
+  });
+
+  it('the reader decodes base64 mirror messages, and keeps foreign ones as raw', async () => {
+    const msg = encodeAuditMessage({ kind: 'decision', requestId: '0g-1', signal: 'geopolitical_shock', txId: SETTLED_TX });
+    const f: typeof fetch = async (input) => {
+      assert.equal(String(input), 'https://mirror.test/api/v1/topics/0.0.4242/messages?limit=2&order=desc');
+      return Response.json({
+        messages: [
+          { sequence_number: 2, consensus_timestamp: '1762400002.0', message: Buffer.from(msg).toString('base64') },
+          { sequence_number: 1, consensus_timestamp: '1762400001.0', message: Buffer.from('hello').toString('base64') },
+        ],
+      });
+    };
+    const rows = await readAuditLog('0.0.4242', 2, { mirrorUrl: 'https://mirror.test', fetch: f });
+    assert.equal(rows[0]?.sequenceNumber, 2);
+    assert.deepEqual(rows[0]?.message, decodeAuditMessage(msg));
+    assert.equal((rows[0]?.message as { kind: string }).kind, 'decision');
+    assert.deepEqual(rows[1]?.message, { raw: 'hello' });
+  });
+
+  it('is a no-op without the topic and its submit key', async () => {
+    const log = HcsAuditLog.fromConfig(loadConfig({ HEDERA_ACCOUNT_ID: PAYER, HEDERA_PRIVATE_KEY: PrivateKey.generateECDSA().toStringDer() }));
     assert.equal(log.enabled, false);
-    assert.equal(await log.record({ kind: 'payment', summary: 'x' }), undefined);
+    assert.equal(await log.record({ kind: 'payment' }), undefined);
+  });
+});
+
+describe('hedera:setup (idempotent custody split)', () => {
+  function fakeOps(initial: { agent?: boolean; associated?: boolean; tinybar?: bigint; usdc?: bigint; merchant?: boolean; key?: boolean; topic?: boolean }) {
+    const calls: string[] = [];
+    const s = { ...initial };
+    const ops: SetupOps = {
+      agent: async () => (s.agent ? { id: '0.0.7', tinybar: s.tinybar ?? 0n, usdcMicros: s.associated ? (s.usdc ?? 0n) : undefined } : undefined),
+      createAgent: async (t) => (calls.push(`createAgent ${t}`), (s.agent = true), (s.tinybar = t), '0.0.7'),
+      associateUsdc: async (who) => (calls.push(`associate ${who}`), who === 'agent' ? (s.associated = true) : (s.merchant = true), 'tx'),
+      merchantUsdcAssociated: async () => Boolean(s.merchant),
+      transferHbar: async (_to, n) => (calls.push(`hbar ${n}`), (s.tinybar = (s.tinybar ?? 0n) + n), 'tx'),
+      transferUsdc: async (_to, n) => (calls.push(`usdc ${n}`), (s.usdc = (s.usdc ?? 0n) + n), 'tx'),
+      hasHcsSubmitKey: () => Boolean(s.key),
+      createHcsSubmitKey: () => void (calls.push('key'), (s.key = true)),
+      topicId: () => (s.topic ? '0.0.9' : undefined),
+      createTopic: async () => (calls.push('topic'), (s.topic = true), '0.0.9'),
+    };
+    return { ops, calls };
+  }
+
+  it('first run creates and funds everything; a second run changes nothing', async () => {
+    const { ops, calls } = fakeOps({});
+    const first = await runSetup(ops);
+    assert.deepEqual(calls, ['createAgent 2000000000', 'associate agent', 'usdc 5000000', 'associate merchant', 'key', 'topic']);
+    assert.equal(first.filter((s) => s.changed).length, 6);
+    calls.length = 0;
+    const second = await runSetup(ops);
+    assert.deepEqual(calls, []);
+    assert.equal(second.filter((s) => s.changed).length, 0);
+  });
+
+  it('only tops up what is low', async () => {
+    const { ops, calls } = fakeOps({ agent: true, associated: true, tinybar: 500_000_000n, usdc: 4_000_000n, merchant: true, key: true, topic: true });
+    await runSetup(ops);
+    assert.deepEqual(calls, ['hbar 1500000000']);
   });
 });
 
 describe('payments factory', () => {
-  it('falls back to the fake payer without Hedera keys', async () => {
+  it('test mode without Hedera keys: the fake payer answers with a bundle, never verified', async () => {
     const p = createPayments(loadConfig({}));
     assert.equal(p.mode, 'fake');
     assert.equal(p.audit.enabled, false);
-    const paid = await p.payer.payForSignal('http://localhost:3000/signal');
+    const paid = await p.payer.pay(`http://127.0.0.1:3101/intel?headline=${encodeURIComponent(HEADLINE)}`);
     assert.match(paid.txId, /^0\.0\.0@\d+\.000000000$/);
-    assert.match(paid.hashscanUrl, /^https:\/\/hashscan\.io\/testnet\/transaction\//);
+    assert.equal((paid.body as IntelBundle).shock.category, 'geopolitical_shock');
+    assert.equal((await paid.verification).verified, false);
+  });
+
+  it('live mode without keys is not_configured', () => {
+    assert.equal(createPayments(loadConfig({ GHOSTY_MODE: 'live' })).mode, 'not_configured');
   });
 });

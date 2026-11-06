@@ -138,6 +138,9 @@ export function registerIntegrationRoutes(app: FastifyInstance, ctx: Integration
   // The agent buys intel for a headline with no human approval (real mode: x402 on hedera:testnet).
   // Body {headline?}: defaults to the newest headline the pod has seen.
   app.post('/sim/pay-signal', { preHandler: ctx.requireDevice }, async (req, reply) => {
+    // Live mode without Hedera keys: 503 not_configured (via the app error handler), before anything else.
+    const missing = notConfiguredInfo(payments.payer);
+    if (missing) throw new ProviderNotConfiguredError(missing);
     const asked = (req.body as { headline?: unknown } | undefined)?.headline;
     const newest = state.snapshot().news[0];
     const headline = typeof asked === 'string' && asked.trim() ? { title: asked.trim() } : newest;
