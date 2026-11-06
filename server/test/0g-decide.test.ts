@@ -109,14 +109,11 @@ describe('ZeroGDecider', () => {
       attempts: 1,
     });
     assert.deepEqual(d.newsIds, ['rss:reuters:1']);
-    // balanced → budget 20 × 0.5 = 10 USD; DOGE (not on watchlist) and uniswap are dropped.
+    // balanced → budget 20 × 0.5 = 10 USD; DOGE (not on watchlist) and uniswap are dropped. A 4/3/3 split would be
+    // three sub-$10 orders Hyperliquid rejects, so the legs are fitted like the playbook: one $10 gold leg.
     assert.deepEqual(
       d.suggestedActions.map((a) => [a.coin, a.side, a.sizeUsd]),
-      [
-        ['xyz:GOLD', 'long', 4],
-        ['xyz:WTI', 'long', 3],
-        ['BTC', 'short', 3],
-      ],
+      [['xyz:GOLD', 'long', 10]],
     );
     assert.equal(zeroGState.lastRequestId, 'req_trace_1');
   });

@@ -74,9 +74,56 @@ function toAction(leg: Leg, sizeUsd: number): PlannedAction {
   return { venue: 'hyperliquid', kind: 'perp', coin: leg.coin, side: leg.side, sizeUsd, reason: leg.reason };
 }
 
-function split(legs: Leg[], budget: number): number[] {
+function split(legs: Array<{ weight: number }>, budget: number): number[] {
   const total = legs.reduce((s, l) => s + l.weight, 0);
-  return legs.map((l) => cents((budget * l.weight) / total));
+  return total > 0 ? legs.map((l) => cents((budget * l.weight) / total)) : legs.map(() => 0);
+}
+
+export interface FittedLeg<T> {
+  leg: T;
+  sizeUsd: number;
+}
+
+/**
+ * Size weighted legs so every one clears the venue minimum and the total stays within `budget`
+ * (itself ≤ MAX_TRADE_USD). Shared by the playbook and the 0G decider's proposed legs.
+ *
+ * scaleToMin (default): drop the smallest-weight leg (ties: the later one, list order = priority) and re-split
+ * the budget until every leg is ≥ the minimum. If one leg is left and still short, raise it to the minimum when
+ * that stays within maxTradeUsd, otherwise return nothing. scaleToMin=false: drop sub-minimum legs, no re-split.
+ * Legs with weight ≤ 0 never trade.
+ */
+export function fitLegsToMinimum<T extends { weight: number }>(
+  legs: T[],
+  budget: number,
+  opts: { maxTradeUsd: number; minNotionalUsd?: number; scaleToMin?: boolean },
+): Array<FittedLeg<T>> {
+  const maxTradeUsd = Math.max(0, opts.maxTradeUsd);
+  const cap = Math.min(Math.max(0, budget), maxTradeUsd);
+  const min = Math.max(0, opts.minNotionalUsd ?? DEFAULT_MIN_NOTIONAL_USD);
+  const usable = legs.filter((l) => l.weight > 0);
+  if (cap === 0 || usable.length === 0) return [];
+
+  if (opts.scaleToMin === false) {
+    const sizes = split(usable, cap);
+    return usable.map((leg, i) => ({ leg, sizeUsd: sizes[i] ?? 0 })).filter((f) => f.sizeUsd >= min && f.sizeUsd > 0);
+  }
+
+  let active = [...usable];
+  while (active.length > 0) {
+    const sizes = split(active, cap);
+    if (sizes.every((s) => s >= min)) return active.map((leg, i) => ({ leg, sizeUsd: sizes[i] ?? 0 }));
+    if (active.length === 1) {
+      const only = active[0] as T;
+      return min <= maxTradeUsd ? [{ leg: only, sizeUsd: min }] : [];
+    }
+    let drop = 0;
+    active.forEach((l, i) => {
+      if (l.weight <= (active[drop] as T).weight) drop = i;
+    });
+    active = active.filter((_, i) => i !== drop);
+  }
+  return [];
 }
 
 /**
@@ -85,33 +132,8 @@ function split(legs: Leg[], budget: number): number[] {
  * never sees an order it will reject (e.g. $25 cap, balanced → one $12.50 gold leg instead of three sub-$10 legs).
  */
 export function planActions(signal: Signal, memory: Pick<UserMemory, 'riskProfile'>, opts: PlanOptions): PlannedAction[] {
-  const maxTradeUsd = Math.max(0, opts.maxTradeUsd);
-  const budget = maxTradeUsd * RISK_MULTIPLIER[memory.riskProfile];
-  const min = Math.max(0, opts.minNotionalUsd ?? DEFAULT_MIN_NOTIONAL_USD);
-  const legs = PLAYBOOK[signal];
-  if (budget === 0 || legs.length === 0) return [];
-
-  if (opts.scaleToMin === false) {
-    const sizes = split(legs, budget);
-    return legs.map((leg, i) => toAction(leg, sizes[i] ?? 0)).filter((a) => a.sizeUsd >= min && a.sizeUsd > 0);
-  }
-
-  let active = [...legs];
-  while (active.length > 0) {
-    const sizes = split(active, budget);
-    if (sizes.every((s) => s >= min)) return active.map((leg, i) => toAction(leg, sizes[i] ?? 0));
-    if (active.length === 1) {
-      const only = active[0] as Leg;
-      return min <= maxTradeUsd ? [toAction(only, min)] : [];
-    }
-    // Drop the smallest-weight leg; on ties drop the later one (playbook order = priority).
-    let drop = 0;
-    active.forEach((l, i) => {
-      if (l.weight <= (active[drop] as Leg).weight) drop = i;
-    });
-    active = active.filter((_, i) => i !== drop);
-  }
-  return [];
+  const budget = Math.max(0, opts.maxTradeUsd) * RISK_MULTIPLIER[memory.riskProfile];
+  return fitLegsToMinimum(PLAYBOOK[signal], budget, opts).map((f) => toAction(f.leg, f.sizeUsd));
 }
 
 export interface SpotLegSpec {

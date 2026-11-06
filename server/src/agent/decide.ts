@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import OpenAI from 'openai';
 import { z } from 'zod';
 import { credibilityWeight, type CredibilityLevel, type CredibilityScorer } from '../credibility/ethos.js';
-import { planActions, RISK_MULTIPLIER, type PlannedAction, type Signal } from '../execution/playbook.js';
+import { fitLegsToMinimum, planActions, RISK_MULTIPLIER, type PlannedAction, type Signal } from '../execution/playbook.js';
 import type { NewsItem } from '../news/types.js';
 import { reportBrainFailure } from '../safety/safeStop.js';
 import { errorMessage, noopLogger, type Logger } from './log.js';
@@ -214,37 +214,45 @@ function watchlistOf(memory: UserMemory): string[] {
 }
 
 /**
- * Model output → executable actions. Only Hyperliquid legs on watchlisted markets survive;
- * legs are scaled so the total never exceeds MAX_TRADE_USD × risk multiplier.
+ * Model output → executable actions. Only Hyperliquid legs on watchlisted markets survive. The legs' sizePct
+ * become weights over budget × min(total sizePct, 100)%, where budget = MAX_TRADE_USD × risk multiplier, and are
+ * then fitted to the Hyperliquid $10 minimum exactly like the playbook (fitLegsToMinimum): the smallest legs are
+ * dropped and the budget re-split, a lone short leg is raised to $10 only when that stays within MAX_TRADE_USD.
+ * The total never exceeds MAX_TRADE_USD. Legs removed for size are reported in `dropped`.
  */
 export function toPlannedActions(
   llm: LlmDecision,
   memory: UserMemory,
   maxTradeUsd: number,
+  opts: { minNotionalUsd?: number } = {},
 ): { actions: PlannedAction[]; dropped: LlmDecision['suggestedActions'] } {
   if (llm.signal === 'none') return { actions: [], dropped: llm.suggestedActions };
-  const budget = Math.max(0, maxTradeUsd) * RISK_MULTIPLIER[memory.riskProfile];
+  const cap = Math.max(0, maxTradeUsd);
+  const budget = cap * RISK_MULTIPLIER[memory.riskProfile];
   const allowed = new Map(watchlistOf(memory).map((m) => [m.toUpperCase(), m]));
 
   const dropped: LlmDecision['suggestedActions'] = [];
-  const kept: Array<LlmDecision['suggestedActions'][number] & { coin: string }> = [];
+  const kept: Array<LlmDecision['suggestedActions'][number] & { coin: string; weight: number }> = [];
   for (const a of llm.suggestedActions) {
     const coin = allowed.get(a.market.toUpperCase());
     if (a.venue.toLowerCase() !== 'hyperliquid' || !coin || a.sizePct <= 0) dropped.push(a);
-    else kept.push({ ...a, coin });
+    else kept.push({ ...a, coin, weight: a.sizePct });
   }
   const totalPct = kept.reduce((sum, a) => sum + a.sizePct, 0);
-  const scale = totalPct > 100 ? 100 / totalPct : 1;
-  const actions = kept
-    .map((a) => ({
-      venue: 'hyperliquid' as const,
-      kind: 'perp' as const,
-      coin: a.coin,
-      side: a.side,
-      sizeUsd: Math.floor(budget * (a.sizePct / 100) * scale * 100) / 100,
-      reason: llm.rationale,
-    }))
-    .filter((a) => a.sizeUsd > 0);
+  const legBudget = budget * Math.min(totalPct, 100) / 100;
+  const fitted = fitLegsToMinimum(kept, legBudget, { maxTradeUsd: cap, minNotionalUsd: opts.minNotionalUsd });
+  const survivors = new Set(fitted.map((f) => f.leg));
+  for (const leg of kept) {
+    if (!survivors.has(leg)) dropped.push({ venue: leg.venue, market: leg.market, side: leg.side, sizePct: leg.sizePct });
+  }
+  const actions = fitted.map(({ leg, sizeUsd }) => ({
+    venue: 'hyperliquid' as const,
+    kind: 'perp' as const,
+    coin: leg.coin,
+    side: leg.side,
+    sizeUsd,
+    reason: llm.rationale,
+  }));
   return { actions, dropped };
 }
 
@@ -347,7 +355,7 @@ export class ZeroGDecider implements Decider {
       const parsed = this.parse(content);
       if (parsed.ok) {
         const { actions, dropped } = toPlannedActions(parsed.value, input.memory, input.maxTradeUsd);
-        if (dropped.length > 0) this.logger.warn({ requestId, dropped }, '0G suggested legs outside venue/watchlist dropped');
+        if (dropped.length > 0) this.logger.warn({ requestId, dropped }, '0G suggested legs dropped (outside venue/watchlist or under the $10 minimum)');
         updateZeroGState({ lastRequestId: requestId, lastDecisionAt: new Date().toISOString() });
         return {
           signal: parsed.value.signal,
