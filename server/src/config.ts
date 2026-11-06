@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { defaultMode, GHOSTY_MODES } from './mode.js';
 
 /** Parse "true"/"1"/"yes"/"on" (case-insensitive) as true; anything else as false; missing → default. */
 const bool = (fallback: boolean) =>
@@ -7,12 +8,35 @@ const bool = (fallback: boolean) =>
     .optional()
     .transform((v) => (v === undefined ? fallback : /^(1|true|yes|on)$/i.test(v.trim())));
 
+/** Like bool, but missing stays undefined so loadConfig can pick a per-mode default. */
+const boolOrUnset = z
+  .string()
+  .optional()
+  .transform((v) => (v === undefined ? undefined : /^(1|true|yes|on)$/i.test(v.trim())));
+
 const optional = z.string().optional();
 
 /** Positive integer with a fallback for missing or malformed values. */
 const posInt = (fallback: number) => z.coerce.number().int().positive().default(fallback).catch(fallback);
 
+/** Comma-separated list, trimmed, empties dropped. */
+const list = (fallback: string) =>
+  z
+    .string()
+    .default(fallback)
+    .transform((v) =>
+      v
+        .split(',')
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0),
+    );
+
+export const DEFAULT_MARKET_WATCHLIST = 'BTC,ETH,SOL,xyz:GOLD,xyz:CL,xyz:TSLA,xyz:NVDA,xyz:SP500';
+
 const ConfigSchema = z.object({
+  /** live (default): real providers or 503 not_configured, never fakes. test: offline fakes (npm test). */
+  GHOSTY_MODE: z.enum(GHOSTY_MODES).optional().catch(undefined),
+
   PORT: z.coerce.number().int().min(1).max(65535).default(3000).catch(3000),
   HOST: z.string().default('0.0.0.0'),
   DEVICE_TOKEN: optional,
@@ -101,8 +125,8 @@ const ConfigSchema = z.object({
   // v1 is gone; valid paths are /api/{growth|growth_weekly|enterprise}/v2/posts/ (probed 2026-11-06).
   CRYPTOPANIC_API_URL: z.string().default('https://cryptopanic.com/api/growth/v2'),
   ETHOS_CLIENT: z.string().default('ghosty@0.1.0'),
-  // Ethos needs no key; off by default so local dev and tests stay offline and deterministic.
-  ETHOS_ENABLED: bool(false),
+  // Ethos needs no key. Default: on in live mode, off in test mode (offline, deterministic).
+  ETHOS_ENABLED: boolOrUnset,
   ETHOS_API_URL: z.string().default('https://api.ethos.network/api/v2'),
   XAI_API_KEY: optional,
   XAI_MODEL: z.string().default('grok-4.7'),
@@ -111,8 +135,11 @@ const ConfigSchema = z.object({
   /** Minimum seconds between paid x_search calls; the poller reuses the cached result in between. */
   XAI_MIN_INTERVAL_SECONDS: posInt(300),
 
-  /** true = use the keyless real providers (RSS, Polymarket). CryptoPanic/Grok switch on with their keys. */
-  NEWS_LIVE: bool(false),
+  /**
+   * true = use the keyless real providers (RSS, Polymarket). CryptoPanic/Grok switch on with their keys.
+   * Default: true in live mode, false in test mode.
+   */
+  NEWS_LIVE: boolOrUnset,
   /** Comma-separated feeds, each `name=url` or a bare url. Empty = CoinDesk, Cointelegraph, The Block, Decrypt. */
   NEWS_RSS_FEEDS: optional,
   NEWS_POLYMARKET_KEYWORDS: z.string().default('war,strike,ceasefire,invasion,sanction,missile,nuclear'),
@@ -127,18 +154,42 @@ const ConfigSchema = z.object({
   SAFE_STOP_ENABLED: bool(true),
   SIMULATE_BRAIN_OFFLINE: bool(false),
   MAX_TRADE_USD: z.coerce.number().positive().default(25).catch(25),
+
+  /** Read-only Hyperliquid prices for the terminal. Independent of HL_TESTNET (which only drives execution). */
+  MARKET_DATA_NETWORK: z.enum(['mainnet', 'testnet']).default('mainnet').catch('mainnet'),
+  /** Coins shown in the terminal. HIP-3 coins carry their dex prefix (xyz:GOLD). Missing ones are reported, not faked. */
+  MARKET_WATCHLIST: list(DEFAULT_MARKET_WATCHLIST),
+  /** Built terminal (Vite dist) served at `/` when its index.html exists. Relative paths resolve from the working directory. */
+  TERMINAL_DIST: optional,
+  /** Origins allowed by CORS in live mode (the Vite dev server). */
+  CORS_ORIGINS: list('http://localhost:5173,http://127.0.0.1:5173'),
 });
 
-export type Config = z.infer<typeof ConfigSchema>;
+type ParsedConfig = z.infer<typeof ConfigSchema>;
+
+export type Config = Omit<ParsedConfig, 'GHOSTY_MODE' | 'NEWS_LIVE' | 'ETHOS_ENABLED'> & {
+  GHOSTY_MODE: 'live' | 'test';
+  NEWS_LIVE: boolean;
+  ETHOS_ENABLED: boolean;
+};
 
 /**
  * Build config from an env-like object. Empty strings count as missing.
  * Never throws: optional keys stay undefined, malformed numbers fall back to defaults.
+ * GHOSTY_MODE missing from `env` falls back to defaultMode() (process env, then "test" under node --test, else "live").
  */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const cleaned: Record<string, string> = {};
   for (const [key, value] of Object.entries(env)) {
     if (value !== undefined && value.trim() !== '') cleaned[key] = value;
   }
-  return ConfigSchema.parse(cleaned);
+  const parsed = ConfigSchema.parse(cleaned);
+  const mode = parsed.GHOSTY_MODE ?? defaultMode();
+  const live = mode === 'live';
+  return {
+    ...parsed,
+    GHOSTY_MODE: mode,
+    NEWS_LIVE: parsed.NEWS_LIVE ?? live,
+    ETHOS_ENABLED: parsed.ETHOS_ENABLED ?? live,
+  };
 }

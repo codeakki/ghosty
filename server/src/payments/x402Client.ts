@@ -33,7 +33,7 @@ export interface PaidSignal {
 }
 
 export interface SignalPayer {
-  readonly mode: 'real' | 'fake';
+  readonly mode: 'real' | 'fake' | 'not_configured';
   payForSignal(url: string): Promise<PaidSignal>;
 }
 

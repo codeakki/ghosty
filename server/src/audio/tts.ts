@@ -1,4 +1,6 @@
 import type { Config } from '../config.js';
+import { isTestMode } from '../mode.js';
+import { NotConfiguredTts } from '../notConfigured.js';
 import { resamplePcm16 } from './resample.js';
 
 /** Output format the device plays straight into I2S. */
@@ -157,9 +159,13 @@ export class OpenAiTts implements TextToSpeech {
   }
 }
 
-/** ElevenLabs when ELEVENLABS_API_KEY is set, else OpenAI when OPENAI_API_KEY is set, else the tone fake. */
+/**
+ * ElevenLabs when ELEVENLABS_API_KEY is set, else OpenAI when OPENAI_API_KEY is set, else the tone fake
+ * (test mode) or NotConfiguredTts (live mode).
+ */
 export function createTts(
-  config: Pick<Config, 'ELEVENLABS_API_KEY' | 'ELEVENLABS_VOICE_ID' | 'ELEVENLABS_MODEL_ID' | 'OPENAI_API_KEY'>,
+  config: Pick<Config, 'ELEVENLABS_API_KEY' | 'ELEVENLABS_VOICE_ID' | 'ELEVENLABS_MODEL_ID' | 'OPENAI_API_KEY'> &
+    Partial<Pick<Config, 'GHOSTY_MODE'>>,
 ): TextToSpeech {
   if (config.ELEVENLABS_API_KEY) {
     return new ElevenLabsTts({
@@ -169,5 +175,5 @@ export function createTts(
     });
   }
   if (config.OPENAI_API_KEY) return new OpenAiTts({ apiKey: config.OPENAI_API_KEY });
-  return new ToneTts();
+  return isTestMode(config) ? new ToneTts() : new NotConfiguredTts();
 }

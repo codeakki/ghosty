@@ -87,7 +87,8 @@ export interface PodSnapshot {
   alerts: Alert[];
 }
 
-export type PodEventType = 'state' | 'news' | 'decision' | 'alert' | 'order' | 'episode';
+/** `providers` and `market` come from index.ts (provider poller, market stream), never from the pipeline. */
+export type PodEventType = 'state' | 'news' | 'decision' | 'alert' | 'order' | 'episode' | 'providers' | 'market';
 
 export interface PodEvent {
   id: number;
@@ -240,6 +241,11 @@ export class PodState implements PipelineObserver {
     return structuredClone(alert);
   }
 
+  /** Broadcast an event that is not part of the pod snapshot (provider health, market mids). */
+  publish(type: 'providers' | 'market', data: unknown): void {
+    this.emit(type, data, false);
+  }
+
   // --- Safe-stop ----------------------------------------------------------
 
   setSafeStop(safeStop: boolean): void {
@@ -253,9 +259,14 @@ export class PodState implements PipelineObserver {
   private async annotate(item: NewsItem): Promise<NewsEntry> {
     let credibility: SourceCredibility | null = null;
     if (item.handle && this.scorer) {
-      const s = await this.scorer.scoreHandle(item.handle);
-      credibility = { handle: s.handle, score: s.score, level: s.level, weight: credibilityWeight(s.level) };
-      this.credibility[s.handle] = credibility;
+      try {
+        const s = await this.scorer.scoreHandle(item.handle);
+        credibility = { handle: s.handle, score: s.score, level: s.level, weight: credibilityWeight(s.level) };
+        this.credibility[s.handle] = credibility;
+      } catch {
+        // Scorer down or not configured (live mode, ETHOS_ENABLED=false): credibility unknown, never invented.
+        credibility = null;
+      }
     }
     const { credibility: weight, ...rest } = item;
     return { ...rest, ...(weight === undefined ? {} : { weight }), credibility, signal: classifyText(item.title) };

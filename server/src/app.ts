@@ -1,4 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest, type FastifyServerOptions } from 'fastify';
@@ -12,6 +14,10 @@ import { loadConfig, type Config } from './config.js';
 import { createCredibilityScorer, type CredibilityScorer } from './credibility/ethos.js';
 import { createExecutor, type Executor } from './execution/executor.js';
 import { registerIntegrationRoutes } from './integrations.js';
+import { createMarketService, type MarketService } from './market/service.js';
+import { registerMarketRoutes } from './market/routes.js';
+import { notConfiguredInfo, ProviderNotConfiguredError } from './mode.js';
+import { ProviderRegistry } from './providers/registry.js';
 import type { NewsAggregator } from './news/aggregator.js';
 import { createNewsAggregator, createNewsProviders } from './news/factory.js';
 import { shockDetector, type ShockResult } from './news/shock.js';
@@ -26,6 +32,15 @@ import { VERSION } from './version.js';
 
 /** server/public, from both src/ (tsx) and dist/ (built). Holds the virtual pod page. */
 const PUBLIC_DIR = fileURLToPath(new URL('../public/', import.meta.url));
+
+/** <repo>/terminal/dist, from both src/ (tsx) and dist/ (built). Overridden by TERMINAL_DIST. */
+const DEFAULT_TERMINAL_DIST = fileURLToPath(new URL('../../terminal/dist/', import.meta.url));
+
+/** The built terminal's directory when its index.html exists, else undefined. */
+export function terminalDistDir(config: Pick<Config, 'TERMINAL_DIST'>): string | undefined {
+  const dir = config.TERMINAL_DIST ? resolve(process.cwd(), config.TERMINAL_DIST) : DEFAULT_TERMINAL_DIST;
+  return existsSync(join(dir, 'index.html')) ? dir : undefined;
+}
 
 /** 30 s of 16 kHz 16-bit mono is ~960 KB; leave headroom. */
 const AUDIO_BODY_LIMIT = 4 * 1024 * 1024;
@@ -45,6 +60,10 @@ export interface BuildAppOptions {
   payments?: Payments;
   /** Paywall overrides, e.g. an in-process facilitator in tests. */
   x402?: Pick<PaidRoutesOptions, 'facilitator' | 'onSettled'>;
+  /** GET /providers/status. Default: real probes over the config (tests pass one with a mocked fetch). */
+  providerRegistry?: ProviderRegistry;
+  /** GET /market/*. Default: Hyperliquid info API on MARKET_DATA_NETWORK (tests pass one with a mocked fetch). */
+  market?: MarketService;
   logger?: FastifyServerOptions['logger'];
 }
 
@@ -54,7 +73,7 @@ export interface FreshNewsOutcome {
   decision: Decision | null;
   alert: Alert | null;
   /** Why no decision was made for a shock candidate. */
-  skipped?: 'no_shock' | 'brain_offline' | 'memory_unavailable';
+  skipped?: 'no_shock' | 'brain_offline' | 'memory_unavailable' | 'not_configured';
 }
 
 /** Handles index.ts needs (poller, shutdown) without reaching into buildApp's closures. */
@@ -65,6 +84,10 @@ export interface GhostyRuntime {
   agent: Agent;
   payments: Payments;
   executor: Executor;
+  /** Provider health (GET /providers/status). index.ts polls it and emits SSE `providers`. */
+  providers: ProviderRegistry;
+  /** Live market data (GET /market/*). index.ts starts it and emits SSE `market`. */
+  market: MarketService;
   /** Present only with NEWS_LIVE=true; index.ts polls it with NewsPoller. */
   aggregator?: NewsAggregator;
   /** NewsPoller listener: shockDetector → decision on the strongest headline → alert queue. */
@@ -86,8 +109,8 @@ export interface Providers {
 }
 
 /**
- * Every provider from its factory: the real one when its keys are set, the fake otherwise.
- * An empty .env gives the same deterministic fakes as day one.
+ * Every provider from its factory: the real one when its keys are set. Otherwise the deterministic fake in test
+ * mode, and a NotConfigured implementation (throws ProviderNotConfiguredError, 503 not_configured) in live mode.
  */
 export function createProviders(
   config: Config,
@@ -118,7 +141,7 @@ export function createProviders(
   };
 }
 
-/** Pipeline deps from the factories (fakes when keys are absent). */
+/** Pipeline deps from the factories (test fakes or live NotConfigured stand-ins when keys are absent). */
 export function defaultDeps(config: Config): PipelineDeps {
   return createProviders(config).deps;
 }
@@ -150,9 +173,18 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
 
   // 0G failures never become a fake decision: map them to 503 so the pod says "brain offline".
   app.setErrorHandler(async (err, req, reply) => {
+    if (err instanceof ProviderNotConfiguredError) {
+      req.log.warn({ provider: err.provider, missingEnv: err.missingEnv }, 'provider not configured');
+      return reply.code(503).send(err.body());
+    }
     if (err instanceof BrainOfflineError) {
       req.log.warn({ reason: err.reason, status: err.status, requestId: err.requestId }, '0G brain offline, trade blocked');
-      return reply.code(503).send({ error: 'brain_offline', reason: err.reason, requestId: err.requestId ?? null });
+      return reply.code(503).send({
+        error: 'brain_offline',
+        reason: err.reason,
+        requestId: err.requestId ?? null,
+        ...(err.reason === 'not_configured' ? { provider: '0g-router', missingEnv: ['OG_API_KEY'] } : {}),
+      });
     }
     if (err instanceof MemoryUnavailableError) {
       req.log.warn({ err: err.message }, '0G memory unavailable, trade blocked');
@@ -178,9 +210,13 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
     } catch (err) {
       if (err instanceof BrainOfflineError) return { shock, decision: null, alert: null, skipped: 'brain_offline' };
       if (err instanceof MemoryUnavailableError) return { shock, decision: null, alert: null, skipped: 'memory_unavailable' };
+      if (err instanceof ProviderNotConfiguredError) return { shock, decision: null, alert: null, skipped: 'not_configured' };
       throw err;
     }
   };
+
+  const providerRegistry = opts.providerRegistry ?? new ProviderRegistry({ config });
+  const market = opts.market ?? createMarketService(config, { logger: app.log });
 
   app.decorate('ghosty', {
     config,
@@ -189,9 +225,30 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
     agent: providers.agent,
     payments,
     executor: providers.executor,
+    providers: providerRegistry,
+    market,
     aggregator: providers.aggregator,
     onFreshNews,
   } satisfies GhostyRuntime);
+
+  // CORS for the terminal's Vite dev server (live mode). The built terminal is same-origin and needs none.
+  const corsOrigins = new Set(config.GHOSTY_MODE === 'live' ? config.CORS_ORIGINS : []);
+  if (corsOrigins.size > 0) {
+    app.addHook('onRequest', async (req, reply) => {
+      const origin = req.headers.origin;
+      if (!origin || !corsOrigins.has(origin)) return;
+      reply.header('access-control-allow-origin', origin).header('vary', 'Origin');
+      if (req.method === 'OPTIONS') {
+        return reply
+          .header('access-control-allow-methods', 'GET,POST,OPTIONS')
+          .header('access-control-allow-headers', String(req.headers['access-control-request-headers'] ?? 'content-type,x-device-token'))
+          .header('access-control-max-age', '600')
+          .code(204)
+          .send();
+      }
+      reply.header('access-control-expose-headers', 'x-request-id,x-signal,x-sample-rate,payment-required,payment-response');
+    });
+  }
 
   app.addHook('onReady', async () => {
     pipeline.refreshNews().catch((err: unknown) => app.log.warn({ err }, 'initial news fetch failed'));
@@ -218,6 +275,15 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
     }
   };
 
+  // Live mode: a /voice round trip needs real STT and TTS. Refuse up front (503 not_configured) instead of
+  // transcribing nothing or answering with a placeholder sound.
+  const requireVoice = async (_req: FastifyRequest, reply: FastifyReply) => {
+    for (const slot of [deps.stt, deps.tts]) {
+      const info = notConfiguredInfo(slot);
+      if (info) return reply.code(503).send(new ProviderNotConfiguredError(info).body());
+    }
+  };
+
   app.get('/health', async () => ({
     ok: true,
     version: VERSION,
@@ -225,7 +291,7 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
     safeStop: !(await brainOnline()),
   }));
 
-  app.post('/voice', { preHandler: [requireDevice, requireBrain] }, async (req, reply) => {
+  app.post('/voice', { preHandler: [requireDevice, requireVoice, requireBrain] }, async (req, reply) => {
     if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
       return reply.code(400).send({ error: 'expected_wav_body' });
     }
@@ -256,12 +322,31 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
     if (!parsed.success) {
       return reply.code(400).send({ error: 'bad_request', message: 'body must be {"action":"confirm"|"cancel"}' });
     }
+    // Live mode without Hyperliquid keys: refuse before the pending decision is consumed.
+    const venue = notConfiguredInfo(deps.venue);
+    if (parsed.data.action === 'confirm' && venue) return reply.code(503).send(new ProviderNotConfiguredError(venue).body());
     return pipeline.handleButton(parsed.data.action);
   });
 
   // Virtual pod web UI: a single static page, no build step. `serve: false` exposes only /sim.
   app.register(fastifyStatic, { root: PUBLIC_DIR, serve: false });
   app.get('/sim', (_req, reply) => reply.sendFile('sim.html'));
+
+  // The trading terminal (Vite build) at `/`, when terminal/dist/index.html (or TERMINAL_DIST) exists.
+  // API routes are registered as exact paths, so they win over the static wildcard. Unknown GETs that accept
+  // text/html get index.html (SPA client-side routing); everything else keeps the JSON 404.
+  const terminalDir = terminalDistDir(config);
+  if (terminalDir) {
+    app.register(fastifyStatic, { root: terminalDir, prefix: '/', decorateReply: false, wildcard: true, index: ['index.html'] });
+    app.setNotFoundHandler((req, reply) => {
+      const accept = String(req.headers.accept ?? '');
+      if (req.method === 'GET' && accept.includes('text/html')) return reply.sendFile('index.html', terminalDir);
+      return reply.code(404).send({ error: 'not_found', message: `Route ${req.method}:${req.url} not found` });
+    });
+  }
+
+  app.get('/providers/status', async () => providerRegistry.status());
+  registerMarketRoutes(app, market);
 
   registerSimRoutes(app, {
     state,

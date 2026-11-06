@@ -8,18 +8,19 @@ export interface InjectInput {
 }
 
 /**
- * News provider fed by hand through `POST /news/inject` (virtual pod only).
- * Items stay for the life of the process, like a real feed's recent headlines.
+ * News provider fed by hand through `POST /news/inject` (a user action from the terminal or the virtual pod).
+ * Items are labelled source "manual" so they are never mistaken for a feed headline. They stay for the life
+ * of the process, like a real feed's recent headlines.
  */
 export class InjectedNewsProvider implements NewsProvider {
-  readonly name = 'inject';
+  readonly name = 'manual';
   private readonly items: NewsItem[] = [];
   private seq = 0;
 
   add(input: InjectInput): NewsItem {
     const item: NewsItem = {
-      id: `inject:${++this.seq}`,
-      source: 'inject',
+      id: `manual:${++this.seq}`,
+      source: 'manual',
       title: input.title,
       url: input.url ?? '',
       publishedAt: new Date().toISOString(),

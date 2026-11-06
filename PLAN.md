@@ -130,12 +130,23 @@ Ticked items above are merged and tested offline with fakes; real keys are check
 - [x] Wire integrations: `createAgent` (0G decider/memory/episodes), STT/TTS factories, news aggregator + poller (`NEWS_LIVE=true`), `registerPaidRoutes` with the latest decision, `createPerpVenue` + `executePlan(planSteps…)`, `BrainOfflineError`/`MemoryUnavailableError` → 503, `agent.flush()` on shutdown [server, P0]
 - [x] Status endpoints for the dashboard: `GET /zerog/status`, `GET /x402/status`, `GET /execution/markets`, `POST /sim/pay-signal` [server, P1]
 
+### Real-mode server (Nov 7)
+
+- [x] `GHOSTY_MODE=live` by default: no fakes outside `npm test`; missing keys answer `503 not_configured {provider, missingEnv}`; no `OG_API_KEY` = safe-stop [server, P0]
+- [x] Live news on by default (RSS + Polymarket + Ethos weights); injected headlines labelled `manual` [server, P0]
+- [x] `GET /providers/status` with real probes per track (cached 30 s, 5 s timeouts) + SSE `providers` [server, P0]
+- [x] Live market data from the keyless Hyperliquid info API: `GET /market/snapshot`, `GET /market/history`, SSE `market` (websocket `allMids`, poll fallback) [server, P0]
+- [x] 0G decider legs fitted to the Hyperliquid $10 minimum like the playbook, never above `MAX_TRADE_USD` [server, venue:hyperliquid, P0]
+- [x] Serve the terminal build at `/` (SPA fallback), CORS for the Vite dev server [server, P1]
+- [x] `npm run doctor` and `npm run start:live` [server, P1]
+- [ ] Keys in `server/.env` until `npm run doctor` shows every P0 provider `live` [server, P0]
+
 ### Live verification with keys
 
-Each item needs real keys in `server/.env`; record the proof in [docs/evidence.md](docs/evidence.md).
+Each item needs real keys in `server/.env`; run `npm run doctor` first and record the proof in [docs/evidence.md](docs/evidence.md).
 
 - [ ] Groq STT and ElevenLabs TTS on a real `/voice` round trip (check whether `pcm_16000` needs a paid ElevenLabs tier) [server, P0]
-- [ ] `NEWS_LIVE=true`: poller pulls RSS/Polymarket (Polymarket needs a VPN on Indian ISPs), a shock headline queues an alert [server, P1]
+- [ ] Live news (default in live mode): poller pulls RSS/Polymarket (Polymarket needs a VPN on Indian ISPs), a shock headline queues an alert [server, P1] (RSS + Polymarket + Ethos verified without keys on 2026-11-06; the alert needs `OG_API_KEY`)
 - [ ] 0G Compute decision with a real request id (try the testnet router; fall back to `https://router-api.0g.ai/v1` if TLS fails) [server, track:0g, P0]
 - [ ] 0G Storage upload of memory and an episode, root hash opened on storagescan-galileo [server, track:0g, P0]
 - [ ] Safe-stop live: kill 0G access, `/voice` answers 503 `brain_offline` [server, track:0g, P0]

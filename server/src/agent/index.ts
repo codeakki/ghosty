@@ -1,5 +1,7 @@
 import type { Config } from '../config.js';
 import { FakeEthosScorer, type CredibilityScorer } from '../credibility/ethos.js';
+import { isTestMode } from '../mode.js';
+import { NotConfiguredDecider, NotConfiguredEpisodeLog, NotConfiguredMemory } from '../notConfigured.js';
 import { isBrainOnline } from '../safety/safeStop.js';
 import { deriveMemoryKey } from './crypto.js';
 import { FakeDecider, ZeroGDecider, type Decider } from './decide.js';
@@ -31,7 +33,10 @@ export interface Agent {
 
 let activeConfig: Config | undefined;
 
-/** Real 0G Compute when OG_API_KEY is set, otherwise the keyword FakeDecider. */
+/**
+ * Real 0G Compute when OG_API_KEY is set. Otherwise the keyword FakeDecider in test mode, and in live mode
+ * NotConfiguredDecider, which throws BrainOfflineError('not_configured'): safe-stop, never a fake decision.
+ */
 export function createDecider(config: Config, opts: CreateAgentOptions = {}): Decider {
   if (config.OG_API_KEY) {
     updateZeroGState({ computeMode: '0g' });
@@ -44,11 +49,18 @@ export function createDecider(config: Config, opts: CreateAgentOptions = {}): De
       logger: opts.logger ?? consoleLogger,
     });
   }
+  if (!isTestMode(config)) {
+    updateZeroGState({ computeMode: 'not_configured' });
+    return new NotConfiguredDecider();
+  }
   updateZeroGState({ computeMode: 'fake' });
   return new FakeDecider(opts.scorer ?? new FakeEthosScorer());
 }
 
-/** Real 0G Storage when OG_PRIVATE_KEY is set (or a blobStore is injected), otherwise in-memory. */
+/**
+ * Real 0G Storage when OG_PRIVATE_KEY is set (or a blobStore is injected). Otherwise in-memory stores in test mode,
+ * and NotConfigured stores (throw not_configured) in live mode.
+ */
 export function createStorage(
   config: Config,
   opts: CreateAgentOptions = {},
@@ -65,6 +77,10 @@ export function createStorage(
         })
       : undefined);
 
+  if (!store && !isTestMode(config)) {
+    updateZeroGState({ storageMode: 'not_configured' });
+    return { memory: new NotConfiguredMemory(), episodes: new NotConfiguredEpisodeLog(), flush: async () => {} };
+  }
   if (!store) {
     updateZeroGState({ storageMode: 'memory' });
     return { memory: new InMemoryMemoryStore(), episodes: new InMemoryEpisodeLog(), flush: async () => {} };
@@ -103,8 +119,8 @@ export function createAgent(config: Config, opts: CreateAgentOptions = {}): Agen
 
 export interface ZeroGStatus {
   computeOnline: boolean;
-  computeMode: '0g' | 'fake';
-  storageMode: '0g' | 'memory';
+  computeMode: '0g' | 'fake' | 'not_configured';
+  storageMode: '0g' | 'memory' | 'not_configured';
   lastRequestId: string | null;
   memoryRootHash: string | null;
   episodeCount: number;
