@@ -4,8 +4,10 @@ import type { WavAudio } from './audio/wav.js';
 import type { Decider, Decision } from './agent/decide.js';
 import type { EpisodeInput, EpisodeLog, EpisodeRecord } from './agent/episode.js';
 import type { MemoryStore } from './agent/memory.js';
+import { executePlan, type SpotOutcome } from './execution/executor.js';
 import type { OrderResult, PerpVenue } from './execution/hyperliquid.js';
-import type { PlannedAction } from './execution/playbook.js';
+import { planSteps, type PlannedAction, type PlanStep, type SpotLegSpec } from './execution/playbook.js';
+import { FakeSpotLeg, type SpotLeg } from './wallet/uniswap.js';
 import { fetchAll, type NewsItem, type NewsProvider } from './news/types.js';
 
 /** What started a decision. `text` and `inject` come from the virtual pod, never from the firmware. */
@@ -37,6 +39,10 @@ export interface PipelineDeps {
   memory: MemoryStore;
   episodes: EpisodeLog;
   venue: PerpVenue;
+  /** Uniswap Trading API leg (createSpotLeg). Defaults to the fake. */
+  spot?: SpotLeg;
+  /** Spot leg to run before the perp legs (UNISWAP_SPOT_LEG=true), or undefined for perps only. */
+  spotLeg?: SpotLegSpec;
   maxTradeUsd: number;
   /** Single-user device for now. */
   userId?: string;
@@ -57,6 +63,8 @@ export interface ButtonResult {
   executed: boolean;
   actions: PlannedAction[];
   orders: OrderResult[];
+  /** Uniswap spot leg results (empty unless UNISWAP_SPOT_LEG=true). */
+  swaps: SpotOutcome[];
 }
 
 /**
@@ -101,12 +109,20 @@ export class Pipeline {
     const decision = this.pending ?? (await this.decide('', 'button'));
     this.pending = undefined;
     const actions = decision.suggestedActions;
+    const memory = await this.deps.memory.load(this.userId);
 
-    const orders: OrderResult[] = [];
+    let orders: OrderResult[] = [];
+    let swaps: SpotOutcome[] = [];
     if (action === 'confirm') {
-      for (const a of actions) {
-        orders.push(await this.deps.venue.placeMarketOrder({ coin: a.coin, isBuy: a.side === 'long', sizeUsd: a.sizeUsd }));
-      }
+      // Perp legs are the ones the wearer heard and confirmed; planSteps only contributes the Uniswap spot step.
+      const spotSteps = planSteps(decision.signal, memory, {
+        maxTradeUsd: this.deps.maxTradeUsd,
+        spotLeg: this.deps.spotLeg,
+      }).filter((s) => s.kind === 'spot');
+      const steps: PlanStep[] = [...spotSteps, ...actions];
+      const report = await executePlan(steps, { venue: this.deps.venue, spot: this.deps.spot ?? new FakeSpotLeg() });
+      orders = report.orders;
+      swaps = report.spot;
     }
     const outcome = action === 'confirm' ? 'executed' : 'cancelled';
     await this.logEpisode({
@@ -114,10 +130,12 @@ export class Pipeline {
       requestId: decision.requestId,
       actions,
       outcome,
-      receipts: orders.map((o) => o.orderId),
+      receipts: [
+        ...swaps.flatMap((s) => (s.result ? [s.result.txHash] : [])),
+        ...orders.map((o) => o.orderId).filter((id) => id !== ''),
+      ],
     });
 
-    const memory = await this.deps.memory.load(this.userId);
     memory.history.push({ at: new Date().toISOString(), requestId: decision.requestId, signal: decision.signal, outcome });
     await this.deps.memory.save(this.userId, memory);
 
@@ -125,9 +143,10 @@ export class Pipeline {
       action,
       requestId: decision.requestId,
       signal: decision.signal,
-      executed: action === 'confirm' && orders.length > 0,
+      executed: action === 'confirm' && orders.length + swaps.length > 0,
       actions,
       orders,
+      swaps,
     };
     this.deps.observer?.onButton?.(result);
     return result;

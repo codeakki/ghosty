@@ -1,6 +1,7 @@
 import { classifyText, type Decision } from '../agent/decide.js';
 import type { EpisodeRecord } from '../agent/episode.js';
 import { credibilityWeight, type CredibilityLevel, type CredibilityScorer } from '../credibility/ethos.js';
+import type { SpotOutcome } from '../execution/executor.js';
 import type { OrderResult } from '../execution/hyperliquid.js';
 import type { PlannedAction, Signal } from '../execution/playbook.js';
 import type { NewsItem } from '../news/types.js';
@@ -44,6 +45,11 @@ export interface OrderEntry extends OrderResult {
   at: string;
 }
 
+export interface SwapEntry extends SpotOutcome {
+  requestId: string;
+  at: string;
+}
+
 export type AlertStatus = 'pending' | 'delivered' | 'acked';
 
 export interface Alert {
@@ -71,6 +77,8 @@ export interface PodSnapshot {
   plannedActions: PlannedAction[];
   /** Newest first. */
   orders: OrderEntry[];
+  /** Uniswap spot legs, newest first. */
+  swaps: SwapEntry[];
   /** Newest first. */
   episodes: EpisodeRecord[];
   /** true = safe-stop engaged, trading blocked. */
@@ -89,7 +97,7 @@ export interface PodEvent {
 
 export type PodListener = (event: PodEvent) => void;
 
-const LIMITS = { news: 50, orders: 100, episodes: 100, alerts: 50 } as const;
+const LIMITS = { news: 50, orders: 100, swaps: 50, episodes: 100, alerts: 50 } as const;
 
 export class PodState implements PipelineObserver {
   private news: NewsEntry[] = [];
@@ -97,6 +105,8 @@ export class PodState implements PipelineObserver {
   private lastDecision: DecisionEntry | null = null;
   private plannedActions: PlannedAction[] = [];
   private orders: OrderEntry[] = [];
+  private swaps: SwapEntry[] = [];
+  private latest: Decision | null = null;
   private episodes: EpisodeRecord[] = [];
   private safeStop: boolean;
   private alerts: Alert[] = [];
@@ -120,10 +130,16 @@ export class PodState implements PipelineObserver {
       lastDecision: this.lastDecision,
       plannedActions: this.plannedActions,
       orders: this.orders,
+      swaps: this.swaps,
       episodes: this.episodes,
       safeStop: this.safeStop,
       alerts: this.alerts,
     });
+  }
+
+  /** The full latest decision (with its planned legs), e.g. for the paid `/signal`. null before the first one. */
+  latestDecision(): Decision | null {
+    return this.latest ? structuredClone(this.latest) : null;
   }
 
   /** Returns an unsubscribe function. */
@@ -149,6 +165,7 @@ export class PodState implements PipelineObserver {
   }
 
   onDecision(decision: Decision, ctx: DecisionContext): void {
+    this.latest = decision;
     this.lastDecision = {
       requestId: decision.requestId,
       signal: decision.signal,
@@ -166,6 +183,9 @@ export class PodState implements PipelineObserver {
   onButton(result: ButtonResult): void {
     this.plannedActions = [];
     const at = new Date().toISOString();
+    for (const swap of result.swaps) {
+      this.swaps = [{ ...swap, requestId: result.requestId, at }, ...this.swaps].slice(0, LIMITS.swaps);
+    }
     for (const order of result.orders) {
       const entry: OrderEntry = { ...order, requestId: result.requestId, at };
       this.orders = [entry, ...this.orders].slice(0, LIMITS.orders);
