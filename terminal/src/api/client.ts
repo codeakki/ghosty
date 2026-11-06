@@ -487,8 +487,21 @@ export function parseReplay(v: unknown): ReplayEpisode[] | null {
 // HTTP
 // ---------------------------------------------------------------------------
 
+/** A guarded route answered 401: the device token is missing or wrong. Never carries the token itself. */
+export interface UnauthorizedInfo {
+  method: 'GET' | 'POST';
+  path: string;
+}
+
+export interface ClientHooks {
+  onUnauthorized?: (info: UnauthorizedInfo) => void;
+}
+
 export class GhostyClient {
-  constructor(private settings: ClientSettings = DEFAULT_SETTINGS) {}
+  constructor(
+    private settings: ClientSettings = DEFAULT_SETTINGS,
+    private hooks: ClientHooks = {},
+  ) {}
 
   configure(settings: ClientSettings): void {
     this.settings = { ...settings, baseUrl: normalizeBaseUrl(settings.baseUrl) };
@@ -520,7 +533,12 @@ export class GhostyClient {
     } catch (err) {
       return { ok: false, kind: 'network', status: 0, message: errorText(err) };
     }
-    return toResult(res, parse);
+    return this.observe(method, path, await toResult(res, parse));
+  }
+
+  private observe<T>(method: UnauthorizedInfo['method'], path: string, r: ApiResult<T>): ApiResult<T> {
+    if (!r.ok && r.kind === 'unauthorized') this.hooks.onUnauthorized?.({ method, path });
+    return r;
   }
 
   health() {
@@ -636,7 +654,7 @@ export class GhostyClient {
     } catch (err) {
       return { ok: false, kind: 'network', status: 0, message: errorText(err) };
     }
-    if (!res.ok) return toResult<VoiceReply>(res, () => null);
+    if (!res.ok) return this.observe('POST', '/voice', await toResult<VoiceReply>(res, () => null));
     const pcm = await res.arrayBuffer();
     return {
       ok: true,

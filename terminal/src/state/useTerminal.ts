@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react';
-import { describeError, GhostyClient, type ClientSettings } from '../api/client';
+import { describeError, GhostyClient, type ClientSettings, type UnauthorizedInfo } from '../api/client';
 import type { ApiResult, SseEventType } from '../api/types';
 import { initialState, reducer, type Action } from './reducer';
 
@@ -20,9 +20,11 @@ export type ActionOutcome = { ok: true; message: string } | { ok: false; message
  * Connects the terminal to the Ghosty server: one SSE stream, a few slow polls for status routes
  * that have no events, and the action callbacks the panels call.
  */
-export function useTerminal(settings: ClientSettings, tap?: (action: Action) => void) {
+export function useTerminal(settings: ClientSettings, tap?: (action: Action) => void, onUnauthorized?: (info: UnauthorizedInfo) => void) {
   const [state, rawDispatch] = useReducer(reducer, initialState);
-  const client = useMemo(() => new GhostyClient(settings), [settings]);
+  // A new client per settings change: the SSE and poll effects depend on it, so saving settings reconnects them.
+  // onUnauthorized must be stable (useCallback), or every render would reconnect.
+  const client = useMemo(() => new GhostyClient(settings, { onUnauthorized }), [settings, onUnauthorized]);
 
   // Optional observer of every action (the Live feed folds the same stream). Kept in a ref so it never re-subscribes.
   const tapRef = useRef(tap);

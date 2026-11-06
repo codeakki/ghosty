@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
-import type { ClientSettings } from '../api/client';
+import type { ClientSettings, UnauthorizedInfo } from '../api/client';
 import type { ApiResult, InjectResult, TextTurnResult, VoiceReply } from '../api/types';
 import { useTerminal } from '../state/useTerminal';
 import { createBatcher, type Batcher } from './feed/batcher';
@@ -13,7 +13,7 @@ import { useSim } from './sim/useSim';
  * One connection to the Ghosty server for the whole Live view: the terminal's SSE + polls, with the feed reducer
  * folding the same actions. Device and Feed share it, so the split view opens one event stream, not two.
  */
-export function useLive(settings: ClientSettings) {
+export function useLive(settings: ClientSettings, onUnauthorized?: (info: UnauthorizedInfo) => void) {
   const [moveOptions] = useMoveOptions();
   const [feed, setFeed] = useState<FeedState>(() => initialFeed(moveOptions));
   const feedRef = useRef(feed);
@@ -52,7 +52,7 @@ export function useLive(settings: ClientSettings) {
     },
     [feedDispatch],
   );
-  const { state, client, actions, dispatch } = useTerminal(settings, tap);
+  const { state, client, actions, dispatch } = useTerminal(settings, tap, onUnauthorized);
   const simControls = useSim({
     client,
     sim,
