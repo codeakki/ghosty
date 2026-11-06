@@ -1,0 +1,44 @@
+{
+  "id": "bybit-hack-2025",
+  "title": "Bybit $1.5B hack (21 Feb 2025)",
+  "description": "An attacker drained ~400k ETH from Bybit's Ethereum cold wallet during a routine cold-to-warm transfer (~14:16 UTC). The largest crypto theft on record; ETH and BTC sold off through the evening.",
+  "category": "hack",
+  "start": "2025-02-21T12:00:00Z",
+  "end": "2025-02-22T06:00:00Z",
+  "interval": "15m",
+  "markets": [
+    { "coin": "BTC", "source": "binance", "symbol": "BTCUSDT" },
+    { "coin": "ETH", "source": "binance", "symbol": "ETHUSDT" }
+  ],
+  "headlines": [
+    {
+      "ts": "2025-02-21T15:00:00Z",
+      "title": "Bybit ETH multisig cold wallet just made a transfer to our warm wallet about 1 hr ago. It appears that this specific transaction was musked, the hacker took control of the specific ETH cold wallet",
+      "source": "X (Ben Zhou, Bybit CEO)",
+      "handle": "benbybit",
+      "url": "https://www.kitco.com/news/article/2025-02-21/bybit-exchange-loses-14-billion-eth-hackers-cofounder-insists-they-are",
+      "tsNote": "Post quoted by Kitco and Forklog on 21 Feb 2025. It says the transfer was 'about 1 hr ago' and the drain was at 14:16 UTC, so it is placed at 15:00 UTC (minute not verified)."
+    },
+    {
+      "ts": "2025-02-21T16:30:00Z",
+      "title": "Bybit Hit by Crypto's Worst Hack With Almost $1.5 Billion Stolen",
+      "source": "Bloomberg",
+      "handle": "business",
+      "url": "https://www.bloomberg.com/news/articles/2025-02-21/bybit-says-exchange-wallet-hacked-1-5-billion-estimated-loss",
+      "tsNote": "Dated 21 Feb 2025; minute not verified."
+    },
+    {
+      "ts": "2025-02-22T04:00:00Z",
+      "title": "$1.5 billion hack strikes major cryptocurrency exchange Bybit",
+      "source": "Associated Press",
+      "handle": "AP",
+      "url": "https://m.washingtontimes.com/news/2025/feb/22/1-5-billion-hack-strikes-major-cryptocurrency-exchange-bybit/",
+      "tsNote": "AP story dated 22 Feb 2025; time not verified, placed at 04:00 UTC."
+    }
+  ],
+  "sources": [
+    "https://en.wikipedia.org/wiki/Bybit",
+    "https://amlcrypto.io/en/blog/hacker-hacked-the-bybit (drain at 14:16:11 UTC)",
+    "Prices: Binance public klines BTCUSDT and ETHUSDT, 15m (data-api.binance.vision)"
+  ]
+}

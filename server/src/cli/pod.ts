@@ -8,6 +8,7 @@
  *   npm run pod -- state
  *   npm run pod -- watch
  *   npm run pod -- next | ack <alert-id> | safe-stop on|off
+ *   npm run pod -- sim list | run <scenario-id> [--speed 360] [--no-autopause] | pause | resume | stop | status
  *
  * Env: SERVER_URL (default http://localhost:$PORT or :3000), DEVICE_TOKEN (sent as X-Device-Token),
  * POD_OUT_DIR (where PCM replies are saved, default /tmp). Reads server/.env like the server does.
@@ -34,6 +35,11 @@ const USAGE = `usage: npm run pod -- <command>
   next                           pop the next pending alert (GET /alerts/next)
   ack <alert-id>                 acknowledge an alert (POST /alerts/:id/ack)
   safe-stop on|off               simulate 0G offline (POST /sim/safe-stop)
+  sim list                       list replay scenarios (GET /sim/scenarios)
+  sim run <id> [--speed N] [--no-autopause]
+                                 start a scenario replay, paper trades only (POST /sim/run)
+  sim pause|resume|stop          control the run (POST /sim/control)
+  sim status                     run status: sim time, P&L vs hold, positions (GET /sim/run)
 
 env: SERVER_URL=${SERVER_URL}  DEVICE_TOKEN=${DEVICE_TOKEN ? '(set)' : '(unset)'}  POD_OUT_DIR=${OUT_DIR}`;
 
@@ -177,6 +183,10 @@ function describe(type: string, d: Record<string, unknown>): string {
       return `${String(d.orderId)} ${d.isBuy ? 'buy' : 'sell'} ${String(d.coin)} $${String(d.sizeUsd)} ${String(d.status)}`;
     case 'episode':
       return `#${String(d.seq)} ${String(d.outcome)} ${String(d.requestId)}`;
+    case 'sim': {
+      const s = d as { status: string; simTime: string; progress: number; pnlUsd: number; baselinePnlUsd: number };
+      return `${s.status} ${s.simTime} ${Math.round(s.progress * 100)}% pnl=$${s.pnlUsd} hold=$${s.baselinePnlUsd}`;
+    }
     case 'state': {
       const s = d as { news: unknown[]; alerts: Array<{ status: string }>; orders: unknown[]; safeStop: boolean };
       const pending = s.alerts.filter((a) => a.status === 'pending').length;
@@ -218,6 +228,46 @@ async function watch(): Promise<void> {
   console.log('stream closed by server');
 }
 
+async function sim(args: string[]): Promise<void> {
+  const [sub, ...rest] = args;
+  if (sub === 'list') {
+    const { res, data } = await request('GET', '/sim/scenarios');
+    check(res, data, 'GET /sim/scenarios');
+    for (const s of (data as { scenarios: Array<{ id: string; title: string; start: string; end: string; headlines: unknown[] }> }).scenarios) {
+      console.log(`${s.id.padEnd(28)} ${s.title}  [${s.start} → ${s.end}, ${s.headlines.length} headlines]`);
+    }
+    return;
+  }
+  if (sub === 'run') {
+    const noAutoPause = rest.includes('--no-autopause');
+    const args2 = rest.filter((a) => a !== '--no-autopause');
+    const speed = flag(args2, 'speed');
+    const scenarioId = args2[0];
+    if (!scenarioId) throw new CliError('sim run needs a scenario id: npm run pod -- sim list');
+    const body = { scenarioId, ...(speed ? { speed: Number(speed) } : {}), ...(noAutoPause ? { autoPauseOnAlert: false } : {}) };
+    const { res, data } = await request('POST', '/sim/run', body);
+    check(res, data, 'POST /sim/run');
+    print(data);
+    console.log('follow it with: npm run pod -- sim status   (or: npm run pod -- watch)');
+    return;
+  }
+  if (sub === 'pause' || sub === 'resume' || sub === 'stop') {
+    const { res, data } = await request('POST', '/sim/control', { action: sub });
+    check(res, data, 'POST /sim/control');
+    const s = data as { status: string; simTime: string };
+    console.log(`${s.status} at sim time ${s.simTime}`);
+    return;
+  }
+  if (sub === 'status') {
+    const { res, data } = await request('GET', '/sim/run');
+    check(res, data, 'GET /sim/run');
+    const { decisions, episodes, fills, ...s } = data as Record<string, unknown> & { decisions: unknown[]; episodes: unknown[]; fills: unknown[] };
+    print({ ...s, decisions, fills, episodes: episodes.length });
+    return;
+  }
+  throw new CliError('sim needs list | run <id> [--speed N] | pause | resume | stop | status');
+}
+
 async function main(argv: string[]): Promise<void> {
   const [cmd, ...args] = argv;
   switch (cmd) {
@@ -239,6 +289,8 @@ async function main(argv: string[]): Promise<void> {
       return ack(args[0]);
     case 'safe-stop':
       return safeStop(args[0]);
+    case 'sim':
+      return sim(args);
     case undefined:
     case 'help':
     case '-h':
