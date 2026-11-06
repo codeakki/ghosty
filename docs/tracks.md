@@ -45,7 +45,7 @@ Source: https://ethglobal.com/events/mumbai/prizes, fetched 2026-11-05. Requirem
 | # | Track | Prize | Why it fits |
 |---|---|---|---|
 | 1 | **0G — Physical AI: Agents with a Body** | $5,000 (+$1k best real hardware) | A real wearable. The decision loop runs on 0G Compute, memory and the episode log live on 0G Storage. Most entrants will bring sims; we bring hardware. This track dictates where memory lives (0G Storage, not Arkiv/Swarm). |
-| 2 | **Hedera — AI Agents That Pay: x402** | $6,500 | "Device pays per AI call from its own wallet" is the brief. Our server exposes an x402-paywalled `/signal`; the agent wallet pays without human approval. |
+| 2 | **Hedera — AI Agents That Pay: x402** | $6,500 | "Device pays per AI call from its own wallet" is the brief. Before each shock decision the agent's hot wallet buys a headline-intelligence bundle from the Signal Desk (separate x402 merchant) in USDC or HBAR, without human approval. |
 | 3 | **Uniswap — Build with Uniswap** | $10,000 (4 winners) | Rule only requires "any part of the stack" + FEEDBACK.md. One real spot leg of the panic flow runs through the Trading API (wallet tokens → USDC before funding perps, or USDC → PAXG safe haven). |
 | exec | **Hyperliquid** (not a sponsor) | — | Main execution venue. HIP-3 markets on trade.xyz (`dex:"xyz"`): perps on stocks, indices, gold, silver, oil, 24/7, same API as crypto perps. Uniswap cannot short or trade stocks at usable liquidity. |
 | stretch | **Arkiv "Build from scratch" + Swarm bonus** | $4,000 + $500 | Arkiv as a public, queryable, expiring **market-event index** (never private memory); Swarm for an encrypted blob archive. Only after 1–3 are done. |
@@ -91,14 +91,18 @@ Details, endpoints and gas numbers: [research/0g.md → Implementation notes](re
 
 ### 2. Hedera x402
 
-- [x] x402 endpoint (`GET /signal`) settling on `hedera:testnet` through a listed facilitator. Evidence: `server/src/payments/x402Server.ts` (`registerPaidRoutes`; `@x402/core` resource server + `@x402/hedera` exact scheme, facilitator: Blocky402 by default, `X402_FACILITATOR_URL` to override); 402 payload in [api.md](api.md#get-signal-x402-on-hedera); tests in `server/test/x402.test.ts`. Live settlement needs a funded account (see next item).
-- [ ] Agent wallet pays at least once with **no human approval**. Code done: `server/src/payments/x402Client.ts` (`@x402/fetch` + Hedera signer), and with `X402_AUTOPAY=true` (default) every decision pays for `/signal` itself (`server/src/pipeline.ts` `paySignal`, wired in `server/src/app.ts`; tests in `server/test/x402-autopay.test.ts`). To finish: fund two testnet accounts, trigger one decision (or run `npm run x402:demo`), and record the tx in [evidence.md](evidence.md).
-- [ ] Settled **tx ID** in README with HashScan link (copy the first row of [evidence.md](evidence.md))
-- [ ] Architecture + payment-flow diagram in README (flow diagram ready in [api.md](api.md#get-signal-x402-on-hedera))
+Walkthrough for the team and judges: [hedera.md](hedera.md).
+
+- [x] x402 endpoint settling on `hedera:testnet` through a listed facilitator: the **Signal Desk** (`GET /intel`, separate process and account) in `server/src/payments/signalDesk.ts` + `x402Server.ts`; 402 shape in [api.md](api.md#signal-desk-get-intel-x402-on-hedera); tests in `server/test/x402.test.ts`.
+- [x] Agent pays with **no human approval**: before each shock decision (`server/src/app.ts` `buyIntel`, `server/src/pipeline.ts` `decide`), and the bundle is used by the 0G decision. Live: [0.0.9185802@1793984888.876950864](https://hashscan.io/testnet/transaction/0.0.9185802-1793984888-876950864) → decision `bb6d851f-…` ([evidence.md](evidence.md#hedera-x402-settled-transactions)).
+- [x] Settled **tx ID** in README with HashScan link.
+- [x] Architecture + payment-flow diagram ([hedera.md](hedera.md#2-one-decision-step-by-step), [architecture.md](architecture.md)).
 - [ ] Video **≤ 5 min** showing the HashScan link
-- [x] Extra credit: spend controls, done in `server/src/payments/spendControls.ts` + `x402Client.ts`. Covers the host allowlist `X402_ALLOWED_HOSTS`, the per-call cap `X402_MAX_PER_CALL_TINYBAR` and the daily cap `X402_MAX_SPEND_TINYBAR`, persisted in `server/.ghosty/spend.json`. The agent also refuses to pay its own account.
-- [x] Extra credit: HCS audit topic, done in `server/src/payments/hcsAudit.ts`. Each payment and each trade decision becomes one message; the topic link is printed by `x402:demo`. Not yet run on testnet.
-- [ ] Extra credit, not done: USDC via HTS, Agent Kit
+- [x] Extra credit: spend controls (`spendControls.ts`, `x402Client.ts`): host allowlist, per-call and daily caps **per asset** (bigint, persisted), never paying itself, at most 2 payments in flight.
+- [x] Extra credit: HCS audit topic [0.0.11342727](https://hashscan.io/testnet/topic/0.0.11342727): structured JSON per payment, decision and trade, dedicated submit key, readable at `GET /hedera/audit`.
+- [x] Extra credit: USDC via HTS (0.0.429274): the desk accepts USDC and HBAR, the agent prefers USDC; merchant and agent associated by `npm run hedera:setup`.
+- [x] Independent on-chain verification of every payment (mirror node), custody split (treasury / agent hot wallet / merchant / HCS key).
+- [ ] Not done: Agent Kit policy (reason in [hedera.md](hedera.md#why-custom-caps-and-not-a-hedera-agent-kit-policy)), HCS-14 / ERC-8004 identity, Scheduled Tx (roadmap).
 
 ### 3. Uniswap
 

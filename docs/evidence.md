@@ -2,7 +2,7 @@
 
 Proof for the track judges: settled transactions, root hashes and order ids from live runs. Where each item comes from:
 
-- **Hedera x402**: `npm run x402:demo` appends a row below. The running server also shows the last payment (HashScan link) and the HCS topic at `GET /x402/status`, and `POST /sim/pay-signal` pays from the dashboard.
+- **Hedera x402**: `npm run x402:demo` appends a row below. The running server shows the last payment (HashScan link, `verified` from the mirror node) at `GET /x402/status` and the decoded HCS audit log at `GET /hedera/audit`; `POST /sim/pay-signal` buys from the dashboard. Walkthrough: [hedera.md](hedera.md).
 - **0G**: `GET /zerog/status` gives the last 0G request id, the memory root hash and the last episode root/tx with storagescan/chainscan links. The local index is `server/.ghosty/episodes.jsonl`. Track map: [tracks.md](tracks.md).
 - **Hyperliquid / Uniswap**: `POST /button` returns order ids with explorer `url`s and the Uniswap `txHash`/`explorerUrl`; `GET /state` keeps the last orders and swaps. `npm run hl:check` prints the market map and margin.
 
@@ -32,8 +32,14 @@ everything else:    NOT CONFIGURED with its missing env keys (0g-router, 0g-stor
 
 ## Hedera x402 settled transactions
 
-Each row is one autonomous `GET /signal` payment by the agent wallet, settled on `hedera:testnet` through an x402 facilitator. Appended by `npm run x402:demo` (server/src/scripts/x402Demo.ts).
+Each row is one autonomous purchase of a Signal Desk intel bundle (`GET /intel`) by the AGENT wallet `0.0.11342726`, paid to the Signal Desk merchant `0.0.11342424`, settled on `hedera:testnet` through an x402 facilitator (fee payer `0.0.9185802`), then checked independently on the mirror node. Rows are appended by `npm run x402:demo` (server/src/scripts/x402Demo.ts); the first two were recorded by hand from a live decision run (`POST /news/inject` on a test server, 2026-11-06, see [hedera.md](hedera.md#what-judges-should-look-at)).
 
-| Time (UTC) | Transaction (HashScan) | Amount | Payer → payTo | Signal requestId | HCS audit |
+- Accounts: [treasury 0.0.10499008](https://hashscan.io/testnet/account/0.0.10499008) · [agent 0.0.11342726](https://hashscan.io/testnet/account/0.0.11342726) · [merchant 0.0.11342424](https://hashscan.io/testnet/account/0.0.11342424)
+- HCS audit topic: [0.0.11342727](https://hashscan.io/testnet/topic/0.0.11342727) (messages #1 to #4 below are these payments and the decision)
+- First row: the bundle was bought (the brain probe said online), then the 0G call timed out at 20 s on a slow network, so that decision answered `503 brain_offline` and proposed nothing. It is the one case where buying before deciding spends 0.01 USDC for nothing; see [hedera.md](hedera.md#the-payment-flow-and-its-guards). The retry 40 s later (second row) decided with the bundle.
+
+| Time (UTC) | Transaction (HashScan) | Amount | Payer → payTo | Mirror verified | HCS audit |
 |---|---|---|---|---|---|
+| 2026-11-06T17:07:40Z | [`0.0.9185802@1793984843.895067134`](https://hashscan.io/testnet/transaction/0.0.9185802-1793984843-895067134) | 0.01 USDC | 0.0.11342726 → 0.0.11342424 | yes (0G then timed out: no decision, see note) | [0.0.11342727 #1](https://hashscan.io/testnet/topic/0.0.11342727) |
+| 2026-11-06T17:08:19Z | [`0.0.9185802@1793984888.876950864`](https://hashscan.io/testnet/transaction/0.0.9185802-1793984888-876950864) | 0.01 USDC | 0.0.11342726 → 0.0.11342424 | yes | payment [#2](https://hashscan.io/testnet/topic/0.0.11342727), decision `bb6d851f-34c9-41f5-8a83-b7f755059320` (geopolitical_shock, used paidIntel) [#3](https://hashscan.io/testnet/topic/0.0.11342727) |
 | 2026-11-06T17:09:08.654Z | [`0.0.9185802@1793984930.617250384`](https://hashscan.io/testnet/transaction/0.0.9185802-1793984930-617250384) | 0.01 HBAR | 0.0.11342726 → 0.0.11342424 | yes | [0.0.11342727 #4](https://hashscan.io/testnet/topic/0.0.11342727) |
