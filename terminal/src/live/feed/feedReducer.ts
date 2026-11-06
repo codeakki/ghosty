@@ -9,7 +9,9 @@ import type {
   PlannedAction,
   ProviderState,
   ProviderStatus,
+  ReplayEpisode,
   Signal,
+  SimTag,
   SwapEntry,
   Track,
 } from '../../api/types';
@@ -29,8 +31,25 @@ export type TxTrack = Extract<Track, '0g' | 'hedera' | 'uniswap' | 'hyperliquid'
 
 interface CardBase {
   id: string;
-  /** When the card entered the feed (ms epoch). */
+  /** When the card entered the feed (ms epoch). Sim cards sort by arrival too, so they never sink below live ones. */
   at: number;
+  /** Set on cards from a simulation run: the run and the HISTORICAL sim clock time shown on the card. */
+  sim?: SimCardTag;
+}
+
+export interface SimCardTag {
+  runId: string;
+  /** Sim clock time (ms epoch), from the event's own timestamp. */
+  simAt: number;
+}
+
+/** One episode played back from GET /episodes/replay. */
+export interface ReplayCard extends CardBase {
+  kind: 'replay';
+  episode: ReplayEpisode;
+  /** 1-based position in the replay and its length ("2 of 5"). */
+  index: number;
+  total: number;
 }
 
 export interface MarketCard extends CardBase {
@@ -82,7 +101,7 @@ export type SystemCard = CardBase & {
   flips: number;
 } & ({ topic: 'provider'; providers: ProviderEntry[] } | { topic: 'safe-stop'; safeStop: boolean });
 
-export type FeedCard = MarketCard | NewsCard | BrainCard | AlertCard | TxCard | SystemCard;
+export type FeedCard = MarketCard | NewsCard | BrainCard | AlertCard | TxCard | SystemCard | ReplayCard;
 
 export interface FeedState {
   cards: FeedCard[];
@@ -140,7 +159,14 @@ export type FeedLocalAction =
         | { ok: false; failure: ApiFailure };
     };
 
-export type FeedAction = TerminalAction | FeedLocalAction;
+export type FeedSimAction =
+  /** Leaving the simulation: drop every sim card so the feed is live-only again. */
+  | { type: 'feed/sim-clear' }
+  /** One step of a replay: the next episode, oldest first. */
+  | { type: 'feed/replay'; replayId: string; episode: ReplayEpisode; index: number; total: number; at: number }
+  | { type: 'feed/replay-clear' };
+
+export type FeedAction = TerminalAction | FeedLocalAction | FeedSimAction;
 
 // ---------------------------------------------------------------------------
 
@@ -220,7 +246,77 @@ function decisionCard(state: FeedState, d: NonNullable<ReturnType<typeof parseDe
   return push(state, [done]);
 }
 
+/** Historical time of a sim event, for the card's clock; arrival time if the payload has none. */
+function simTag(tag: SimTag, iso: string | undefined, at: number): SimCardTag {
+  const t = iso ? Date.parse(iso) : NaN;
+  return { runId: tag.runId, simAt: Number.isFinite(t) ? t : at };
+}
+
+/**
+ * Events from a simulation run (`sim: true, runId`). They become ordinary cards tagged SIM, keyed apart from live
+ * ids so a replayed request id never updates a live card. Sim `market` ticks are historical prices: no cards, no
+ * move detection, and they never touch the live series.
+ */
+function foldSimSse(state: FeedState, event: string, data: unknown, at: number): FeedState | null {
+  switch (event) {
+    case 'market': {
+      const tick = parseMarketTick(data);
+      return tick?.sim ? state : null;
+    }
+    case 'news': {
+      const item = parseNews(data);
+      if (!item?.sim) return null;
+      const id = `sim:news:${item.sim.runId}:${item.id}`;
+      return fresh(state, id) ? push(state, [{ kind: 'news', id, at, item, sim: simTag(item.sim, item.publishedAt, at) }]) : state;
+    }
+    case 'decision': {
+      const d = parseDecision(data);
+      if (!d?.sim) return null;
+      const id = `sim:brain:${d.sim.runId}:${d.requestId}`;
+      if (!fresh(state, id)) return state;
+      return push(state, [
+        {
+          kind: 'brain',
+          id,
+          at,
+          status: 'done',
+          prompt: d.headline ?? d.transcript,
+          trigger: d.trigger,
+          requestId: d.requestId,
+          signal: d.signal,
+          confidence: d.confidence,
+          rationale: d.rationale,
+          actions: d.actions,
+          sim: simTag(d.sim, d.at, at),
+        },
+      ]);
+    }
+    case 'alert': {
+      const alert = parseAlert(data);
+      if (!alert?.sim) return null;
+      const id = `sim:alert:${alert.sim.runId}:${alert.id}`;
+      return fresh(state, id) ? push(state, [{ kind: 'alert', id, at, alert, sim: simTag(alert.sim, alert.createdAt, at) }]) : state;
+    }
+    case 'order': {
+      const order = parseOrder(data);
+      if (!order?.sim) return null;
+      const c = orderCard(order, at);
+      return upsert(state, { ...c, id: `sim:${order.sim.runId}:${c.id}`, sim: simTag(order.sim, order.at, at) });
+    }
+    case 'episode': {
+      const ep = parseEpisode(data);
+      if (!ep?.sim) return null;
+      const c = episodeCard(ep, at);
+      return upsert(state, { ...c, id: `sim:${ep.sim.runId}:${c.id}`, sim: simTag(ep.sim, ep.at, at) });
+    }
+    default:
+      return null;
+  }
+}
+
 function foldSse(state: FeedState, event: string, data: unknown, at: number): FeedState {
+  const simmed = foldSimSse(state, event, data, at);
+  if (simmed) return simmed;
   switch (event) {
     case 'state': {
       const snap = parseSnapshot(data);
@@ -396,6 +492,20 @@ export function feedReducer(state: FeedState, action: FeedAction): FeedState {
       const id = `payment:${p.txId}`;
       return fresh(state, id) ? push({ ...state, paymentTx: p.txId }, [{ kind: 'tx', track: 'hedera', tx: 'payment', id, at: action.at, payment: p }]) : state;
     }
+    case 'feed/sim-clear': {
+      const cards = state.cards.filter((c) => !c.sim);
+      return cards.length === state.cards.length ? state : { ...state, cards };
+    }
+    case 'feed/replay': {
+      const id = `replay:${action.replayId}:${action.index}`;
+      return fresh(state, id)
+        ? push(state, [{ kind: 'replay', id, at: action.at, episode: action.episode, index: action.index, total: action.total }])
+        : state;
+    }
+    case 'feed/replay-clear': {
+      const cards = state.cards.filter((c) => c.kind !== 'replay');
+      return cards.length === state.cards.length ? state : { ...state, cards };
+    }
     case 'feed/brain-pending':
       return push(state, [
         { kind: 'brain', id: `pending:${action.localId}`, at: action.at, status: 'thinking', prompt: action.prompt, trigger: action.trigger, actions: [], localId: action.localId },
@@ -457,6 +567,7 @@ export function cardFilter(card: FeedCard): Exclude<FeedFilter, 'all'> | null {
       return 'news';
     case 'brain':
     case 'alert':
+    case 'replay':
       return 'agent';
     case 'tx':
       return 'tx';

@@ -1,9 +1,10 @@
-import { memo, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { createContext, memo, useContext, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { formatSimClock } from '../sim/simState';
 import { RelTime } from './RelTime';
 import { formatSignal, shockTag } from '../../lib/format';
 import { chainscanBase } from '../../state/proofs';
 import { coinName, formatAssetPx, formatConfidencePct, formatPx, formatSignedPct, formatUsdAmount, legText, shortHash } from '../words';
-import { systemText, type AlertCard, type BrainCard, type FeedCard, type MarketCard, type NewsCard, type SystemCard, type TxCard, type TxTrack } from './feedReducer';
+import { systemText, type ReplayCard, type SimCardTag, type AlertCard, type BrainCard, type FeedCard, type MarketCard, type NewsCard, type SystemCard, type TxCard, type TxTrack } from './feedReducer';
 import { MiniSpark } from './MiniSpark';
 
 export interface CardContext {
@@ -51,12 +52,27 @@ function CopyId({ value, label }: { value: string; label: string }) {
   );
 }
 
+/** Set per card: a simulation card shows its HISTORICAL sim clock and a SIM tag instead of "12s ago". */
+const SimTagContext = createContext<SimCardTag | null>(null);
+
+function CardTime({ at, className }: { at: number; className: string }) {
+  const sim = useContext(SimTagContext);
+  if (!sim) return <RelTime at={at} className={className} />;
+  const iso = new Date(sim.simAt).toISOString();
+  return (
+    <span className={`${className} lv-sim-time`} title={`Simulated time ${iso.replace('T', ' ').slice(0, 16)} UTC · not live`}>
+      <span className="lv-sim-tag">SIM</span>
+      <time dateTime={iso}>{formatSimClock(sim.simAt)}</time>
+    </span>
+  );
+}
+
 function Head({ kind, label, at, extra }: { kind: string; label: ReactNode; at: number; extra?: ReactNode }) {
   return (
     <header className="lv-card-head">
       <span className={`lv-kind lv-kind-${kind}`}>{label}</span>
       {extra}
-      <RelTime at={at} className="lv-card-time" />
+      <CardTime at={at} className="lv-card-time" />
     </header>
   );
 }
@@ -105,7 +121,7 @@ function MarketRow({ card, ctx }: { card: MarketCard; ctx: CardContext }) {
       </span>
       <span className="lv-row-why">{moveWhy(card)}</span>
       <MiniSpark points={card.points} dir={dir} label={`${name} ${dir === 'up' ? 'rising' : 'falling'}, ${ref}`} />
-      <RelTime at={card.at} className="lv-card-time" />
+      <CardTime at={card.at} className="lv-card-time" />
     </div>
   );
 }
@@ -152,7 +168,7 @@ function NewsRow({ card }: { card: NewsCard }) {
         <span className="lv-card-source" title={credTitle}>
           {source}
         </span>
-        <RelTime at={Number.isFinite(published) ? published : card.at} className="lv-card-time" />
+        <CardTime at={Number.isFinite(published) ? published : card.at} className="lv-card-time" />
       </p>
     </div>
   );
@@ -357,6 +373,53 @@ function SystemView({ card }: { card: SystemCard }) {
 }
 
 /** CSS ident from a card key (for the brain card's view-transition-name). */
+/** An episode played back from the log: what was decided, its 0G request id, and where it is stored, honestly. */
+function ReplayView({ card }: { card: ReplayCard }) {
+  const ep = card.episode;
+  const d = ep.decision;
+  const leg = ep.actions[0];
+  return (
+    <>
+      <header className="lv-card-head">
+        <span className="lv-kind lv-kind-replay">
+          Replay · <span className="lv-num">{card.index}</span> of <span className="lv-num">{card.total}</span>
+        </span>
+        <span className="lv-card-time lv-sim-time" title={ep.ts}>
+          <time dateTime={ep.ts}>{formatSimClock(ep.ts)}</time>
+        </span>
+      </header>
+      <h3 className="lv-card-title">
+        {d && d.signal !== 'none' ? (
+          <>
+            {formatSignal(d.signal)} · <span className="lv-num">{formatConfidencePct(d.confidence)}</span>
+          </>
+        ) : (
+          'No trade: held'
+        )}
+      </h3>
+      {d?.rationale ? <p className="lv-card-body">{d.rationale}</p> : null}
+      {leg ? (
+        <p className="lv-card-meta">
+          {legText(leg)}
+          {ep.orders > 0 ? ` · ${ep.orders} paper ${ep.orders === 1 ? 'order' : 'orders'}` : ''}
+        </p>
+      ) : null}
+      <p className="lv-card-meta lv-card-proof">
+        <span>0G request</span> <CopyId value={ep.requestId} label="0G request id" />
+        {ep.storage === '0g' && ep.storagescanUrl ? (
+          <Ext href={ep.storagescanUrl} label="Open this episode on 0G Storagescan">
+            0G Storage
+          </Ext>
+        ) : ep.storage === '0g' ? (
+          <span>On 0G Storage{ep.rootHash ? ` · root ${shortHash(ep.rootHash)}` : ''}</span>
+        ) : (
+          <span>Local log only (not on 0G Storage)</span>
+        )}
+      </p>
+    </>
+  );
+}
+
 function vtName(key: string): string {
   return `card-${key.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80)}`;
 }
@@ -391,15 +454,19 @@ export const FeedCardView = memo(function FeedCardView({
       data-track={track}
       data-dir={dir}
       data-status={card.kind === 'brain' ? card.status : undefined}
+      data-sim={card.sim ? 'true' : undefined}
       style={{ ...enterStyle, ...vt }}
     >
       <article>
+        <SimTagContext.Provider value={card.sim ?? null}>
         {card.kind === 'market' ? <MarketRow card={card} ctx={ctx} /> : null}
         {card.kind === 'news' ? <NewsRow card={card} /> : null}
         {card.kind === 'brain' ? <BrainView card={card} ctx={ctx} /> : null}
         {card.kind === 'alert' ? <AlertView card={card} ctx={ctx} /> : null}
         {card.kind === 'tx' ? <TxView card={card} ctx={ctx} /> : null}
         {card.kind === 'system' ? <SystemView card={card} /> : null}
+        {card.kind === 'replay' ? <ReplayView card={card} /> : null}
+        </SimTagContext.Provider>
       </article>
     </li>
   );

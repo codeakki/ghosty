@@ -21,8 +21,15 @@ import type {
   ProviderState,
   ProviderStatus,
   ProvidersStatus,
+  ReplayEpisode,
   SafeStopResult,
   Signal,
+  SimAction,
+  SimPosition,
+  SimRun,
+  SimScenario,
+  SimStatus,
+  SimTag,
   SourceCredibility,
   SwapEntry,
   TextTurnResult,
@@ -98,6 +105,12 @@ function records(v: unknown): Rec[] {
   return arr(v).filter(isRecord);
 }
 
+/** `sim: true, runId` on an SSE payload → a tag; anything else → undefined (a live event). */
+export function parseSimTag(v: Rec): SimTag | undefined {
+  if (v.sim !== true) return undefined;
+  return { runId: str(v.runId) };
+}
+
 const SIGNALS: readonly Signal[] = ['geopolitical_shock', 'regulatory_crackdown', 'none'];
 function signal(v: unknown): Signal {
   return SIGNALS.includes(v as Signal) ? (v as Signal) : 'none';
@@ -146,6 +159,7 @@ export function parseNews(v: unknown): NewsEntry | null {
     weight: num(v.weight) ?? undefined,
     credibility: parseCredibility(v.credibility),
     signal: signal(v.signal),
+    sim: parseSimTag(v),
   };
 }
 
@@ -163,6 +177,7 @@ export function parseDecision(v: unknown): DecisionEvent | null {
     headline: optStr(v.headline),
     at: str(v.at),
     actions: parseActions(v.actions),
+    sim: parseSimTag(v),
   };
 }
 
@@ -186,6 +201,7 @@ export function parseOrder(v: unknown): OrderEntry | null {
     error: optStr(v.error),
     requestId: str(v.requestId),
     at: str(v.at),
+    sim: parseSimTag(v),
   };
 }
 
@@ -251,6 +267,7 @@ export function parseEpisode(v: unknown): EpisodeRecord | null {
             : undefined,
         }
       : undefined,
+    sim: parseSimTag(v),
   };
 }
 
@@ -270,6 +287,7 @@ export function parseAlert(v: unknown): Alert | null {
     createdAt: str(v.createdAt),
     deliveredAt: optStr(v.deliveredAt),
     ackedAt: optStr(v.ackedAt),
+    sim: parseSimTag(v),
   };
 }
 
@@ -377,7 +395,92 @@ export function parseMarketTick(v: unknown): MarketTick | null {
     const n = num(px);
     if (n !== null && n > 0) mids[coin] = n;
   }
-  return { ts: str(v.ts, new Date().toISOString()), mids };
+  return { ts: str(v.ts, new Date().toISOString()), mids, sim: parseSimTag(v) };
+}
+
+// ---------------------------------------------------------------------------
+// Simulation
+// ---------------------------------------------------------------------------
+
+export function parseSimScenarios(v: unknown): SimScenario[] | null {
+  const list = Array.isArray(v) ? v : isRecord(v) && Array.isArray(v.scenarios) ? v.scenarios : null;
+  if (!list) return null;
+  return records(list).flatMap((r) => {
+    const id = optStr(r.id);
+    if (!id) return [];
+    return [
+      {
+        id,
+        title: str(r.title, id),
+        description: str(r.description),
+        start: str(r.start),
+        end: str(r.end),
+        markets: arr(r.markets).filter((x): x is string => typeof x === 'string'),
+        headlines: records(r.headlines).map((h) => ({ ts: str(h.ts), title: str(h.title), source: str(h.source), url: str(h.url) })),
+      },
+    ];
+  });
+}
+
+const SIM_STATUSES: readonly SimStatus[] = ['idle', 'running', 'paused', 'done'];
+
+/** A count that the server may send as a number or as the list itself. */
+function count(v: unknown): number {
+  return Array.isArray(v) ? v.length : Math.max(0, num(v) ?? 0);
+}
+
+export function parseSimRun(v: unknown): SimRun | null {
+  if (!isRecord(v)) return null;
+  const status = SIM_STATUSES.includes(v.status as SimStatus) ? (v.status as SimStatus) : null;
+  if (!status) return null;
+  const positions: SimPosition[] = records(v.positions).flatMap((p) => {
+    const market = optStr(p.market);
+    if (!market) return [];
+    return [
+      {
+        market,
+        side: p.side === 'short' ? 'short' : 'long',
+        sizeUsd: num(p.sizeUsd) ?? 0,
+        entryPx: num(p.entryPx) ?? 0,
+        markPx: num(p.markPx) ?? 0,
+        pnlUsd: num(p.pnlUsd) ?? 0,
+      },
+    ];
+  });
+  return {
+    runId: str(v.runId),
+    scenarioId: str(v.scenarioId),
+    status,
+    simTime: str(v.simTime),
+    progress: Math.max(0, Math.min(1, num(v.progress) ?? 0)),
+    pnlUsd: num(v.pnlUsd) ?? 0,
+    baselinePnlUsd: num(v.baselinePnlUsd) ?? 0,
+    positions,
+    decisions: count(v.decisions),
+    episodes: count(v.episodes),
+  };
+}
+
+export function parseReplay(v: unknown): ReplayEpisode[] | null {
+  const list = Array.isArray(v) ? v : isRecord(v) && Array.isArray(v.episodes) ? v.episodes : null;
+  if (!list) return null;
+  return records(list).flatMap((r) => {
+    const requestId = optStr(r.requestId);
+    if (!requestId) return [];
+    const d = isRecord(r.decision) ? r.decision : null;
+    return [
+      {
+        ts: str(r.ts),
+        requestId,
+        decision: d ? { signal: signal(d.signal), confidence: num(d.confidence) ?? 0, rationale: str(d.rationale) } : null,
+        actions: parseActions(r.actions),
+        orders: count(r.orders),
+        storage: r.storage === '0g' ? '0g' : 'local',
+        rootHash: optStr(r.rootHash),
+        storagescanUrl: optStr(r.storagescanUrl),
+      },
+    ];
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -495,6 +598,29 @@ export class GhostyClient {
       (b) => (isRecord(b) && typeof b.requestId === 'string' ? (b as unknown as TextTurnResult) : null),
       { text },
     );
+  }
+
+  simScenarios() {
+    return this.request('GET', '/sim/scenarios', parseSimScenarios);
+  }
+  simRun() {
+    return this.request('GET', '/sim/run', parseSimRun);
+  }
+  simStart(scenarioId: string, speed?: number, autoPauseOnAlert?: boolean) {
+    return this.request<{ runId: string }>(
+      'POST',
+      '/sim/run',
+      (b) => (isRecord(b) && typeof b.runId === 'string' ? { runId: b.runId } : null),
+      { scenarioId, ...(speed !== undefined ? { speed } : {}), ...(autoPauseOnAlert !== undefined ? { autoPauseOnAlert } : {}) },
+    );
+  }
+  simControl(action: SimAction) {
+    return this.request<true>('POST', '/sim/control', () => true, { action });
+  }
+  episodesReplay(from?: string, limit = 20) {
+    const q = new URLSearchParams({ limit: String(limit) });
+    if (from) q.set('from', from);
+    return this.request('GET', `/episodes/replay?${q.toString()}`, parseReplay);
   }
 
   /** WAV in, raw PCM s16le out. Measures the round trip for the pod dock. */
