@@ -19,10 +19,10 @@ Built at ETHGlobal Mumbai, Nov 6–8 2026.
 ## How it works
 
 ```
-[ESP32-CAM pod] --WAV over HTTP POST--> [server: Fastify/Express TS]
-   button GPIO2                         ├─ STT (Groq whisper; 0G Whisper if router exposes audio)
-   INMP441 mic  GPIO14/15/13             ├─ news ingest: RSS (CoinDesk/Cointelegraph/TheBlock/Decrypt),
-   MAX98357A amp GPIO14/15/12            │    CryptoPanic, Polymarket Gamma, Grok x_search (optional)
+[ESP32-S3 pod] --WAV over HTTP POST---> [server: Fastify/Express TS]
+   button GPIO15                        ├─ STT (Groq whisper; 0G Whisper if router exposes audio)
+   INMP441 mic  GPIO4/5/6                ├─ news ingest: RSS (CoinDesk/Cointelegraph/TheBlock/Decrypt),
+   MAX98357A amp GPIO4/5/7               │    CryptoPanic, Polymarket Gamma, Grok x_search (optional)
    speaker, LiPo→TP4056→5V boost         ├─ credibility: Ethos score per handle/address (optional)
                                          ├─ decision loop: 0G Compute chat completion (request ID logged)
 <--raw PCM s16le 16k over HTTP--         ├─ memory: encrypted (AES-256) blobs on 0G Storage; episode log per decision
@@ -48,8 +48,7 @@ Full detail: [docs/architecture.md](docs/architecture.md).
 
 | Part | Qty | Purpose | Status |
 |---|---|---|---|
-| ESP32-CAM (AI Thinker) | 1 | Main MCU, WiFi, 4 MB PSRAM | Bought |
-| ESP32-CAM-MB base board | 1 | USB flashing and serial | Bought |
+| ESP32-S3 N16R8 dev board | 1 | Main MCU, WiFi, 16 MB flash, 8 MB PSRAM, USB-C flashing | Bought |
 | INMP441 I2S MEMS mic | 1 | Voice input | Bought |
 | MAX98357A I2S amp | 1 | Speaker driver | Bought |
 | Mini speaker | 1 | Voice output | Bought |
@@ -65,27 +64,27 @@ Full list with notes: [hardware/BOM.md](hardware/BOM.md).
 
 ### Wiring
 
-| Module | Module pin | ESP32-CAM pin |
+| Module | Module pin | ESP32-S3 pin |
 |---|---|---|
 | INMP441 | VDD / GND / L/R | 3V3 / GND / GND |
-| INMP441 | SCK / WS / SD | GPIO14 / GPIO15 / GPIO13 |
-| MAX98357A | VIN / GND | 5V / GND |
-| MAX98357A | BCLK / LRC / DIN | GPIO14 / GPIO15 / GPIO12 |
+| INMP441 | SCK / WS / SD | GPIO4 / GPIO5 / GPIO6 |
+| MAX98357A | VIN / GND | 3V3 on USB power (5V pin is dead on many clones) / GND |
+| MAX98357A | BCLK / LRC / DIN | GPIO4 / GPIO5 / GPIO7 |
 | Speaker | + / − | Amp + / − |
-| Button | one leg / other leg | GPIO2 / GND (`INPUT_PULLUP`) |
+| Button | one leg / other leg | GPIO15 / GND (`INPUT_PULLUP`) |
 | LiPo | + / − | TP4056 B+ / B− |
 | TP4056 | OUT+ / OUT− | 5 V boost in → boost out to 5V / GND |
 
 Mic and amp share one I2S port in full duplex: BCLK and WS are common, data runs on separate pins, 16 kHz with 32-bit slots.
 
-> **Warning: boot strapping pins**
-> - **GPIO12** sets the flash voltage at reset. If it is HIGH at reset the board boot-loops with `flash read err`. Only the amp's DIN (an input) goes here. Never put the mic's SD output on GPIO12.
-> - **GPIO2** must be LOW or floating to enter download mode. Wire the button GPIO2 → GND with `INPUT_PULLUP`. Never tie GPIO2 to 3V3.
-> - GPIO2, 4, 12, 13, 14, 15 are the SD card pins. **Never call `SD_MMC.begin()`.**
+> **Warning: pins to avoid**
+> - **GPIO0, GPIO3, GPIO45, GPIO46** are strapping pins. Leave them free.
+> - **GPIO19 / GPIO20** are the native USB port. **GPIO26–37** are flash and octal PSRAM.
+> - **GPIO17 / GPIO18** are kept free for the Dabao UART link.
 
-> **Power note:** a LiPo (3.0–4.2 V) on the 5V pin browns out under WiFi plus audio, because the onboard AMS1117 needs about 1.1 V of headroom. Use LiPo → TP4056 → 5 V boost → 5V pin, feed the amp VIN from the boost, and add a 470–1000 µF capacitor across 5V/GND.
+> **Power note:** a LiPo (3.0–4.2 V) on the 5V pin browns out under WiFi plus audio. Use LiPo → TP4056 → 5 V boost → 5V pin, feed the amp VIN from the boost, and add a 470–1000 µF capacitor across 5V/GND. On USB power the 5V pin of many N16R8 clones outputs nothing, so feed the amp from 3V3 there.
 
-Full guide with power and test order: [hardware/wiring.md](hardware/wiring.md).
+Full guide with power and test order: [hardware/wiring.md](hardware/wiring.md). Measured results and fixes from the first ESP32-S3 bring-up: [hardware/bringup-esp32s3.md](hardware/bringup-esp32s3.md). Ghost enclosure (STL files): [hardware/enclosure/](hardware/enclosure/README.md).
 
 ## Firmware quick start
 
@@ -93,7 +92,7 @@ Full guide with power and test order: [hardware/wiring.md](hardware/wiring.md).
 2. In *Preferences → Additional boards manager URLs* add:
    `https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json`
 3. *Boards Manager* → install **esp32 by Espressif** (CI uses core 3.3.12).
-4. Select board **AI Thinker ESP32-CAM**. On Windows you may need the CH340 USB driver for the MB base board.
+4. Select board **ESP32S3 Dev Module**, Flash Size **16MB**, PSRAM **OPI PSRAM**, USB CDC On Boot **Disabled**. On Windows you may need the CH343 / CH340 USB driver.
 5. Link the shared library into your sketchbook:
    ```bash
    ./firmware/scripts/link-lib.sh
@@ -105,7 +104,7 @@ Full guide with power and test order: [hardware/wiring.md](hardware/wiring.md).
    ```
 7. Open `firmware/sketches/01_Blink/01_Blink.ino` and upload. Work through the sketches in order.
 
-Flashing: use the ESP32-CAM-MB base board, or pull GPIO0 to GND while resetting.
+Flashing: plug into the board's **COM** USB-C port. It enters download mode by itself.
 
 ## Server quick start
 
@@ -207,7 +206,7 @@ No placeholder data: when a provider is missing the panel says so (for example "
 
 | # | Sketch | What it proves | Status |
 |---|---|---|---|
-| 01 | `01_Blink` | Toolchain and upload work (red LED on GPIO33) | Scaffolded |
+| 01 | `01_Blink` | Toolchain and upload work (heartbeat and PSRAM on serial) | Scaffolded |
 | 02 | `02_WiFiTest` | WiFi joins with `secrets.h` | Scaffolded |
 | 03 | `03_MicTest` | INMP441 over full-duplex I2S, RMS level meter | Scaffolded |
 | 04 | `04_SpeakerTest` | MAX98357A plays a sine tone | Scaffolded |

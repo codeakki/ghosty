@@ -5,10 +5,10 @@ Ghosty is a wearable ESP32 voice pod that hosts a private, user-owned trading co
 ## System diagram
 
 ```
-[ESP32-CAM pod] --WAV over HTTP POST--> [server: Fastify/Express TS]
-   button GPIO2                         ├─ STT (Groq whisper; 0G Whisper if router exposes audio)
-   INMP441 mic  GPIO14/15/13             ├─ news ingest: RSS (CoinDesk/Cointelegraph/TheBlock/Decrypt),
-   MAX98357A amp GPIO14/15/12            │    CryptoPanic, Polymarket Gamma, Grok x_search (optional)
+[ESP32-S3 pod] --WAV over HTTP POST---> [server: Fastify/Express TS]
+   button GPIO15                        ├─ STT (Groq whisper; 0G Whisper if router exposes audio)
+   INMP441 mic  GPIO4/5/6                ├─ news ingest: RSS (CoinDesk/Cointelegraph/TheBlock/Decrypt),
+   MAX98357A amp GPIO4/5/7               │    CryptoPanic, Polymarket Gamma, Grok x_search (optional)
    speaker, LiPo→TP4056→5V boost         ├─ credibility: Ethos score per handle/address (optional)
                                          ├─ decision loop: 0G Compute chat completion (request ID logged)
 <--raw PCM s16le 16k over HTTP--         ├─ memory: encrypted (AES-256) blobs on 0G Storage; episode log per decision
@@ -24,7 +24,7 @@ Ghosty is a wearable ESP32 voice pod that hosts a private, user-owned trading co
 
 | Component | Where | Tech | Job | Server module |
 |---|---|---|---|---|
-| Device | ESP32-CAM (AI Thinker) | Arduino core 3.3.x, `ESP_I2S` full duplex, `HTTPClient` | Push-to-talk record (16 kHz, 16-bit mono), play PCM, read button | `firmware/sketches/06_CloudVoice` |
+| Device | ESP32-S3 N16R8 | Arduino core 3.3.x, `ESP_I2S` full duplex, `HTTPClient` | Push-to-talk record (16 kHz, 16-bit mono), play PCM, read button | `firmware/sketches/06_CloudVoice` |
 | Server | Laptop / small VM | Node 22, TypeScript, Fastify/Express | HTTP API (`/health`, `/voice`, `/button`, later `/signal`), orchestration | `server/src/index.ts` |
 | STT | Cloud | Groq `whisper-large-v3-turbo`; 0G Whisper Large v3 if the Router exposes audio (UNVERIFIED) | WAV → text | `server/src/audio/stt.ts` |
 | TTS | Cloud | ElevenLabs `eleven_flash_v2_5`, `output_format=pcm_16000` | Text → raw s16le 16 kHz PCM, no resampling | `server/src/audio/tts.ts` |
@@ -63,7 +63,7 @@ User        Pod (ESP32)            Server                 STT     0G Compute   0
  |<-- speaker -| play in 1–2 KB chunks|                    |          |            |         |
 ```
 
-1. User holds the button (GPIO2), speaks, releases.
+1. User holds the button (GPIO15), speaks, releases.
 2. Pod prepends a 44-byte WAV header and POSTs to `/voice` with `X-Device-Token`.
 3. Server transcribes, loads encrypted memory from 0G Storage, calls 0G Compute with transcript + memory + latest events.
 4. Server writes an episode record (input, request ID, output) to 0G Storage and keeps the root hash.
@@ -138,5 +138,5 @@ if (!zeroG.computeReachable() || !zeroG.storageWritable()) {
 - Slow networks: the reachability probe waits up to `OG_HEALTH_TIMEOUT_MS` (15 s) and flips offline only after 2 consecutive failures (back online after 1 success); a 0G call gets `OG_DECIDE_TIMEOUT_MS` (45 s) and one retry on a timeout or `ECONNRESET` only. A call that still fails throws `brain_offline`.
 - Never fake a decision. No local LLM fallback, no cached plan replay.
 - `/health` reports `safeStop: true` so the demo can show the state.
-- `/voice` and `/button` return `503` with JSON `{"error":"brain_offline"}` and no audio body. The pod plays nothing and blinks the red LED (GPIO33) 3 times fast. See [api.md](api.md).
+- `/voice` and `/button` return `503` with JSON `{"error":"brain_offline"}` and no audio body. The pod plays nothing and calls `blinkRed(3)`, which does nothing on the ESP32-S3 (no red LED). See [api.md](api.md).
 - Recovery is automatic on the next successful 0G call.

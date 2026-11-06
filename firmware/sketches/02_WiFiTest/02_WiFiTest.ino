@@ -12,7 +12,7 @@
  *   (repeats every 10 s)
  *
  * What to check:
- *   - RSSI better than about -75 dBm (the ESP32-CAM PCB antenna is weak).
+ *   - RSSI better than about -75 dBm (keep the PCB antenna clear of metal).
  *   - 200 from /health. A negative code means the TCP connection failed:
  *     server not running, wrong IP, laptop firewall, or a different subnet.
  *   - Brownout reset during connect = power problem (see hardware/wiring.md).

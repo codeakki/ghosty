@@ -25,10 +25,10 @@ size_t readMic(I2SClass &i2s, int16_t *out, size_t samples);
 // Plays int16 mono PCM at SAMPLE_RATE. Blocks until queued in DMA.
 void playPcm16(I2SClass &i2s, const int16_t *pcm, size_t samples);
 
-// True while the button is held (GPIO2 pulled to GND).
+// True while the button is held (PIN_BUTTON pulled to GND).
 bool buttonPressed();
 
-// Red LED helpers (handles the active-LOW wiring).
+// Red LED helpers (handles the active-LOW wiring; no-ops if PIN_LED_RED is -1).
 void setRedLed(bool on);
 void blinkRed(uint8_t times, uint16_t onMs = 100, uint16_t offMs = 100);
 

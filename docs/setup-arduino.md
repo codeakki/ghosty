@@ -1,4 +1,4 @@
-# Arduino setup (ESP32-CAM)
+# Arduino setup (ESP32-S3 N16R8)
 
 From zero to a flashed pod. Works on macOS, Windows and Linux. No PlatformIO; Arduino IDE 2.x only.
 
@@ -11,9 +11,13 @@ From zero to a flashed pod. Works on macOS, Windows and Linux. No PlatformIO; Ar
    https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
    ```
 4. Open **Tools → Board → Boards Manager**, search `esp32`, install **esp32 by Espressif Systems**, version **3.3.x** (CI pins 3.3.12, ESP-IDF 5.5).
-5. Select **Tools → Board → esp32 → AI Thinker ESP32-CAM** (FQBN `esp32:esp32:esp32cam`).
+5. Select **Tools → Board → esp32 → ESP32S3 Dev Module** and set:
+   - Flash Size: **16MB (128Mb)**
+   - PSRAM: **OPI PSRAM** (the "R8" in N16R8 is 8 MB of octal PSRAM)
+   - Partition Scheme: **16M Flash (3MB APP/9.9MB FATFS)**
+   - USB CDC On Boot: **Disabled** when you use the COM port (recommended)
 
-Defaults for this board are fine: PSRAM enabled (4 MB), partition scheme "Huge APP".
+   FQBN: `esp32:esp32:esp32s3:FlashSize=16M,PSRAM=opi,PartitionScheme=app3M_fat9M_16MB`. Any other board stops the build with an error from `pins.h`.
 
 > CI uses `https://espressif.github.io/arduino-esp32/package_esp32_index.json` as the index URL. Both point to the same Espressif package index.
 
@@ -21,8 +25,8 @@ Defaults for this board are fine: PSRAM enabled (4 MB), partition scheme "Huge A
 
 | OS | What to do |
 |---|---|
-| Windows | Install the **CH340** driver from WCH (the ESP32-CAM-MB base board and most cheap USB-TTL adapters use a CH340). Then check Device Manager → Ports for a new COM port. |
-| macOS | Recent macOS usually has a CH340 driver built in. If no `/dev/cu.usbserial-*` or `/dev/cu.wchusbserial*` appears, install the WCH driver. |
+| Windows | Install the **CH343 / CH340** driver from WCH (the COM port's USB-serial bridge). Then check Device Manager → Ports for a new COM port. |
+| macOS | Usually works without a driver. Look for `/dev/cu.usbmodem*`, `/dev/cu.usbserial-*` or `/dev/cu.wchusbserial*`; install the WCH driver if none appears. |
 | Linux | Built in (`ch341` module). Add yourself to the `dialout` group if the port is permission-denied. |
 
 Use a data USB cable. Charge-only cables are the most common reason no port shows up.
@@ -52,17 +56,17 @@ Fill in WiFi SSID and password (2.4 GHz network), the server URL (LAN IP of your
 
 ## 5. Flashing
 
-The ESP32-CAM has no USB port of its own. Two ways to flash:
+The board has two USB-C ports:
 
-| Method | Steps |
+| Port | Steps |
 |---|---|
-| **ESP32-CAM-MB** base board (recommended) | Seat the CAM on the MB board, plug USB, pick the port, click Upload. If upload stalls at "Connecting...", hold **IO0** on the MB board, tap **RST**, release IO0. |
-| **USB-TTL adapter** | Wire 5V→5V, GND→GND, TX→U0R (GPIO3), RX→U0T (GPIO1). Jumper **GPIO0 → GND**, press RST, click Upload. After upload, remove the jumper and press RST to run. |
+| **COM** (recommended) | Plug in, pick the port, click Upload. The USB-serial bridge resets the board into download mode by itself. Keep USB CDC On Boot **Disabled** so `Serial` appears on this port. |
+| **USB** (native) | Set USB CDC On Boot **Enabled**. If upload stalls at "Connecting...", hold **BOOT**, tap **RST**, release BOOT, upload, then tap RST to run. |
 
 Rules that keep download mode working:
 
-- **GPIO2** (our button) must be LOW or floating at reset. The button goes GPIO2 ↔ GND with `INPUT_PULLUP`; never tie GPIO2 to 3V3.
-- **GPIO12** must not be HIGH at reset. Only the amp's DIN (an input) is on GPIO12.
+- Leave the strapping pins **GPIO0, GPIO3, GPIO45, GPIO46** unconnected.
+- Do not use **GPIO26–37** (flash and octal PSRAM) or **GPIO19/20** (native USB).
 
 ## 6. Serial monitor
 
@@ -74,7 +78,7 @@ Flash and pass each sketch before moving on. Each one isolates one subsystem.
 
 | # | Sketch | Pass when |
 |---|---|---|
-| 1 | `01_Blink` | Red LED on GPIO33 blinks (it is active LOW; the board has no `LED_BUILTIN`). |
+| 1 | `01_Blink` | Heartbeat prints every second and PSRAM shows about 8 MB free. |
 | 2 | `02_WiFiTest` | Serial prints an IP address and RSSI. |
 | 3 | `03_MicTest` | RMS meter on serial rises when you talk, stays low when quiet. |
 | 4 | `04_SpeakerTest` | Clean sine tone from the speaker. |
@@ -85,4 +89,4 @@ Run the power test (5V boost, WiFi + audio at once, no resets) between steps 5 a
 
 ## CI
 
-GitHub Actions compiles every sketch for `esp32:esp32:esp32cam` on core 3.3.12 with a stub `secrets.h` copied from the example. A green firmware workflow means the sketches compile; it does not mean they work on hardware.
+GitHub Actions compiles every sketch for `esp32:esp32:esp32s3` (16 MB flash, OPI PSRAM) on core 3.3.12 with a stub `secrets.h` copied from the example. A green firmware workflow means the sketches compile; it does not mean they work on hardware.

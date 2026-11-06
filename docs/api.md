@@ -159,7 +159,7 @@ Body: raw PCM s16le, 16 kHz, mono. The device reads `http.getStreamPtr()` in 1â€
 | 401 | `DEVICE_TOKEN` is set and `X-Device-Token` is missing or wrong | `{"error":"unauthorized"}` |
 | 503 | Safe-stop: brain (0G Compute) offline | `{"error":"brain_offline"}` |
 
-Firmware rule (`06_CloudVoice`): play the body only on `200`. On `503` play nothing and blink the red LED (GPIO33) 3 times fast; on any other error blink 5 times slowly.
+Firmware rule (`06_CloudVoice`): play the body only on `200`. On `503` play nothing and call `blinkRed(3)` (fast); on any other error `blinkRed(5)` (slow). On the ESP32-S3 there is no red LED, so these calls do nothing.
 
 ```bash
 # Make a test clip on a laptop (requires sox or ffmpeg)
