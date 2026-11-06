@@ -38,6 +38,10 @@ Ghosty is a wearable ESP32 voice pod that hosts a private, user-owned trading co
 | Spot leg | Arbitrum / Base | viem + Uniswap Trading API | Wallet tokens → USDC before funding perps, or USDC → PAXG safe haven | `server/src/wallet/uniswap.ts` |
 | Safe-stop | Server | Guard around the decision loop | If 0G is unreachable: speak "brain offline", block every trade | `server/src/safety/safeStop.ts` |
 
+## 0G decides, Claude researches and talks
+
+Trading decisions stay on 0G Compute: every proposed trade comes from the 0G decider, and if 0G is unreachable the pod safe-stops instead of asking anyone else. Claude (Anthropic API, `ANTHROPIC_MODEL`, default `claude-sonnet-5-5`) does two supporting jobs. It answers questions and chit-chat on `/voice` and `/voice/text` ("what's moving gold?", "are you online?") from the live market snapshot, recent headlines with credibility, the last 0G decision and the pending alert, and the reply is marked `answeredBy: "claude"`; utterances that ask for a trade or react to an alert go to the 0G path (`answeredBy: "0g"`), and "yes"/"confirm" by voice only points at the button. It also runs a news scout (`server/src/claude/scout.ts`): every `CLAUDE_SCOUT_MINUTES` one Messages API call with the server-side `web_search` tool returns up to 6 headlines from the last 2 hours as JSON, validated with zod and fed into the aggregator, where dedupe, the rolling window and the shock detector treat them like any other source and 0G decides on them. Claude is never a fallback decider: when it fails the pod says it couldn't reach its research assistant, and when 0G fails there is no decision.
+
 ## Sequence A: voice query
 
 ```
@@ -131,6 +135,7 @@ if (!zeroG.computeReachable() || !zeroG.storageWritable()) {
 ```
 
 - Checked before every decision and again before every order.
+- Slow networks: the reachability probe waits up to `OG_HEALTH_TIMEOUT_MS` (15 s) and flips offline only after 2 consecutive failures (back online after 1 success); a 0G call gets `OG_DECIDE_TIMEOUT_MS` (45 s) and one retry on a timeout or `ECONNRESET` only. A call that still fails throws `brain_offline`.
 - Never fake a decision. No local LLM fallback, no cached plan replay.
 - `/health` reports `safeStop: true` so the demo can show the state.
 - `/voice` and `/button` return `503` with JSON `{"error":"brain_offline"}` and no audio body. The pod plays nothing and blinks the red LED (GPIO33) 3 times fast. See [api.md](api.md).

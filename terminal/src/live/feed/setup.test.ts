@@ -19,7 +19,7 @@ describe('setup notice', () => {
       p('0g-storage', 'not_configured', ['OG_PRIVATE_KEY']),
       p('hyperliquid', 'not_configured', ['HL_MASTER_ADDRESS', 'HL_AGENT_PRIVATE_KEY']),
     ]);
-    expect(n!.headline).toBe('Ghosty can’t decide yet — the storage wallet isn’t set up.');
+    expect(n!.headline).toBe('Ghosty can’t decide yet: the storage wallet isn’t set up.');
     expect(n!.headline).not.toMatch(/[A-Z]{2,}_[A-Z]/);
     expect(n!.issues.map((i) => i.id)).toEqual(['0g-storage', 'hyperliquid', 'groq']);
     expect(n!.issues[0]!.env).toEqual(['OG_PRIVATE_KEY']);

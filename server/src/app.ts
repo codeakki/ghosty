@@ -5,15 +5,18 @@ import { fileURLToPath } from 'node:url';
 import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest, type FastifyServerOptions } from 'fastify';
 import { z } from 'zod';
-import { BrainOfflineError, createAgent, MemoryUnavailableError, type Agent } from './agent/index.js';
+import { BrainOfflineError, createAgent, MemoryUnavailableError, ZeroGBlobStore, type Agent, type BlobStore } from './agent/index.js';
+import { consoleLogger } from './agent/log.js';
+import { DEFAULT_DATA_DIR } from './agent/storage.js';
 import type { Decision } from './agent/decide.js';
 import { createStt } from './audio/stt.js';
+import { ClaudeVoiceAssistant, type VoiceAssistant, type VoiceContext } from './claude/voice.js';
 import { createTts, OUTPUT_SAMPLE_RATE } from './audio/tts.js';
 import { parseWav, WavFormatError } from './audio/wav.js';
 import { loadConfig, type Config } from './config.js';
 import { createCredibilityScorer, type CredibilityScorer } from './credibility/ethos.js';
 import { createExecutor, type Executor } from './execution/executor.js';
-import { registerIntegrationRoutes } from './integrations.js';
+import { registerIntegrationRoutes, zeroGExplorers } from './integrations.js';
 import { createMarketService, type MarketService } from './market/service.js';
 import { registerMarketRoutes } from './market/routes.js';
 import { notConfiguredInfo, ProviderNotConfiguredError } from './mode.js';
@@ -24,9 +27,14 @@ import { shockDetector, type ShockResult } from './news/shock.js';
 import type { NewsItem } from './news/types.js';
 import { createPayments, decisionToSignal, registerPaidRoutes, type PaidRoutesOptions, type Payments, type SignalPayload } from './payments/index.js';
 import { SignalBuyer } from './payments/signalBuyer.js';
-import { Pipeline, type PipelineDeps, type SignalPaymentReceipt } from './pipeline.js';
+import { Pipeline, SafeStopEngagedError, type PipelineDeps, type SignalPaymentReceipt } from './pipeline.js';
 import { BrainSwitch, isBrainOnline } from './safety/safeStop.js';
+import { createCandleLoader, type CandleLoader } from './sim/candles.js';
+import { SimEngine } from './sim/engine.js';
+import { SimEpisodeLog } from './sim/episodes.js';
 import { InjectedNewsProvider } from './sim/injected.js';
+import { registerSimRunRoutes } from './sim/runRoutes.js';
+import { loadScenarios, type Scenario } from './sim/scenarios.js';
 import { registerSimRoutes } from './sim/routes.js';
 import { PodState, type Alert } from './sim/state.js';
 import { VERSION } from './version.js';
@@ -65,7 +73,14 @@ export interface BuildAppOptions {
   providerRegistry?: ProviderRegistry;
   /** GET /market/*. Default: Hyperliquid info API on MARKET_DATA_NETWORK (tests pass one with a mocked fetch). */
   market?: MarketService;
+  /**
+   * Claude voice answers. Default: ClaudeVoiceAssistant when CLAUDE_VOICE_ENABLED (ANTHROPIC_API_KEY set).
+   * null turns routing off (every turn is a 0G decision). Tests pass a mock.
+   */
+  assistant?: VoiceAssistant | null;
   logger?: FastifyServerOptions['logger'];
+  /** Simulation runs: candle loader (tests pass a fake), scenarios, 0G store for sim episodes (null = local only). */
+  sim?: { loadCandles?: CandleLoader; scenarios?: () => Scenario[]; store?: BlobStore | null; autoTick?: boolean; slippageBps?: number };
 }
 
 /** What the news poller did with one batch of fresh headlines. */
@@ -91,6 +106,8 @@ export interface GhostyRuntime {
   market: MarketService;
   /** Present only with NEWS_LIVE=true; index.ts polls it with NewsPoller. */
   aggregator?: NewsAggregator;
+  /** Scenario replay with paper execution (POST /sim/run). */
+  sim: SimEngine;
   /** NewsPoller listener: shockDetector → decision on the strongest headline → alert queue. */
   onFreshNews(items: NewsItem[]): Promise<FreshNewsOutcome>;
 }
@@ -107,6 +124,8 @@ export interface Providers {
   agent: Agent;
   executor: Executor;
   aggregator?: NewsAggregator;
+  /** The one 0G Storage client (shared by memory, live episodes and sim episodes so uploads never race on the nonce). */
+  blobStore?: BlobStore;
 }
 
 /**
@@ -118,7 +137,11 @@ export function createProviders(
   opts: Pick<BuildAppOptions, 'scorer' | 'agent' | 'executor'> & { logger?: FastifyInstance['log'] } = {},
 ): Providers {
   const scorer = opts.scorer ?? createCredibilityScorer(config);
-  const agent = opts.agent ?? createAgent(config, { logger: opts.logger, scorer });
+  const blobStore =
+    !opts.agent && config.OG_PRIVATE_KEY
+      ? new ZeroGBlobStore({ privateKey: config.OG_PRIVATE_KEY, rpcUrl: config.OG_RPC_URL, indexerUrl: config.OG_INDEXER_URL, logger: opts.logger ?? consoleLogger })
+      : undefined;
+  const agent = opts.agent ?? createAgent(config, { logger: opts.logger, scorer, blobStore });
   const executor = opts.executor ?? createExecutor(config);
   // Aggregate only live news: the fake headlines carry fixed timestamps and would fall out of the rolling window.
   const aggregator = config.NEWS_LIVE ? createNewsAggregator(config, { scorer }) : undefined;
@@ -127,6 +150,7 @@ export function createProviders(
     agent,
     executor,
     aggregator,
+    blobStore,
     deps: {
       stt: createStt(config),
       tts: createTts(config),
@@ -148,6 +172,19 @@ export function defaultDeps(config: Config): PipelineDeps {
 }
 
 const NO_SIGNAL: SignalPayload = { signal: 'none', confidence: 0, actions: [], requestId: 'no-decision-yet' };
+
+/** `fallback` if `p` has not settled within `ms` (or rejects). Keeps the voice context from stalling a turn. */
+async function within<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(fallback), ms);
+  });
+  try {
+    return await Promise.race([p.catch(() => fallback), late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 function tokenMatches(got: string, expected: string): boolean {
   const a = Buffer.from(got);
@@ -188,12 +225,21 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
           }
         }
       : undefined;
+  // Claude answers questions (never trades); `voiceContext` is defined below and only called per request.
+  const assistant: VoiceAssistant | undefined =
+    opts.assistant !== undefined
+      ? (opts.assistant ?? undefined)
+      : config.CLAUDE_VOICE_ENABLED && config.ANTHROPIC_API_KEY
+        ? new ClaudeVoiceAssistant({ apiKey: config.ANTHROPIC_API_KEY, model: config.ANTHROPIC_MODEL, context: () => voiceContext() })
+        : undefined;
   const pipeline = new Pipeline({
     paySignal,
     paySignalWaitMs: config.X402_AUTOPAY_WAIT_MS,
     ...deps,
     news: [...deps.news, injected],
     observer: state,
+    assistant,
+    brainOnline,
   });
 
   // 0G failures never become a fake decision: map them to 503 so the pod says "brain offline".
@@ -210,6 +256,10 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
         requestId: err.requestId ?? null,
         ...(err.reason === 'not_configured' ? { provider: '0g-router', missingEnv: ['OG_API_KEY'] } : {}),
       });
+    }
+    if (err instanceof SafeStopEngagedError) {
+      req.log.warn('trade request while safe-stop is engaged');
+      return reply.code(503).send({ error: 'brain_offline' });
     }
     if (err instanceof MemoryUnavailableError) {
       req.log.warn({ err: err.message }, '0G memory unavailable, trade blocked');
@@ -240,8 +290,67 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
     }
   };
 
+  // Simulation: real decider (0G in live mode), historical world, PaperVenue only. Sim episodes go to 0G Storage
+  // when OG_PRIVATE_KEY is set, else to <dataDir>/sim-episodes.jsonl labelled storage "local".
+  const dataDir = config.OG_DATA_DIR ?? DEFAULT_DATA_DIR;
+  const simStore = opts.sim?.store === null ? undefined : (opts.sim?.store ?? providers.blobStore);
+  const simLog = new SimEpisodeLog({ dataDir, store: simStore, logger: app.log });
+  const sim = new SimEngine({
+    decider: deps.decider,
+    memory: deps.memory,
+    episodes: simLog,
+    loadCandles: opts.sim?.loadCandles ?? createCandleLoader({ dataDir }),
+    scenarios: opts.sim?.scenarios ?? (() => loadScenarios()),
+    brainOnline,
+    publish: (type, data) => state.publishSim(type, data),
+    maxTradeUsd: config.MAX_TRADE_USD,
+    slippageBps: opts.sim?.slippageBps,
+    logger: app.log,
+    autoTick: opts.sim?.autoTick,
+  });
+  app.addHook('onClose', async () => sim.stop());
+
   const providerRegistry = opts.providerRegistry ?? new ProviderRegistry({ config });
   const market = opts.market ?? createMarketService(config, { logger: app.log });
+
+  // What Claude sees for a question: live prices, latest headlines with credibility, last 0G decision, pending
+  // alert and trade, recent orders, mode. Slow sources fall back to "unknown" instead of stalling the turn.
+  const voiceContext = async (): Promise<VoiceContext> => {
+    const snap = state.snapshot();
+    const [online, marketSnap] = await Promise.all([
+      within(brainOnline(), 2_000, !snap.safeStop),
+      within(market.snapshot().then((m) => m as typeof m | null), 3_000, null),
+    ]);
+    const simStatus = sim.status().status;
+    const pendingAlert = snap.alerts.find((a) => a.status !== 'acked') ?? null;
+    return {
+      mode: config.GHOSTY_MODE,
+      simRunActive: simStatus === 'running' || simStatus === 'paused',
+      safeStop: !online,
+      market: marketSnap ? marketSnap.assets.map((a) => ({ coin: a.coin, label: a.label, mid: a.mid, change24hPct: a.change24hPct })) : null,
+      headlines: snap.news.slice(0, 10).map((n) => ({
+        title: n.title,
+        source: n.summary && n.source === 'claude-scout' ? `${n.summary} (via Claude scout)` : n.source,
+        publishedAt: n.publishedAt,
+        ...(n.weight === undefined ? {} : { weight: n.weight }),
+        credibility: n.credibility?.level ?? null,
+      })),
+      lastDecision: snap.lastDecision
+        ? {
+            signal: snap.lastDecision.signal,
+            confidence: snap.lastDecision.confidence,
+            rationale: snap.lastDecision.rationale,
+            at: snap.lastDecision.at,
+            trigger: snap.lastDecision.trigger,
+          }
+        : null,
+      pendingAlert: pendingAlert
+        ? { text: pendingAlert.text, signal: pendingAlert.signal, createdAt: pendingAlert.createdAt, ...(pendingAlert.headline ? { headline: pendingAlert.headline } : {}) }
+        : null,
+      pendingTrade: snap.plannedActions,
+      recentOrders: snap.orders.slice(0, 5).map((o) => ({ coin: o.coin, isBuy: o.isBuy, sizeUsd: o.sizeUsd, status: o.status, at: o.at })),
+    };
+  };
 
   app.decorate('ghosty', {
     config,
@@ -253,6 +362,7 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
     providers: providerRegistry,
     market,
     aggregator: providers.aggregator,
+    sim,
     onFreshNews,
   } satisfies GhostyRuntime);
 
@@ -271,7 +381,7 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
           .code(204)
           .send();
       }
-      reply.header('access-control-expose-headers', 'x-request-id,x-signal,x-sample-rate,payment-required,payment-response');
+      reply.header('access-control-expose-headers', 'x-request-id,x-signal,x-answered-by,x-sample-rate,payment-required,payment-response');
     });
   }
 
@@ -316,7 +426,9 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
     safeStop: !(await brainOnline()),
   }));
 
-  app.post('/voice', { preHandler: [requireDevice, requireVoice, requireBrain] }, async (req, reply) => {
+  // With Claude on, questions do not need 0G: the pipeline checks safe-stop on the trade path only.
+  const voicePreHandlers = assistant ? [requireDevice, requireVoice] : [requireDevice, requireVoice, requireBrain];
+  app.post('/voice', { preHandler: voicePreHandlers }, async (req, reply) => {
     if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
       return reply.code(400).send({ error: 'expected_wav_body' });
     }
@@ -331,14 +443,22 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
 
     const result = await pipeline.handleVoice(wav);
     req.log.info(
-      { requestId: result.decision.requestId, signal: result.decision.signal, confidence: result.decision.confidence },
-      'voice decision',
+      {
+        answeredBy: result.answeredBy,
+        intent: result.intent,
+        requestId: result.requestId,
+        signal: result.decision?.signal,
+        confidence: result.decision?.confidence,
+        assistantError: result.assistantError,
+      },
+      'voice turn',
     );
     return reply
       .header('content-type', 'application/octet-stream')
       .header('x-sample-rate', String(OUTPUT_SAMPLE_RATE))
-      .header('x-request-id', result.decision.requestId)
-      .header('x-signal', result.decision.signal)
+      .header('x-request-id', result.requestId)
+      .header('x-signal', result.decision?.signal ?? 'none')
+      .header('x-answered-by', result.answeredBy)
       .send(result.audio);
   });
 
@@ -347,6 +467,8 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
     if (!parsed.success) {
       return reply.code(400).send({ error: 'bad_request', message: 'body must be {"action":"confirm"|"cancel"}' });
     }
+    // A pending SIM decision always takes the press, and only ever fills on the PaperVenue.
+    if (sim.hasPending()) return sim.press(parsed.data.action);
     // Live mode without Hyperliquid keys: refuse before the pending decision is consumed.
     const venue = notConfiguredInfo(deps.venue);
     if (parsed.data.action === 'confirm' && venue) return reply.code(503).send(new ProviderNotConfiguredError(venue).body());
@@ -381,6 +503,16 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
     safeStopEngaged: async () => !(await brainOnline()),
     requireDevice,
     requireBrain,
+    voiceRouting: assistant !== undefined,
+  });
+
+  registerSimRunRoutes(app, {
+    engine: sim,
+    simLog,
+    liveEpisodes: providers.agent.episodes,
+    store: simStore,
+    storagescan: zeroGExplorers(config).storagescan,
+    requireDevice,
   });
 
   // Paid GET /signal (x402 on Hedera): serves the latest decision from the pod state.

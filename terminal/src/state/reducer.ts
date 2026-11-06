@@ -7,6 +7,7 @@ import {
   parseNews,
   parseOrder,
   parseProviders,
+  parseSimRun,
   parseSnapshot,
 } from '../api/client';
 import type {
@@ -187,7 +188,8 @@ function foldSse(state: TerminalState, event: SseEventType, data: unknown, at: n
     }
     case 'news': {
       const item = parseNews(data);
-      if (!item) return base;
+      // Simulated headlines live in the Live feed (tagged SIM), never in the live news list.
+      if (!item || item.sim) return base;
       const news = [item, ...snap.news.filter((n) => n.id !== item.id)].slice(0, 50);
       const stages: StageId[] = item.credibility || item.weight !== undefined ? ['news', 'credibility'] : ['news'];
       return log(
@@ -248,9 +250,16 @@ function foldSse(state: TerminalState, event: SseEventType, data: unknown, at: n
     }
     case 'market': {
       const tick = parseMarketTick(data);
-      if (!tick) return base;
+      // Simulation ticks are historical prices: they never touch the live ticker.
+      if (!tick || tick.sim) return base;
       // Market ticks are frequent: they never reach the console.
       return { ...base, mids: { ...state.mids, ...tick.mids }, series: appendMids(state.series, tick.mids), midsAt: at };
+    }
+    case 'sim': {
+      // A run that ended or stopped takes its pending paper trade with it.
+      const run = parseSimRun(data);
+      if (!run || run.status === 'running' || run.status === 'paused') return base;
+      return state.banner?.sim ? { ...base, banner: null } : base;
     }
     case 'providers': {
       const providers = parseProviders(data);

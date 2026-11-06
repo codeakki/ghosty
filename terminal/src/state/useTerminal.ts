@@ -3,7 +3,7 @@ import { describeError, GhostyClient, type ClientSettings } from '../api/client'
 import type { ApiResult, SseEventType } from '../api/types';
 import { initialState, reducer, type Action } from './reducer';
 
-const SSE_EVENTS: SseEventType[] = ['state', 'news', 'decision', 'alert', 'order', 'episode', 'market', 'providers'];
+const SSE_EVENTS: SseEventType[] = ['state', 'news', 'decision', 'alert', 'order', 'episode', 'market', 'providers', 'sim'];
 
 const STATUS_POLL_MS = 5_000;
 const EXECUTION_POLL_MS = 30_000;
@@ -215,7 +215,7 @@ export function useTerminal(settings: ClientSettings, tap?: (action: Action) => 
     [injectNews, pressButton, setSafeStop, paySignal, ackAlert, dismissAlert, logLine, refreshStatus],
   );
 
-  return { state, client, actions };
+  return { state, client, actions, dispatch };
 }
 
 export type TerminalActions = ReturnType<typeof useTerminal>['actions'];

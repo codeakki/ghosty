@@ -1,7 +1,7 @@
 export interface NewsItem {
   /** Stable id, prefixed by source (e.g. "rss:coindesk:123"). */
   id: string;
-  /** Provider name: rss, cryptopanic, polymarket, grok. */
+  /** Provider name: rss, cryptopanic, polymarket, grok, claude-scout. */
   source: string;
   title: string;
   url: string;
@@ -13,6 +13,8 @@ export interface NewsItem {
   domain?: string;
   /** Short description or post text when the provider has one. */
   summary?: string;
+  /** claude-scout only: the scout's one-line note on why it may move markets. Not read by the shock detector. */
+  why?: string;
   /** CryptoPanic community votes collapsed to 0 (bearish) .. 1 (bullish); 0.5 = neutral/no votes. */
   sentiment?: number;
   /** Polymarket: implied probability (0..1) of the market's "Yes" outcome. */

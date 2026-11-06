@@ -5,7 +5,7 @@ import type { SpotOutcome } from '../execution/executor.js';
 import type { OrderResult } from '../execution/hyperliquid.js';
 import type { PlannedAction, Signal } from '../execution/playbook.js';
 import type { NewsItem } from '../news/types.js';
-import type { ButtonResult, DecisionContext, DecisionTrigger, PipelineObserver } from '../pipeline.js';
+import type { ButtonResult, DecisionContext, DecisionTrigger, PipelineObserver, VoiceTurn } from '../pipeline.js';
 
 /**
  * In-memory picture of what the pod knows: the virtual pod's single source of truth.
@@ -87,8 +87,11 @@ export interface PodSnapshot {
   alerts: Alert[];
 }
 
-/** `providers` and `market` come from index.ts (provider poller, market stream), never from the pipeline. */
-export type PodEventType = 'state' | 'news' | 'decision' | 'alert' | 'order' | 'episode' | 'providers' | 'market';
+/**
+ * `providers` and `market` come from index.ts (provider poller, market stream), never from the pipeline.
+ * `voice` is one conversation turn {transcript, reply, answeredBy, requestId?}; it is not part of the snapshot.
+ */
+export type PodEventType = 'state' | 'news' | 'decision' | 'alert' | 'order' | 'episode' | 'providers' | 'market' | 'sim' | 'voice';
 
 export interface PodEvent {
   id: number;
@@ -200,6 +203,11 @@ export class PodState implements PipelineObserver {
     this.emit('episode', record);
   }
 
+  /** A voice/text turn (Claude answer, 0G decision or confirm hint): SSE `voice` for the Live feed. */
+  onVoice(turn: VoiceTurn): void {
+    this.emit('voice', turn, false);
+  }
+
   // --- Alerts -------------------------------------------------------------
 
   /** Queue a spoken alert for an actionable decision. Returns null when the signal is `none`. */
@@ -243,6 +251,14 @@ export class PodState implements PipelineObserver {
 
   /** Broadcast an event that is not part of the pod snapshot (provider health, market mids). */
   publish(type: 'providers' | 'market', data: unknown): void {
+    this.emit(type, data, false);
+  }
+
+  /**
+   * Broadcast a simulation-run event (data tagged `sim: true, runId` by the engine). Never touches the pod
+   * snapshot: sim news, decisions, alerts and orders stay out of /state, /signal and the live ticker.
+   */
+  publishSim(type: 'sim' | 'market' | 'news' | 'decision' | 'alert' | 'order' | 'episode', data: object): void {
     this.emit(type, data, false);
   }
 
