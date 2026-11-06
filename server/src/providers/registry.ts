@@ -108,6 +108,9 @@ export class ProviderRegistry {
 
   private async runOne(probe: ProviderProbe): Promise<ProviderStatus> {
     const started = this.now();
+    // An explicit registry timeout (tests) wins; otherwise a slow probe may ask for more than the 5 s default.
+    const budgetMs = this.opts.timeoutMs ?? probe.timeoutMs ?? this.timeoutMs;
+    const attemptTimeoutMs = budgetMs > PROBE_TIMEOUT_MS ? budgetMs - 500 : undefined;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_, reject) => {
@@ -115,11 +118,11 @@ export class ProviderRegistry {
         // Reject first so the race reports the timeout, then abort the probe's requests.
         reject(Object.assign(new Error('timed out'), { name: 'TimeoutError' }));
         controller.abort();
-      }, this.timeoutMs);
+      }, budgetMs);
     });
     let result: ProbeResult;
     try {
-      result = await Promise.race([probe.run({ config: this.opts.config, fetch: this.fetchImpl, signal: controller.signal }), timeout]);
+      result = await Promise.race([probe.run({ config: this.opts.config, fetch: this.fetchImpl, signal: controller.signal, attemptTimeoutMs }), timeout]);
     } catch (err) {
       result = { state: 'offline', detail: describeError(err) };
     } finally {

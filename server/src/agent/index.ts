@@ -45,6 +45,7 @@ export function createDecider(config: Config, opts: CreateAgentOptions = {}): De
       apiKey: config.OG_API_KEY,
       model: config.OG_MODEL,
       jsonMode: config.OG_JSON_MODE,
+      timeoutMs: config.OG_DECIDE_TIMEOUT_MS,
       scorer: opts.scorer,
       logger: opts.logger ?? consoleLogger,
     });

@@ -5,7 +5,7 @@ import type { SpotOutcome } from '../execution/executor.js';
 import type { OrderResult } from '../execution/hyperliquid.js';
 import type { PlannedAction, Signal } from '../execution/playbook.js';
 import type { NewsItem } from '../news/types.js';
-import type { ButtonResult, DecisionContext, DecisionTrigger, PipelineObserver } from '../pipeline.js';
+import type { ButtonResult, DecisionContext, DecisionTrigger, PipelineObserver, VoiceTurn } from '../pipeline.js';
 
 /**
  * In-memory picture of what the pod knows: the virtual pod's single source of truth.
@@ -87,8 +87,11 @@ export interface PodSnapshot {
   alerts: Alert[];
 }
 
-/** `providers` and `market` come from index.ts (provider poller, market stream), never from the pipeline. */
-export type PodEventType = 'state' | 'news' | 'decision' | 'alert' | 'order' | 'episode' | 'providers' | 'market' | 'sim';
+/**
+ * `providers` and `market` come from index.ts (provider poller, market stream), never from the pipeline.
+ * `voice` is one conversation turn {transcript, reply, answeredBy, requestId?}; it is not part of the snapshot.
+ */
+export type PodEventType = 'state' | 'news' | 'decision' | 'alert' | 'order' | 'episode' | 'providers' | 'market' | 'sim' | 'voice';
 
 export interface PodEvent {
   id: number;
@@ -198,6 +201,11 @@ export class PodState implements PipelineObserver {
   onEpisode(record: EpisodeRecord): void {
     this.episodes = [record, ...this.episodes].slice(0, LIMITS.episodes);
     this.emit('episode', record);
+  }
+
+  /** A voice/text turn (Claude answer, 0G decision or confirm hint): SSE `voice` for the Live feed. */
+  onVoice(turn: VoiceTurn): void {
+    this.emit('voice', turn, false);
   }
 
   // --- Alerts -------------------------------------------------------------

@@ -73,7 +73,8 @@ export const ELEVENLABS_BASE_URL = 'https://api.elevenlabs.io/v1';
 /** "George", the voice id used in the ElevenLabs API reference examples. */
 export const ELEVENLABS_DEFAULT_VOICE_ID = 'JBFqnCBsd6RMkjVDRZzb';
 export const ELEVENLABS_DEFAULT_MODEL = 'eleven_flash_v2_5';
-export const TTS_TIMEOUT_MS = 20_000;
+/** A ~45-word reply can take 15-20 s to synthesize on a slow network; 20 s timed out in practice. */
+export const TTS_TIMEOUT_MS = 45_000;
 
 export interface ElevenLabsTtsOptions {
   apiKey: string;

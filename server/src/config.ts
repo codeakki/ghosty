@@ -50,6 +50,22 @@ const ConfigSchema = z.object({
   // TTS fallback only (gpt-4o-mini-tts, 24 kHz PCM resampled to 16 kHz). Used when ELEVENLABS_API_KEY is unset.
   OPENAI_API_KEY: optional,
 
+  /** Claude (Anthropic API): voice answers to questions and the news scout. Never decides trades (that is 0G). */
+  ANTHROPIC_API_KEY: optional,
+  ANTHROPIC_MODEL: z.string().default('claude-sonnet-5-5'),
+  /** Answer questions and chit-chat on /voice and /voice/text with Claude. Default: on when ANTHROPIC_API_KEY is set. */
+  CLAUDE_VOICE_ENABLED: boolOrUnset,
+  /** Claude web-search news scout feeding the aggregator. Default: on when ANTHROPIC_API_KEY is set. */
+  CLAUDE_SCOUT_ENABLED: boolOrUnset,
+  CLAUDE_SCOUT_MINUTES: posInt(5),
+  CLAUDE_SCOUT_QUERY: z
+    .string()
+    .default(
+      'breaking geopolitical, regulatory, exchange-hack and macro news that could move BTC, ETH, gold, oil or US stocks in the last hour',
+    ),
+  /** Cost guard: at most this many scout cycles (Messages API calls) per UTC day. */
+  CLAUDE_SCOUT_MAX_PER_DAY: posInt(200),
+
   OG_ROUTER_URL: z.string().default('https://router-api-testnet.integratenetwork.work/v1'),
   OG_API_KEY: optional,
   OG_PRIVATE_KEY: optional,
@@ -58,6 +74,10 @@ const ConfigSchema = z.object({
   OG_MODEL: z.string().default('glm-4.7'),
   /** Ask the router for `response_format: json_object`. Turn off for models without structured-output support. */
   OG_JSON_MODE: bool(true),
+  /** Safe-stop reachability probe (GET <OG_ROUTER_URL>/models) timeout. Slow networks need more than a few seconds. */
+  OG_HEALTH_TIMEOUT_MS: posInt(15_000),
+  /** Per-attempt 0G decide() timeout; one retry on timeout or ECONNRESET only. */
+  OG_DECIDE_TIMEOUT_MS: posInt(45_000),
   /** 0G Galileo EVM RPC used to submit storage transactions. */
   OG_RPC_URL: z.string().default('https://evmrpc-testnet.0g.ai'),
   /** 32-byte hex AES-256-GCM key for user memory. Unset → sha256-derived from OG_PRIVATE_KEY. */
@@ -167,10 +187,12 @@ const ConfigSchema = z.object({
 
 type ParsedConfig = z.infer<typeof ConfigSchema>;
 
-export type Config = Omit<ParsedConfig, 'GHOSTY_MODE' | 'NEWS_LIVE' | 'ETHOS_ENABLED'> & {
+export type Config = Omit<ParsedConfig, 'GHOSTY_MODE' | 'NEWS_LIVE' | 'ETHOS_ENABLED' | 'CLAUDE_VOICE_ENABLED' | 'CLAUDE_SCOUT_ENABLED'> & {
   GHOSTY_MODE: 'live' | 'test';
   NEWS_LIVE: boolean;
   ETHOS_ENABLED: boolean;
+  CLAUDE_VOICE_ENABLED: boolean;
+  CLAUDE_SCOUT_ENABLED: boolean;
 };
 
 /**
@@ -191,5 +213,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     GHOSTY_MODE: mode,
     NEWS_LIVE: parsed.NEWS_LIVE ?? live,
     ETHOS_ENABLED: parsed.ETHOS_ENABLED ?? live,
+    CLAUDE_VOICE_ENABLED: Boolean(parsed.ANTHROPIC_API_KEY) && (parsed.CLAUDE_VOICE_ENABLED ?? true),
+    CLAUDE_SCOUT_ENABLED: Boolean(parsed.ANTHROPIC_API_KEY) && (parsed.CLAUDE_SCOUT_ENABLED ?? true),
   };
 }
