@@ -13,7 +13,7 @@ import type { TextToSpeech } from './audio/tts.js';
 import type { CredibilityScore, CredibilityScorer } from './credibility/ethos.js';
 import type { MarketFilter, MarketInfo, MarketOrderRequest, OrderResult, PerpVenue } from './execution/hyperliquid.js';
 import { ProviderNotConfiguredError, type NotConfiguredInfo, type NotConfiguredSlot } from './mode.js';
-import type { PaidSignal, SignalPayer } from './payments/x402Client.js';
+import type { PaidResource, Payer } from './payments/x402Client.js';
 import type { SpotLeg, SwapRequest, SwapResult } from './wallet/uniswap.js';
 
 /** Names of the keys in `keys` whose value is missing (undefined or blank). */
@@ -130,12 +130,12 @@ export class NotConfiguredScorer extends Slot implements CredibilityScorer {
   }
 }
 
-export class NotConfiguredPayer extends Slot implements SignalPayer {
+export class NotConfiguredPayer extends Slot implements Payer {
   readonly mode = 'not_configured' as const;
   constructor(missingEnv: string[]) {
     super('hedera-payer', missingEnv);
   }
-  async payForSignal(): Promise<PaidSignal> {
+  async pay(): Promise<PaidResource> {
     this.fail();
   }
 }

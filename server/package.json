@@ -17,6 +17,8 @@
     "typecheck": "tsc --noEmit",
     "test": "GHOSTY_MODE=test node --test --import tsx test/*.test.ts",
     "x402:demo": "tsx src/scripts/x402Demo.ts",
+    "hedera:setup": "tsx src/scripts/hederaSetup.ts",
+    "signal-desk": "tsx src/scripts/signalDesk.ts",
     "hl:check": "tsx src/scripts/hlCheck.ts",
     "doctor": "tsx src/scripts/doctor.ts",
     "start:live": "npm run build && GHOSTY_MODE=live node dist/index.js"

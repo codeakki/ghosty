@@ -54,6 +54,8 @@ const shutdown = async (signal: string) => {
   providers.stopPolling();
   market.stop();
   await app.close();
+  // Close the Hedera SDK client behind the HCS audit log (open gRPC channels keep the process alive).
+  app.ghosty.payments.audit.close();
   // Wait for queued 0G Storage uploads (memory and episodes) before exiting.
   await app.ghosty.agent.flush().catch((err: unknown) => app.log.error({ err }, '0G flush failed'));
   process.exit(0);

@@ -1,6 +1,6 @@
 # Ghosty
 
-Ghosty is a wearable ESP32 voice pod that hosts a private, user-owned trading copilot. It reads the news for you, scores how credible each signal is, speaks an alert through its own speaker, and executes the trade from its own wallet when you press one button. The decision loop runs on 0G Compute, every decision is logged to 0G Storage, the agent pays for its premium signal feed per call with x402 on Hedera, and trades go to Hyperliquid perps (with a Uniswap spot leg). If the 0G brain is unreachable, the pod says so and refuses to trade.
+Ghosty is a wearable ESP32 voice pod that hosts a private, user-owned trading copilot. It reads the news for you, scores how credible each signal is, speaks an alert through its own speaker, and executes the trade from its own wallet when you press one button. The decision loop runs on 0G Compute, every decision is logged to 0G Storage, before each shock decision the agent buys a headline-intelligence bundle from an independent x402 merchant on Hedera (USDC or HBAR, verified on chain, logged to an HCS topic), and trades go to Hyperliquid perps (with a Uniswap spot leg). If the 0G brain is unreachable, the pod says so and refuses to trade.
 
 Built at ETHGlobal Mumbai, Nov 6–8 2026.
 
@@ -13,7 +13,7 @@ Built at ETHGlobal Mumbai, Nov 6–8 2026.
 -->
 
 - Video (≤ 3 min): _TODO link_
-- HashScan x402 payment: _TODO tx link_
+- HashScan x402 payment (agent buys intel before a 0G decision, 0.01 USDC, mirror-verified): [0.0.9185802@1793984888.876950864](https://hashscan.io/testnet/transaction/0.0.9185802-1793984888-876950864) · HCS audit topic: [0.0.11342727](https://hashscan.io/testnet/topic/0.0.11342727) · walkthrough: [docs/hedera.md](docs/hedera.md)
 - 0G Storage episode log: _TODO root hash / storagescan link_
 
 ## How it works
@@ -26,7 +26,7 @@ Built at ETHGlobal Mumbai, Nov 6–8 2026.
    speaker, LiPo→TP4056→5V boost         ├─ credibility: Ethos score per handle/address (optional)
                                          ├─ decision loop: 0G Compute chat completion (request ID logged)
 <--raw PCM s16le 16k over HTTP--         ├─ memory: encrypted (AES-256) blobs on 0G Storage; episode log per decision
-                                         ├─ payments: x402 client on Hedera testnet pays /signal per call
+                                         ├─ payments: x402 client buys intel from the Signal Desk (USDC/HBAR on Hedera testnet)
                                          ├─ execution: Hyperliquid API wallet (@nktkas/hyperliquid) opens perp
                                          │    (xyz:GOLD / xyz:WTI long, BTC short) — main venue
                                          ├─ spot leg: viem + Uniswap Trading API (Arbitrum/Base) swap → USDC
@@ -137,8 +137,8 @@ The server runs on **real data only**. `GHOSTY_MODE=live` is the default: each p
 | Ethos credibility | none (`ETHOS_ENABLED=true` by default) | n/a | Weights unknown if disabled |
 | 0G Compute decider | `OG_API_KEY` (+ `OG_ROUTER_URL`, `OG_MODEL`) | https://pc.0g.ai (mainnet) or https://pc.testnet.0g.ai | Safe-stop: `503 brain_offline`, no decision |
 | 0G Storage memory + episode log | `OG_PRIVATE_KEY` (optional `OG_MEMORY_KEY`) | Any EVM key, funded at https://faucet.0g.ai | `503 not_configured` |
-| Hedera x402 payer + HCS audit | `HEDERA_ACCOUNT_ID`, `HEDERA_PRIVATE_KEY` | https://portal.hedera.com (testnet faucet) | `/sim/pay-signal` answers `503 not_configured` |
-| Paid `GET /signal` (merchant) | `X402_PAY_TO` (a **second** testnet account) | https://portal.hedera.com | `503 payments_not_configured` |
+| Hedera agent wallet (x402 payer) + HCS audit | `HEDERA_ACCOUNT_ID`, `HEDERA_PRIVATE_KEY`, `HEDERA_HCS_TOPIC_ID`, `HEDERA_HCS_SUBMIT_KEY` (written by `npm run hedera:setup` from `HEDERA_TREASURY_*`, see [docs/hedera.md](docs/hedera.md#4-accounts-and-keys)) | https://portal.hedera.com (testnet faucet) | `/sim/pay-signal` answers `503 not_configured` |
+| Signal Desk merchant (`npm run signal-desk`) | `X402_PAY_TO` (a **second** testnet account, USDC-associated by `npm run hedera:setup`) | https://portal.hedera.com | desk answers `503 payments_not_configured` |
 | Hyperliquid perps | `HL_MASTER_ADDRESS`, `HL_AGENT_PRIVATE_KEY` (+ `HL_TESTNET`, `HL_DEXES`, `HL_FALLBACK_COINS`) | API wallet approved at https://app.hyperliquid-testnet.xyz/API | Confirm answers `503 not_configured`; market listing stays real |
 | Uniswap spot leg | `UNISWAP_API_KEY`, `EVM_PRIVATE_KEY`, `UNISWAP_SPOT_LEG=true` (+ `EVM_RPC_URL`, `EVM_CHAIN_ID`) | https://developers.uniswap.org/dashboard | Spot step fails with `not_configured` |
 
@@ -146,7 +146,7 @@ The server runs on **real data only**. `GHOSTY_MODE=live` is the default: each p
 
 **Terminal.** `GET /providers/status` (provider health), `GET /market/snapshot` and `GET /market/history` (Hyperliquid prices with no keys; `MARKET_DATA_NETWORK=mainnet` by default for display, orders follow `HL_TESTNET`), plus SSE `providers` and `market` events on `/events`. When `terminal/dist/index.html` exists the server serves the terminal at `/` (`TERMINAL_DIST` overrides the path); CORS allows the Vite dev server at `http://localhost:5173` in live mode. See [docs/api.md](docs/api.md#terminal-providers-and-market-data).
 
-Status endpoints show which mode each integration is in: `GET /zerog/status`, `GET /x402/status`, `GET /execution/markets` (see [docs/api.md](docs/api.md#integration-status)). Pre-flight checks: `npm run doctor`, `npm run hl:check` (Hyperliquid markets and margin, read-only) and `npm run x402:demo` (one real paid `/signal`, appended to [docs/evidence.md](docs/evidence.md)).
+Status endpoints show which mode each integration is in: `GET /zerog/status`, `GET /x402/status`, `GET /execution/markets` (see [docs/api.md](docs/api.md#integration-status)). Pre-flight checks: `npm run doctor`, `npm run hl:check` (Hyperliquid markets and margin, read-only) and `npm run hedera:setup` (idempotent custody split: treasury, agent hot wallet, USDC association, HCS topic) and `npm run x402:demo` (one real intel purchase from the Signal Desk, appended to [docs/evidence.md](docs/evidence.md)).
 
 No pod yet? Open http://localhost:3000/sim for the virtual pod (hold-to-talk, inject headlines, confirm trades, live state), or use `npm run pod -- help`. See [docs/simulator.md](docs/simulator.md).
 
@@ -231,7 +231,7 @@ The device streams the PCM reply straight to I2S in 1–2 KB chunks. No MP3 deco
 | # | Track | How Ghosty qualifies |
 |---|---|---|
 | 1 | **0G — Physical AI: Agents with a Body** | Real wearable. Every decision is a 0G Compute call with its request ID logged; each decision is written as an episode to 0G Storage; encrypted memory on 0G Storage; safe-stop when 0G is unreachable. |
-| 2 | **Hedera — AI Agents That Pay: x402** | The agent's wallet pays our x402-paywalled `/signal` endpoint per call on `hedera:testnet`, with no human approval. Settled tx ID: see the HashScan link under [Demo](#demo). |
+| 2 | **Hedera — AI Agents That Pay: x402** | Before each shock decision the agent's hot wallet buys a headline-intelligence bundle from the Signal Desk (a separate x402 merchant) in USDC (HTS) or HBAR on `hedera:testnet`, with no human approval, inside per-asset caps. Each payment is re-checked on the mirror node and logged with the decision to an HCS topic. Tx and topic links under [Demo](#demo); walkthrough in [docs/hedera.md](docs/hedera.md). |
 | 3 | **Uniswap — Build with Uniswap** | The spot leg of each trade runs through the Uniswap Trading API. Code: [`server/src/wallet/uniswap.ts`](server/src/wallet/uniswap.ts). Feedback: [FEEDBACK.md](FEEDBACK.md). |
 | stretch | Arkiv + Swarm bonus, EF Anon-RPC | Public market-event index on Arkiv; chain reads via Anon-RPC. Only if time allows. |
 

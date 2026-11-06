@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import type { FacilitatorClient } from '@x402/core/server';
 import { BrainOfflineError, type Decider } from '../src/agent/decide.js';
 import { MemoryUnavailableError } from '../src/agent/memory.js';
 import { buildApp } from '../src/app.js';
@@ -17,17 +16,6 @@ const offlineDecider: Decider = {
   decide: async () => {
     throw new BrainOfflineError('0G router unreachable', 'network_error', { requestId: 'router-req-1' });
   },
-};
-
-/** In-process x402 facilitator: answers /supported, never verifies (the 402 path never reaches it). */
-const facilitator: FacilitatorClient = {
-  getSupported: async () => ({
-    kinds: [{ x402Version: 2, scheme: 'exact', network: 'hedera:testnet', extra: { feePayer: '0.0.9185802' } }],
-    extensions: [],
-    signers: { 'hedera:*': ['0.0.9185802'] },
-  }),
-  verify: async () => ({ isValid: false, invalidReason: 'not_used_in_tests' }),
-  settle: async () => ({ success: false, errorReason: 'not_used_in_tests', transaction: '', network: 'hedera:testnet' }),
 };
 
 const headline = (title: string): NewsItem => ({
@@ -109,49 +97,47 @@ describe('GET /zerog/status', () => {
 });
 
 describe('x402', () => {
-  it('GET /signal answers 402 with Hedera requirements when no payment is attached', async () => {
-    const app = buildApp({ config: loadConfig({ X402_PAY_TO: '0.0.5005' }), x402: { facilitator } });
-    const res = await app.inject({ method: 'GET', url: '/signal' });
-    assert.equal(res.statusCode, 402);
-    assert.ok(res.headers['payment-required'], 'PAYMENT-REQUIRED header');
-    const accepted = res.json().accepts[0];
-    assert.equal(accepted.network, 'hedera:testnet');
-    assert.equal(accepted.asset, '0.0.0');
-    assert.equal(accepted.payTo, '0.0.5005');
-    assert.equal(accepted.amount, '1000000');
+  it('the paid /signal route is gone: intel is sold by the separate Signal Desk', async () => {
+    const app = buildApp({ config: loadConfig({ X402_PAY_TO: '0.0.5005' }) });
+    assert.equal((await app.inject({ method: 'GET', url: '/signal' })).statusCode, 404);
     await app.close();
   });
 
-  it('GET /signal answers 503 when no merchant account is configured', async () => {
-    const app = buildApp({ config: loadConfig({}), x402: { facilitator } });
-    const res = await app.inject({ method: 'GET', url: '/signal' });
-    assert.equal(res.statusCode, 503);
-    assert.equal(res.json().error, 'payments_not_configured');
-    await app.close();
-  });
-
-  it('GET /x402/status shows the budget; POST /sim/pay-signal (fake payer) spends from it', async () => {
-    const app = buildApp({ config: loadConfig({ X402_MAX_SPEND_TINYBAR: '2000000' }) });
+  it('GET /x402/status shows per-asset budgets; POST /sim/pay-signal (fake payer) spends USDC and is never "verified"', async () => {
+    const app = buildApp({ config: loadConfig({ X402_MAX_SPEND_USDC_MICROS: '20000' }) });
     let status = (await app.inject({ method: 'GET', url: '/x402/status' })).json();
     assert.equal(status.mode, 'fake');
-    assert.equal(status.spentToday, 0);
-    assert.equal(status.cap, 2_000_000);
+    assert.equal(status.budgets.USDC.spentToday, '0');
+    assert.equal(status.budgets.USDC.cap, '20000');
+    assert.equal(status.budgets.HBAR.asset, '0.0.0');
     assert.deepEqual(status.allowedHosts, ['localhost', '127.0.0.1']);
     assert.equal(status.hcsTopicUrl, null);
     assert.equal(status.lastPayment, null);
 
-    const paid = await app.inject({ method: 'POST', url: '/sim/pay-signal' });
+    const paid = await app.inject({ method: 'POST', url: '/sim/pay-signal', payload: { headline: 'Missile strikes near Hormuz' } });
     assert.equal(paid.statusCode, 200);
     assert.match(paid.json().hashscanUrl, /^https:\/\/hashscan\.io\/testnet\/transaction\//);
+    assert.equal(paid.json().bundle.shock.category, 'geopolitical_shock');
+    assert.equal(paid.json().amountLabel, '0.01 USDC');
 
+    await new Promise((r) => setImmediate(r));
     status = (await app.inject({ method: 'GET', url: '/x402/status' })).json();
-    assert.equal(status.spentToday, 1_000_000);
+    assert.equal(status.budgets.USDC.spentToday, '10000');
     assert.equal(status.lastPayment.txId, paid.json().txId);
+    assert.equal(status.lastPayment.verified, false, 'a fake payment is never shown as verified');
 
-    await app.inject({ method: 'POST', url: '/sim/pay-signal' });
-    const refused = await app.inject({ method: 'POST', url: '/sim/pay-signal' });
+    await app.inject({ method: 'POST', url: '/sim/pay-signal', payload: { headline: 'second' } });
+    const refused = await app.inject({ method: 'POST', url: '/sim/pay-signal', payload: { headline: 'third' } });
     assert.equal(refused.statusCode, 409, 'daily cap reached');
     assert.equal(refused.json().error, 'payment_refused');
+    await app.close();
+  });
+
+  it('GET /hedera/audit answers 503 not_configured without a topic', async () => {
+    const app = buildApp({ config: loadConfig({}) });
+    const res = await app.inject({ method: 'GET', url: '/hedera/audit' });
+    assert.equal(res.statusCode, 503);
+    assert.deepEqual(res.json().missingEnv, ['HEDERA_HCS_TOPIC_ID', 'HEDERA_HCS_SUBMIT_KEY']);
     await app.close();
   });
 

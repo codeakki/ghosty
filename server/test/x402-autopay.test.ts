@@ -7,103 +7,63 @@ import { BrainOfflineError, type Decider, type DecideInput, type Decision } from
 import { buildApp } from '../src/app.js';
 import type { AssistantReply, VoiceAssistant } from '../src/claude/voice.js';
 import { defaultFacilitatorUrl, loadConfig } from '../src/config.js';
-import { NoopAuditLog, type Payments } from '../src/payments/index.js';
-import type { PaidSignal, SignalPayer } from '../src/payments/x402Client.js';
+import { IntelBuyer, NoopAuditLog, SpendCap, type Payments } from '../src/payments/index.js';
+import type { Verification } from '../src/payments/mirror.js';
+import { dailyCaps, type PaidResource, type Payer } from '../src/payments/x402Client.js';
 import type { CandleSet } from '../src/sim/candles.js';
 import type { Scenario } from '../src/sim/scenarios.js';
 
-/** The decision loop pays for GET /signal on its own (X402_AUTOPAY). Every payer here is in-process. */
+/**
+ * The decision loop buys Signal Desk intel on its own (X402_AUTOPAY) BEFORE the 0G decision on a shock headline.
+ * Every payer here is in-process.
+ */
 
 const WAR = 'War breaks out: missile strikes hit Gulf oil terminals';
 
-class CountingPayer implements SignalPayer {
+class CountingPayer implements Payer {
   readonly mode = 'real' as const;
   calls: string[] = [];
   constructor(private readonly behaviour: 'ok' | 'fail' | 'slow' = 'ok') {}
-  async payForSignal(url: string): Promise<PaidSignal> {
+  async pay(url: string): Promise<PaidResource> {
     this.calls.push(url);
     if (this.behaviour === 'fail') throw new Error('facilitator said no');
     if (this.behaviour === 'slow') await new Promise((r) => setTimeout(r, 300));
     const txId = `0.0.1001@1730000000.00000000${this.calls.length}`;
-    return { status: 200, body: { requestId: 'prev' }, txId, hashscanUrl: `https://hashscan.io/testnet/transaction/${txId}`, amountTinybar: 1_000_000 };
+    const verification: Promise<Verification> = Promise.resolve({ verified: true, consensusTimestamp: '1730000001.0', checkedAt: 'now' });
+    return {
+      status: 200,
+      body: { provider: 'ghosty-signal-desk', requestId: `desk-${this.calls.length}`, shock: { category: 'geopolitical_shock', severity: 'medium', keywords: ['war'] } },
+      txId,
+      hashscanUrl: `https://hashscan.io/testnet/transaction/${txId}`,
+      asset: '0.0.429274',
+      amount: '10000',
+      payTo: '0.0.5005',
+      payer: '0.0.1001',
+      verification,
+    };
   }
 }
 
-const paymentsWith = (payer: SignalPayer): Payments => ({ mode: 'real', payer, audit: new NoopAuditLog() });
-
-async function receiptsOfProposed(app: ReturnType<typeof buildApp>): Promise<string[] | undefined> {
-  const state = (await app.inject({ method: 'GET', url: '/state' })).json();
-  return state.episodes.find((e: { outcome: string }) => e.outcome === 'proposed')?.receipts;
+function paymentsWith(payer: Payer, over: Record<string, string> = {}): Payments {
+  const config = loadConfig(over);
+  const audit = new NoopAuditLog();
+  const spendCap = new SpendCap({ maxPerDay: dailyCaps(config), file: null });
+  return { mode: 'real', payer, audit, buyer: new IntelBuyer({ config, payer, spendCap, audit }) };
 }
 
-describe('x402 autopay in the decision loop', () => {
-  it('pays /signal once per decision with no button press, and logs the tx on the episode', async () => {
-    const payer = new CountingPayer();
-    const app = buildApp({ config: loadConfig({ PORT: '4555' }), payments: paymentsWith(payer) });
+async function proposed(app: ReturnType<typeof buildApp>) {
+  const state = (await app.inject({ method: 'GET', url: '/state' })).json();
+  return state.episodes.find((e: { outcome: string }) => e.outcome === 'proposed');
+}
 
-    const res = await app.inject({ method: 'POST', url: '/news/inject', payload: { title: WAR } });
-    assert.equal(res.statusCode, 200);
-    assert.deepEqual(payer.calls, ['http://127.0.0.1:4555/signal']);
-    assert.deepEqual(await receiptsOfProposed(app), ['0.0.1001@1730000000.000000001']);
-
-    const status = (await app.inject({ method: 'GET', url: '/x402/status' })).json();
-    assert.equal(status.autopay, true);
-    assert.equal(status.lastPayment.trigger, 'decision');
-    assert.equal(status.lastPayment.txId, '0.0.1001@1730000000.000000001');
-
-    await app.inject({ method: 'POST', url: '/voice/text', payload: { text: 'what is gold doing?' } });
-    assert.equal(payer.calls.length, 2);
-    await app.close();
-  });
-
-  it('a failed payment never blocks the decision', async () => {
-    const payer = new CountingPayer('fail');
-    const app = buildApp({ config: loadConfig({}), payments: paymentsWith(payer) });
-    const res = await app.inject({ method: 'POST', url: '/news/inject', payload: { title: WAR } });
-    assert.equal(res.statusCode, 200);
-    assert.equal(res.json().decision.signal, 'geopolitical_shock');
-    assert.equal(payer.calls.length, 1);
-    assert.equal(await receiptsOfProposed(app), undefined);
-    assert.equal((await app.inject({ method: 'GET', url: '/x402/status' })).json().lastPayment, null);
-    await app.close();
-  });
-
-  it('a slow payment is not waited on past X402_AUTOPAY_WAIT_MS, but still lands in lastPayment', async () => {
-    const payer = new CountingPayer('slow');
-    const app = buildApp({ config: loadConfig({ X402_AUTOPAY_WAIT_MS: '20' }), payments: paymentsWith(payer) });
-    await app.inject({ method: 'POST', url: '/news/inject', payload: { title: WAR } });
-    assert.equal(await receiptsOfProposed(app), undefined, 'decision answered before settlement');
-    await new Promise((r) => setTimeout(r, 400));
-    assert.equal((await app.inject({ method: 'GET', url: '/x402/status' })).json().lastPayment.trigger, 'decision');
-    await app.close();
-  });
-
-  it('does not pay while the brain is offline, or when X402_AUTOPAY=false', async () => {
-    const offline = new CountingPayer();
-    const app = buildApp({ config: loadConfig({}), payments: paymentsWith(offline) });
-    await app.inject({ method: 'POST', url: '/sim/safe-stop', payload: { enabled: true } });
-    assert.equal((await app.inject({ method: 'POST', url: '/news/inject', payload: { title: WAR } })).statusCode, 503);
-    assert.equal(offline.calls.length, 0);
-    await app.close();
-
-    const off = new CountingPayer();
-    const manual = buildApp({ config: loadConfig({ X402_AUTOPAY: 'false' }), payments: paymentsWith(off) });
-    await manual.inject({ method: 'POST', url: '/news/inject', payload: { title: WAR } });
-    assert.equal(off.calls.length, 0);
-    // The sim button still pays, and says so.
-    const paid = await manual.inject({ method: 'POST', url: '/sim/pay-signal' });
-    assert.equal(paid.statusCode, 200);
-    assert.equal(paid.json().trigger, 'sim');
-    await manual.close();
-  });
-});
-
-/** 0G decider stand-in: a shock decision, or a 0G failure (timeout / router down). */
+/** 0G decider stand-in: a shock decision, or a 0G failure (timeout / router down). Records what it was given. */
 class StubDecider implements Decider {
   calls = 0;
+  inputs: DecideInput[] = [];
   constructor(private readonly behaviour: 'short' | 'offline' = 'short') {}
   async decide(input: DecideInput): Promise<Decision> {
     this.calls++;
+    this.inputs.push(input);
     if (this.behaviour === 'offline') throw new BrainOfflineError('0G call timed out', 'timeout', { requestId: 'rq-timeout' });
     return {
       signal: 'geopolitical_shock',
@@ -115,6 +75,91 @@ class StubDecider implements Decider {
     };
   }
 }
+
+describe('x402 autopay: buy intel before the 0G decision', () => {
+  it('buys the bundle once per shock headline, hands it to the decider, and cites it on the episode', async () => {
+    const payer = new CountingPayer();
+    const decider = new StubDecider();
+    const app = buildApp({ config: loadConfig({ SIGNAL_DESK_URL: 'http://127.0.0.1:4555' }), payments: paymentsWith(payer, { SIGNAL_DESK_URL: 'http://127.0.0.1:4555' }), deps: { decider } });
+
+    const res = await app.inject({ method: 'POST', url: '/news/inject', payload: { title: WAR } });
+    assert.equal(res.statusCode, 200);
+    assert.equal(payer.calls.length, 1);
+    assert.match(payer.calls[0] ?? '', /^http:\/\/127\.0\.0\.1:4555\/intel\?headline=War\+breaks\+out/);
+    assert.equal(decider.inputs[0]?.paidIntel?.provider, 'ghosty-signal-desk');
+    assert.equal(decider.inputs[0]?.paidIntel?.txId, '0.0.1001@1730000000.000000001');
+
+    const episode = await proposed(app);
+    assert.deepEqual(episode.receipts, ['0.0.1001@1730000000.000000001']);
+    assert.equal(episode.decision.paidIntel.provider, 'ghosty-signal-desk');
+    assert.equal(episode.decision.paidIntel.verified, true);
+
+    const status = (await app.inject({ method: 'GET', url: '/x402/status' })).json();
+    assert.equal(status.autopay, true);
+    assert.equal(status.lastPayment.trigger, 'decision');
+    assert.equal(status.lastPayment.verified, true);
+    assert.equal(status.lastPayment.amountLabel, '0.01 USDC');
+    await app.close();
+  });
+
+  it('does not buy for a non-shock headline', async () => {
+    const payer = new CountingPayer();
+    const app = buildApp({ config: loadConfig({}), payments: paymentsWith(payer) });
+    await app.inject({ method: 'POST', url: '/news/inject', payload: { title: 'Quarterly earnings beat estimates' } });
+    assert.equal(payer.calls.length, 0);
+    await app.close();
+  });
+
+  it('a failed payment never blocks the decision', async () => {
+    const payer = new CountingPayer('fail');
+    const app = buildApp({ config: loadConfig({}), payments: paymentsWith(payer) });
+    const res = await app.inject({ method: 'POST', url: '/news/inject', payload: { title: WAR } });
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.json().decision.signal, 'geopolitical_shock');
+    assert.equal(payer.calls.length, 1);
+    assert.equal((await proposed(app)).receipts, undefined);
+    assert.equal((await app.inject({ method: 'GET', url: '/x402/status' })).json().lastPayment, null);
+    await app.close();
+  });
+
+  it('a slow purchase is not waited on past X402_AUTOPAY_WAIT_MS, but still lands in lastPayment', async () => {
+    const payer = new CountingPayer('slow');
+    const decider = new StubDecider();
+    const app = buildApp({ config: loadConfig({ X402_AUTOPAY_WAIT_MS: '20' }), payments: paymentsWith(payer, { SIGNAL_DESK_URL: 'http://127.0.0.1:4555' }), deps: { decider } });
+    await app.inject({ method: 'POST', url: '/news/inject', payload: { title: WAR } });
+    assert.equal(decider.inputs[0]?.paidIntel, undefined, 'decided without the late bundle');
+    await new Promise((r) => setTimeout(r, 400));
+    assert.equal((await app.inject({ method: 'GET', url: '/x402/status' })).json().lastPayment.trigger, 'decision');
+    await app.close();
+  });
+
+  it('does not pay while safe-stop is on, or when X402_AUTOPAY=false', async () => {
+    const offline = new CountingPayer();
+    const app = buildApp({ config: loadConfig({}), payments: paymentsWith(offline) });
+    await app.inject({ method: 'POST', url: '/sim/safe-stop', payload: { enabled: true } });
+    assert.equal((await app.inject({ method: 'POST', url: '/news/inject', payload: { title: WAR } })).statusCode, 503);
+    assert.equal(offline.calls.length, 0);
+    await app.close();
+
+    const off = new CountingPayer();
+    const manual = buildApp({ config: loadConfig({ X402_AUTOPAY: 'false' }), payments: paymentsWith(off) });
+    await manual.inject({ method: 'POST', url: '/news/inject', payload: { title: WAR } });
+    assert.equal(off.calls.length, 0);
+    // The sim button still pays (for the newest headline), and says so.
+    const paid = await manual.inject({ method: 'POST', url: '/sim/pay-signal' });
+    assert.equal(paid.statusCode, 200);
+    assert.equal(paid.json().trigger, 'sim');
+    await manual.close();
+  });
+
+  it('merges two buys for the same headline into one payment', async () => {
+    const payer = new CountingPayer('slow');
+    const payments = paymentsWith(payer);
+    const [a, b] = await Promise.all([payments.buyer.buy({ title: WAR }, 'sim'), payments.buyer.buy({ title: WAR }, 'decision')]);
+    assert.equal(payer.calls.length, 1);
+    assert.equal(a.txId, b.txId);
+  });
+});
 
 class FakeAssistant implements VoiceAssistant {
   async answer(): Promise<AssistantReply> {
@@ -155,30 +200,33 @@ describe('x402 autopay guards', () => {
     const press = await app.inject({ method: 'POST', url: '/button', payload: { action: 'confirm' } });
     assert.equal(press.json().sim, true);
     await app.ghosty.sim.runUntilIdle();
-    assert.equal(payer.calls.length, 0, 'a sim decision triggered a real /signal payment');
+    assert.equal(payer.calls.length, 0, 'a sim decision triggered a real payment');
     assert.equal((await app.inject({ method: 'GET', url: '/x402/status' })).json().lastPayment, null);
     await app.close();
   });
 
-  it('does not pay when the 0G call fails (timeout -> brain_offline)', async () => {
+  it('does not pay when the brain probe says 0G is unreachable', async () => {
     const payer = new CountingPayer();
-    const app = buildApp({ config: loadConfig({}), payments: paymentsWith(payer), deps: { decider: new StubDecider('offline') } });
+    // Live mode with OG_API_KEY set but an unreachable router: the health probe fails, so no decision will run.
+    const app = buildApp({
+      config: loadConfig({ GHOSTY_MODE: 'test', OG_API_KEY: 'k', OG_ROUTER_URL: 'http://127.0.0.1:9/v1' }),
+      payments: paymentsWith(payer),
+      deps: { decider: new StubDecider('offline') },
+    });
     const res = await app.inject({ method: 'POST', url: '/news/inject', payload: { title: WAR } });
     assert.equal(res.statusCode, 503);
-    assert.equal(res.json().error, 'brain_offline');
     assert.equal(payer.calls.length, 0);
     await app.close();
   });
 
-  it('does not pay for Claude-answered voice turns, only for 0G trade turns', async () => {
+  it('never pays for voice turns: Claude answers and 0G trade turns are not tied to a headline', async () => {
     const payer = new CountingPayer();
     const app = buildApp({ config: loadConfig({}), payments: paymentsWith(payer), assistant: new FakeAssistant() });
     const q = await app.inject({ method: 'POST', url: '/voice/text', payload: { text: "What's moving gold right now?" } });
     assert.equal(q.json().answeredBy, 'claude');
-    assert.equal(payer.calls.length, 0);
     const t = await app.inject({ method: 'POST', url: '/voice/text', payload: { text: 'Should I go long oil?' } });
     assert.equal(t.json().answeredBy, '0g');
-    assert.equal(payer.calls.length, 1);
+    assert.equal(payer.calls.length, 0);
     await app.close();
   });
 });
