@@ -82,7 +82,7 @@ See [`.env.example`](.env.example) for every variable with a comment. All keys a
 | `CLAUDE_SCOUT_MINUTES` | `5` | Scout cycle interval |
 | `CLAUDE_SCOUT_MAX_PER_DAY` | `200` | Scout cost guard: cycles per UTC day (overlapping cycles are skipped) |
 | `CLAUDE_SCOUT_QUERY` | breaking geopolitical, regulatory, exchange-hack and macro news that could move BTC, ETH, gold, oil or US stocks in the last hour | What the scout searches for |
-| `HEDERA_ACCOUNT_ID`, `HEDERA_PRIVATE_KEY`, `X402_FACILITATOR_URL` | x402.org facilitator | `payments/` |
+| `HEDERA_ACCOUNT_ID`, `HEDERA_PRIVATE_KEY`, `X402_FACILITATOR_URL` | Blocky402 facilitator (default; override with `X402_FACILITATOR_URL`) | `payments/` |
 | `HL_MASTER_ADDRESS`, `HL_AGENT_PRIVATE_KEY`, `HL_TESTNET` | `HL_TESTNET=true` | `execution/` |
 | `UNISWAP_API_KEY`, `EVM_PRIVATE_KEY`, `EVM_ADDRESS`, `EVM_RPC_URL` | unset | `wallet/` |
 | `CRYPTOPANIC_TOKEN`, `ETHOS_CLIENT`, `XAI_API_KEY` | `ETHOS_CLIENT=ghosty@0.1.0` | `news/`, `credibility/` |

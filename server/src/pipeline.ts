@@ -37,6 +37,12 @@ export interface PipelineObserver {
   onEpisode?(record: EpisodeRecord): void;
 }
 
+/** Receipt of one autonomous /signal payment. */
+export interface SignalPaymentReceipt {
+  txId: string;
+  hashscanUrl?: string;
+}
+
 export interface PipelineDeps {
   stt: SpeechToText;
   tts: TextToSpeech;
@@ -53,6 +59,14 @@ export interface PipelineDeps {
   /** Single-user device for now. */
   userId?: string;
   observer?: PipelineObserver;
+  /**
+   * Pay for the premium /signal (x402 on Hedera) once per decision, with no human approval. Starts only after the
+   * 0G decider returned a decision (never on brain_offline, safe-stop or Claude-answered turns); a failed payment
+   * never blocks or fakes a decision. Undefined = no autonomous payments. The SimEngine never gets one (paper only).
+   */
+  paySignal?: () => Promise<SignalPaymentReceipt>;
+  /** Max wait for that payment after the decision is ready (default 4000 ms). It still settles and is logged later. */
+  paySignalWaitMs?: number;
   /**
    * Claude voice answers (CLAUDE_VOICE_ENABLED). When set, questions go to Claude and only trade requests reach the
    * 0G decider; without it every turn is a 0G decision, as before.
@@ -270,15 +284,43 @@ export class Pipeline {
     // Put the headline being asked about first so the rationale quotes it.
     const news = headline ? [headline, ...fetched.filter((n) => n.id !== headline.id)] : fetched;
     const decision = await this.deps.decider.decide({ transcript, news, memory, maxTradeUsd: this.deps.maxTradeUsd });
+    // Pay only once the 0G decision actually ran: a 0G timeout / brain_offline throws above and never pays.
+    const payment = this.startSignalPayment();
     this.deps.observer?.onDecision?.(decision, { trigger, transcript, headline });
+    const paid = await this.awaitSignalPayment(payment);
     await this.logEpisode({
       decision,
       requestId: decision.requestId,
       actions: decision.suggestedActions,
       outcome: 'proposed',
+      ...(paid ? { receipts: [paid.txId] } : {}),
     });
     this.pending = decision.signal === 'none' ? undefined : decision;
     return decision;
+  }
+
+  /**
+   * Start this decision's /signal payment. Resolves to the receipt, or undefined when it failed or was refused:
+   * paySignal reports its own errors, and a payment problem never blocks the decision.
+   */
+  private startSignalPayment(): Promise<SignalPaymentReceipt | undefined> | undefined {
+    return this.deps.paySignal?.().catch(() => undefined);
+  }
+
+  /** Wait a bounded time for the payment so a slow settlement does not hold up the spoken answer. */
+  private async awaitSignalPayment(
+    payment: Promise<SignalPaymentReceipt | undefined> | undefined,
+  ): Promise<SignalPaymentReceipt | undefined> {
+    if (!payment) return undefined;
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<undefined>((resolve) => {
+      timer = setTimeout(() => resolve(undefined), this.deps.paySignalWaitMs ?? 4000);
+    });
+    try {
+      return await Promise.race([payment, timeout]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   private async logEpisode(entry: EpisodeInput): Promise<void> {

@@ -400,17 +400,20 @@ Read-only snapshots for the dashboard. No device token. Each one works with an e
   "remainingToday": 99000000,
   "allowedHosts": ["localhost", "127.0.0.1"],
   "hcsTopicUrl": "https://hashscan.io/testnet/topic/0.0.…",
-  "lastPayment": { "mode": "real", "txId": "0.0.1001@…", "hashscanUrl": "https://hashscan.io/testnet/transaction/…", "amountTinybar": 1000000, "requestId": "…", "at": "…" }
+  "autopay": true,
+  "lastPayment": { "mode": "real", "txId": "0.0.1001@…", "hashscanUrl": "https://hashscan.io/testnet/transaction/…", "amountTinybar": 1000000, "requestId": "…", "trigger": "decision", "at": "…" }
 }
 ```
 
 `mode` is `not_configured` in live mode without `HEDERA_ACCOUNT_ID` + `HEDERA_PRIVATE_KEY` (`fake` in test mode, where the fake payer is charged against an in-memory cap so the numbers still move). The real cap is persisted in `server/.ghosty/spend.json` (UTC day). `hcsTopicUrl` is `null` until the first audit message creates the topic (or `HEDERA_HCS_TOPIC_ID` is set).
 
+`autopay` is `X402_AUTOPAY` (default `true`): every decision (voice, text, button, injected or live headline) pays for one `/signal` on its own, right after the 0G decider returns, with no human approval. The decision waits up to `X402_AUTOPAY_WAIT_MS` (default 4000) for settlement, and the tx id is added to the `proposed` episode's `receipts`. A failed or refused payment (spend cap, policy) is logged and never blocks the decision. Nothing is paid while safe-stop is engaged, when the 0G call fails or times out (`brain_offline`), on Claude-answered voice turns, for simulation decisions (`/sim/run`, paper only) or when the Hedera keys are missing. `lastPayment.trigger` is `decision` for these and `sim` for `POST /sim/pay-signal`; both share one daily cap.
+
 ### POST /sim/pay-signal
 
 Device token. No body. The agent pays `http://127.0.0.1:$PORT/signal` with no human approval (`payForSignal` → x402 → facilitator → Hedera), then `/x402/status.lastPayment` shows the HashScan link.
 
-**200** `{"mode","txId","hashscanUrl","amountTinybar","requestId","at","status","body","audit"}` where `body` is the paid `/signal` payload.
+**200** `{"mode","txId","hashscanUrl","amountTinybar","requestId","trigger":"sim","at","status","body","audit"}` where `body` is the paid `/signal` payload.
 
 | Status | When | Body |
 |---|---|---|
@@ -528,7 +531,7 @@ Protocol: x402 **v2** as spoken by `@x402/core` / `@x402/fetch` 2.30. Scheme `ex
 **Flow**
 
 ```
-Agent (X402Payer)                        Server GET /signal                Facilitator (x402.org, hedera:testnet)
+Agent (X402Payer)                        Server GET /signal                Facilitator (Blocky402, hedera:testnet)
    | GET /signal                            |  (first call: GET /supported → feePayer, cached)
    |--------------------------------------->|                                 |
    |<-- 402 + PAYMENT-REQUIRED header ------|                                 |
@@ -600,7 +603,7 @@ Sent when there is no payment header, or when the payment is malformed, does not
 | `amount` | `X402_SIGNAL_PRICE_TINYBAR` (default `1000000` = 0.01 HBAR) |
 | `asset` | `0.0.0` = HBAR. (A `"$0.01"` price would mean testnet USDC `0.0.429274`, not HBAR.) |
 | `payTo` | `X402_PAY_TO`, falling back to `HEDERA_ACCOUNT_ID`. Must not be the payer's account. |
-| `extra.feePayer` | Facilitator's fee-payer account from its `GET /supported` (x402.org: `0.0.9185802`) |
+| `extra.feePayer` | Facilitator's fee-payer account from its `GET /supported` (Blocky402 testnet: `0.0.7162784`, x402.org: `0.0.9185802`) |
 
 `error` values: `payment required` (no header), `invalid_payment_header`, `no_matching_payment_requirements`, any facilitator `invalidReason` (e.g. `invalid_exact_hedera_payload_signature_invalid`, `invalid_exact_hedera_payload_preflight_failed`), or a settle `errorReason` (e.g. `transaction_failed`).
 
@@ -634,7 +637,7 @@ Body:
 | Status | When | Body |
 |---|---|---|
 | 503 | No `X402_PAY_TO` / `HEDERA_ACCOUNT_ID` configured | `{"error":"payments_not_configured"}` |
-| 503 | Facilitator `/supported` unreachable (retried on the next request) | `{"error":"facilitator_unavailable","facilitator":"https://x402.org/facilitator"}` |
+| 503 | Facilitator `/supported` unreachable (retried on the next request) | `{"error":"facilitator_unavailable","facilitator":"https://api.testnet.blocky402.com"}` |
 
 ### Try it
 
