@@ -2003,6 +2003,11 @@ tfoot td {
     display: none;
   }
 
+  /* Phone width: ticker + mid + 24h + trend fit without sideways scrolling. */
+  .watch .watch-label {
+    display: none;
+  }
+
 
   .alert-banner {
     flex-wrap: wrap;
