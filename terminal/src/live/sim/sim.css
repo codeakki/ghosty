@@ -104,7 +104,7 @@
 }
 
 .lv-main-simulate > .lv-feed {
-  height: calc(100dvh - var(--nav-h) - var(--sim-h, 0px));
+  height: calc(100dvh - var(--nav-h) - var(--sim-h, 0px) - var(--auth-h, 0px));
 }
 
 @media (min-width: 1200px) {
@@ -113,7 +113,7 @@
     display: grid;
     grid-template-columns: minmax(340px, 3fr) minmax(320px, 3fr) 5fr;
     grid-template-rows: minmax(0, 1fr);
-    height: calc(100dvh - var(--nav-h) - var(--sim-h, 0px));
+    height: calc(100dvh - var(--nav-h) - var(--sim-h, 0px) - var(--auth-h, 0px));
   }
 
   .lv-main-simulate > .lv-sim,

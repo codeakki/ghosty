@@ -38,7 +38,7 @@ function failureNote(r: ApiFailure, what: 'voice' | 'text' | 'button'): NonNulla
     return { tone: 'warn', text: 'Ghosty can’t decide yet — the server isn’t fully set up. See Setup in the feed.' };
   }
   if (r.kind === 'brain_offline') return { tone: 'warn', text: 'The 0G brain is unreachable, so Ghosty is paused.' };
-  if (r.kind === 'unauthorized') return { tone: 'warn', text: 'This device isn’t allowed: the server wants a device token.' };
+  if (r.kind === 'unauthorized') return { tone: 'warn', text: 'This device isn’t allowed yet: add your device token in Settings.' };
   return { tone: 'warn', text: describeError(r) };
 }
 

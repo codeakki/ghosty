@@ -112,6 +112,8 @@
 
   /* Layout */
   --nav-h: 56px;
+  /* Nav row items (tab group, status pills, Settings) share one height: a 32px tab + the 2px group inset. */
+  --size-nav-item: calc(var(--size-control-sm) + 2 * var(--space-0));
   --gutter: 16px;
 }
 
