@@ -16,6 +16,7 @@ import { parseWav, WavFormatError } from './audio/wav.js';
 import { loadConfig, type Config } from './config.js';
 import { createCredibilityScorer, type CredibilityScorer } from './credibility/ethos.js';
 import { createExecutor, type Executor } from './execution/executor.js';
+import type { PerpVenue } from './execution/hyperliquid.js';
 import { registerIntegrationRoutes, zeroGExplorers } from './integrations.js';
 import { createMarketService, type MarketService } from './market/service.js';
 import { registerMarketRoutes } from './market/routes.js';
@@ -31,6 +32,7 @@ import { BrainSwitch, isBrainOnline } from './safety/safeStop.js';
 import { createCandleLoader, type CandleLoader } from './sim/candles.js';
 import { SimEngine } from './sim/engine.js';
 import { SimEpisodeLog } from './sim/episodes.js';
+import { createSimLiveExecution } from './sim/liveOrders.js';
 import { InjectedNewsProvider } from './sim/injected.js';
 import { registerSimRunRoutes } from './sim/runRoutes.js';
 import { loadScenarios, type Scenario } from './sim/scenarios.js';
@@ -77,7 +79,15 @@ export interface BuildAppOptions {
   assistant?: VoiceAssistant | null;
   logger?: FastifyServerOptions['logger'];
   /** Simulation runs: candle loader (tests pass a fake), scenarios, 0G store for sim episodes (null = local only). */
-  sim?: { loadCandles?: CandleLoader; scenarios?: () => Scenario[]; store?: BlobStore | null; autoTick?: boolean; slippageBps?: number };
+  sim?: {
+    loadCandles?: CandleLoader;
+    scenarios?: () => Scenario[];
+    store?: BlobStore | null;
+    autoTick?: boolean;
+    slippageBps?: number;
+    /** Stand-in for the Hyperliquid mainnet venue that real sim orders go to (tests). Still needs SIM_LIVE_ORDERS. */
+    liveVenue?: PerpVenue;
+  };
 }
 
 /** What the news poller did with one batch of fresh headlines. */
@@ -303,7 +313,8 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
     }
   };
 
-  // Simulation: real decider (0G in live mode), historical world, PaperVenue only. Sim episodes go to 0G Storage
+  // Simulation: real decider (0G in live mode), historical world, PaperVenue fills. A run may opt in to real
+  // Hyperliquid mainnet orders (SIM_LIVE_ORDERS=true), sent through the sim's own mainnet venue, never the executor. Sim episodes go to 0G Storage
   // when OG_PRIVATE_KEY is set, else to <dataDir>/sim-episodes.jsonl labelled storage "local".
   const dataDir = config.OG_DATA_DIR ?? DEFAULT_DATA_DIR;
   const simStore = opts.sim?.store === null ? undefined : (opts.sim?.store ?? providers.blobStore);
@@ -317,6 +328,7 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
     brainOnline,
     publish: (type, data) => state.publishSim(type, data),
     maxTradeUsd: config.MAX_TRADE_USD,
+    live: createSimLiveExecution(config, opts.sim?.liveVenue),
     slippageBps: opts.sim?.slippageBps,
     logger: app.log,
     autoTick: opts.sim?.autoTick,

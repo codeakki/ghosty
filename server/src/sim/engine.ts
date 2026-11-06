@@ -10,13 +10,16 @@ import { shockDetector } from '../news/shock.js';
 import type { NewsItem } from '../news/types.js';
 import { intervalMs, priceAt, type CandleLoader, type CandleSet } from './candles.js';
 import type { SimEpisodeEntry, SimEpisodeLog } from './episodes.js';
+import type { SimLiveExecution, SimLiveOrder } from './liveOrders.js';
 import { holdBaselinePnl, PaperVenue, type PaperFill } from './paperVenue.js';
 import type { Scenario } from './scenarios.js';
 
 /**
  * Simulation engine: replays a scenario (real past headlines, real historical prices) on a compressed clock.
  * Every headline goes through the shock pre-filter and, when it is a candidate, a REAL decider call (0G Compute
- * in live mode). Confirmed trades go to a PaperVenue only. Every event a run emits carries `sim: true, runId`.
+ * in live mode). Confirmed trades always fill on a PaperVenue. A run started with `liveOrders: true` (and the server's
+ * SIM_LIVE_ORDERS switch on) also sends each confirmed leg to Hyperliquid mainnet at a small fixed size.
+ * Every event a run emits carries `sim: true, runId`.
  */
 
 export const DEFAULT_SPEED = 360;
@@ -90,15 +93,33 @@ export interface SimRunStatus {
   lastRootHash: string | null;
   pending: { requestId: string; signal: Signal; actions: PlannedAction[]; headline: string } | null;
   headlines: { total: number; delivered: number };
+  /** Paper always; plus real Hyperliquid mainnet orders when the run opted in. */
+  execution: SimExecutionStatus;
   memory: string | null;
   storage: 'local' | '0g';
   error: string | null;
+}
+
+export interface SimExecutionStatus {
+  /** This run sends confirmed legs to Hyperliquid mainnet too. */
+  liveOrders: boolean;
+  /** The server allows real orders (SIM_LIVE_ORDERS on and mainnet keys set). */
+  available: boolean;
+  /** Why real orders are unavailable, or null. */
+  unavailable: string | null;
+  network: 'mainnet';
+  orderUsd: number;
+  maxRunUsd: number;
+  spentUsd: number;
+  orders: SimLiveOrder[];
 }
 
 export interface SimButtonResult {
   sim: true;
   runId: string;
   paper: true;
+  /** Real Hyperliquid mainnet orders placed by this press (empty for a paper-only run). */
+  liveOrders: SimLiveOrder[];
   action: 'confirm' | 'cancel';
   requestId: string;
   signal: Signal;
@@ -119,6 +140,8 @@ export interface SimEngineDeps {
   /** Broadcast on the shared SSE stream; data already carries sim + runId. */
   publish: (type: SimEventType, data: object) => void;
   maxTradeUsd: number;
+  /** Real orders on Hyperliquid mainnet. Omitted = never available. */
+  live?: SimLiveExecution;
   slippageBps?: number;
   logger?: Logger;
   /** false = no interval timer; tests drive the clock with step(). Default true. */
@@ -129,7 +152,7 @@ export interface SimEngineDeps {
 export class SimRunError extends Error {
   constructor(
     message: string,
-    readonly code: 'unknown_scenario' | 'no_run' | 'no_pending' | 'candles_failed',
+    readonly code: 'unknown_scenario' | 'no_run' | 'no_pending' | 'candles_failed' | 'live_unavailable',
   ) {
     super(message);
   }
@@ -161,6 +184,8 @@ class SimRun {
   error: string | null = null;
   alertSeq = 0;
   lastMarketEmit = 0;
+  liveSpentUsd = 0;
+  readonly liveFills: SimLiveOrder[] = [];
   readonly inflight = new Set<Promise<unknown>>();
 
   constructor(
@@ -169,6 +194,7 @@ class SimRun {
     readonly speed: number,
     readonly autoPauseOnAlert: boolean,
     slippageBps: number | undefined,
+    readonly liveOrders: boolean,
   ) {
     this.startMs = Date.parse(scenario.start);
     this.endMs = Date.parse(scenario.end);
@@ -222,9 +248,13 @@ export class SimEngine {
     return this.run?.pending != null && this.run.status !== 'done';
   }
 
-  async start(opts: { scenarioId: string; speed?: number; autoPauseOnAlert?: boolean }): Promise<{ runId: string }> {
+  async start(opts: { scenarioId: string; speed?: number; autoPauseOnAlert?: boolean; liveOrders?: boolean }): Promise<{ runId: string; liveOrders: boolean }> {
     const scenario = this.deps.scenarios().find((s) => s.id === opts.scenarioId);
     if (!scenario) throw new SimRunError(`unknown scenario "${opts.scenarioId}"`, 'unknown_scenario');
+    const liveOrders = opts.liveOrders === true;
+    if (liveOrders && !this.deps.live?.venue) {
+      throw new SimRunError(this.deps.live?.unavailable ?? 'real orders are not available on this server', 'live_unavailable');
+    }
     let candles: CandleSet;
     try {
       candles = await this.deps.loadCandles(scenario);
@@ -233,10 +263,10 @@ export class SimEngine {
     }
     this.stopTimer();
     if (this.run && this.run.status !== 'done') this.run.status = 'done';
-    const run = new SimRun(scenario, candles, opts.speed ?? DEFAULT_SPEED, opts.autoPauseOnAlert ?? true, this.deps.slippageBps);
+    const run = new SimRun(scenario, candles, opts.speed ?? DEFAULT_SPEED, opts.autoPauseOnAlert ?? true, this.deps.slippageBps, liveOrders);
     this.run = run;
     await this.loadMemory(run);
-    this.logger.info({ runId: run.runId, scenario: scenario.id, speed: run.speed, memory: run.memoryLabel }, 'sim run started');
+    this.logger.info({ runId: run.runId, scenario: scenario.id, speed: run.speed, memory: run.memoryLabel, liveOrders }, 'sim run started');
     this.emitMarket(run, true);
     this.emitStatus(true);
     if (this.deps.autoTick !== false) {
@@ -249,7 +279,7 @@ export class SimEngine {
       }, TICK_MS);
       this.timer.unref?.();
     }
-    return { runId: run.runId };
+    return { runId: run.runId, liveOrders };
   }
 
   control(action: 'pause' | 'resume' | 'stop'): SimRunStatus {
@@ -321,7 +351,10 @@ export class SimEngine {
     await this.deps.episodes.idle();
   }
 
-  /** Button press on the pending sim decision: confirm fills on the PaperVenue, never on a real venue. */
+  /**
+   * Button press on the pending sim decision: confirm fills on the PaperVenue. Only a run started with
+   * `liveOrders: true` also places real Hyperliquid mainnet orders (fixed small size, capped per run).
+   */
   async press(action: 'confirm' | 'cancel'): Promise<SimButtonResult> {
     const run = this.run;
     const pending = run?.pending;
@@ -336,7 +369,8 @@ export class SimEngine {
         this.deps.publish('order', run.tag({ ...order, requestId: decision.requestId, paper: true, simTime: new Date(run.simTime).toISOString() }));
       }
     }
-    this.logEpisode(run, decision, pending.item, action === 'confirm' ? 'executed' : 'cancelled', orders);
+    const liveOrders = action === 'confirm' && run.liveOrders ? await this.placeLive(run, decision) : [];
+    this.logEpisode(run, decision, pending.item, action === 'confirm' ? 'executed' : 'cancelled', [...orders, ...liveOrders]);
     if (run.status === 'paused' && run.pauseReason === 'awaiting_press') {
       run.status = 'running';
       run.pauseReason = null;
@@ -347,6 +381,7 @@ export class SimEngine {
       sim: true,
       runId: run.runId,
       paper: true,
+      liveOrders,
       action,
       requestId: decision.requestId,
       signal: decision.signal,
@@ -390,6 +425,7 @@ export class SimEngine {
         lastRootHash: null,
         pending: null,
         headlines: { total: 0, delivered: 0 },
+        execution: this.execution(null),
         memory: null,
         storage: this.deps.episodes.storageMode,
         error: null,
@@ -437,6 +473,7 @@ export class SimEngine {
           }
         : null,
       headlines: { total: run.scenario.headlines.length, delivered: run.nextHeadline },
+      execution: this.execution(run),
       memory: run.memoryLabel,
       storage: this.deps.episodes.storageMode,
       error: run.error,
@@ -450,6 +487,55 @@ export class SimEngine {
   }
 
   // --- internals ------------------------------------------------------------
+
+  private execution(run: SimRun | null): SimExecutionStatus {
+    const live = this.deps.live;
+    return {
+      liveOrders: run?.liveOrders ?? false,
+      available: Boolean(live?.venue),
+      unavailable: live ? live.unavailable : 'real orders are not available on this server',
+      network: 'mainnet',
+      orderUsd: live?.orderUsd ?? 0,
+      maxRunUsd: live?.maxRunUsd ?? 0,
+      spentUsd: Math.round((run?.liveSpentUsd ?? 0) * 100) / 100,
+      orders: run ? structuredClone(run.liveFills) : [],
+    };
+  }
+
+  /** Real Hyperliquid mainnet legs for a confirmed sim decision. Never throws: failures come back as rejected orders. */
+  private async placeLive(run: SimRun, decision: Decision): Promise<SimLiveOrder[]> {
+    const live = this.deps.live;
+    if (!live?.venue) return [];
+    const out: SimLiveOrder[] = [];
+    for (const a of decision.suggestedActions) {
+      const isBuy = a.side === 'long';
+      const sizeUsd = live.orderUsd;
+      let order: OrderResult;
+      if (run.liveSpentUsd + sizeUsd > live.maxRunUsd + 1e-9) {
+        order = { orderId: '', coin: a.coin, isBuy, sizeUsd, status: 'rejected', error: `run cap of $${live.maxRunUsd} in real orders reached (SIM_LIVE_MAX_RUN_USD)` };
+      } else {
+        try {
+          order = await live.venue.placeMarketOrder({ coin: a.coin, isBuy, sizeUsd });
+        } catch (err) {
+          order = { orderId: '', coin: a.coin, isBuy, sizeUsd, status: 'rejected', error: errorMessage(err) };
+        }
+        if (order.status !== 'rejected') run.liveSpentUsd += sizeUsd;
+      }
+      const entry: SimLiveOrder = {
+        ...order,
+        live: true,
+        network: 'mainnet',
+        requestId: decision.requestId,
+        simTime: new Date(run.simTime).toISOString(),
+        placedAt: new Date().toISOString(),
+      };
+      run.liveFills.push(entry);
+      out.push(entry);
+      this.logger.warn({ runId: run.runId, coin: entry.coin, isBuy, sizeUsd, status: entry.status, orderId: entry.orderId, error: entry.error }, 'sim real order (Hyperliquid mainnet)');
+      this.deps.publish('order', run.tag({ ...entry, paper: false }));
+    }
+    return out;
+  }
 
   private async onHeadline(run: SimRun, index: number): Promise<void> {
     const h = run.scenario.headlines[index]!;

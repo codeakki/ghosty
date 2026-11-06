@@ -19,12 +19,20 @@ const RunBody = z.object({
   scenarioId: z.string().min(1).max(100),
   speed: z.number().positive().max(1_000_000).optional(),
   autoPauseOnAlert: z.boolean().optional(),
+  /** Also place real Hyperliquid mainnet orders on confirm (needs SIM_LIVE_ORDERS=true on the server). */
+  liveOrders: z.boolean().optional(),
 });
 const ControlBody = z.object({ action: z.enum(['pause', 'resume', 'stop']) });
 const EpisodesQuery = z.object({ runId: z.string().max(100).optional(), limit: z.coerce.number().int().min(1).max(500).default(50) });
 const ReplayQuery = z.object({ from: z.string().min(1).max(200), limit: z.coerce.number().int().min(1).max(200).default(20) });
 
-const STATUS_FOR: Record<SimRunError['code'], number> = { unknown_scenario: 404, no_run: 409, no_pending: 409, candles_failed: 502 };
+const STATUS_FOR: Record<SimRunError['code'], number> = {
+  unknown_scenario: 404,
+  no_run: 409,
+  no_pending: 409,
+  candles_failed: 502,
+  live_unavailable: 409,
+};
 
 export function registerSimRunRoutes(app: FastifyInstance, ctx: SimRunRouteContext): void {
   const { engine } = ctx;
@@ -51,7 +59,7 @@ export function registerSimRunRoutes(app: FastifyInstance, ctx: SimRunRouteConte
   app.post('/sim/run', { preHandler: ctx.requireDevice }, async (req, reply) => {
     const parsed = RunBody.safeParse(req.body);
     if (!parsed.success) {
-      return reply.code(400).send({ error: 'bad_request', message: 'body must be {"scenarioId": string, "speed"?: number, "autoPauseOnAlert"?: boolean}' });
+      return reply.code(400).send({ error: 'bad_request', message: 'body must be {"scenarioId": string, "speed"?: number, "autoPauseOnAlert"?: boolean, "liveOrders"?: boolean}' });
     }
     try {
       return await engine.start(parsed.data);
