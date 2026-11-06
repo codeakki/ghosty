@@ -460,7 +460,8 @@ export class SimEngine {
       url: h.url,
       publishedAt: new Date(Date.parse(h.ts)).toISOString(),
       ...(h.handle ? { handle: h.handle } : {}),
-      summary: `${h.source} (historical, replayed by scenario ${run.scenario.id})`,
+      // Never put the scenario id here: the shock pre-filter reads the summary ("bybit-hack-2025" would match "hack").
+      summary: `Historical headline from ${h.source}`,
     };
     run.seen.unshift(item);
     this.deps.publish('news', run.tag({ ...item, outlet: h.source, simTime: item.publishedAt }));

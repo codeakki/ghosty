@@ -25,7 +25,8 @@ const START = Date.parse('2025-01-01T00:00:00Z');
 
 /** 4 hours, 2 markets. BTC 100 → 90 (falls), ETH flat 10. Two headlines: one benign, one shock at +2h. */
 const SCENARIO: Scenario = {
-  id: 'test-shock',
+  // The id contains shock words on purpose: it must not leak into the pre-filter (benign headline stays no_shock).
+  id: 'test-war-hack-shock',
   title: 'test',
   description: 'synthetic',
   start: '2025-01-01T00:00:00Z',
@@ -170,7 +171,7 @@ describe('paper venue', () => {
 describe('sim engine', () => {
   it('schedules headlines at their sim times, decides on the shock, auto-pauses, fills on paper', async () => {
     const { eng, events, decider } = engine();
-    const { runId } = await eng.start({ scenarioId: 'test-shock', speed: 360 });
+    const { runId } = await eng.start({ scenarioId: 'test-war-hack-shock', speed: 360 });
     await eng.step(5_000); // +30 min
     assert.equal(eng.status().simTime, '2025-01-01T00:30:00.000Z');
     await eng.step(60_000); // would be +6 h, clamps at the first headline (01:00)
@@ -231,7 +232,7 @@ describe('sim engine', () => {
 
   it('safe-stop applies in sim: no fake decision when 0G is unreachable', async () => {
     const { eng } = engine({ decider: new StubDecider('offline') });
-    await eng.start({ scenarioId: 'test-shock', autoPauseOnAlert: true });
+    await eng.start({ scenarioId: 'test-war-hack-shock', autoPauseOnAlert: true });
     await eng.runUntilIdle();
     const st = eng.status();
     assert.equal(st.status, 'done');
@@ -241,7 +242,7 @@ describe('sim engine', () => {
     assert.equal(st.episodes, 0);
 
     const off = engine({ online: false });
-    await off.eng.start({ scenarioId: 'test-shock' });
+    await off.eng.start({ scenarioId: 'test-war-hack-shock' });
     await off.eng.runUntilIdle();
     assert.equal(off.eng.status().decisionList[1]!.skipped, 'brain_offline');
     assert.equal((off.decider as StubDecider).calls.length, 0);
@@ -249,7 +250,7 @@ describe('sim engine', () => {
 
   it('works without OG_PRIVATE_KEY: default memory snapshot, labelled; local episodes', async () => {
     const { eng, episodes } = engine({ memory: new NotConfiguredMemory() });
-    await eng.start({ scenarioId: 'test-shock', autoPauseOnAlert: false });
+    await eng.start({ scenarioId: 'test-war-hack-shock', autoPauseOnAlert: false });
     await eng.runUntilIdle();
     const st = eng.status();
     assert.match(st.memory!, /default snapshot: 0G memory not configured/);
@@ -266,7 +267,7 @@ describe('sim engine', () => {
 describe('sim stop', () => {
   it('stop clears a pending sim decision so a later press cannot fill', async () => {
     const { eng } = engine();
-    await eng.start({ scenarioId: 'test-shock' });
+    await eng.start({ scenarioId: 'test-war-hack-shock' });
     await eng.runUntilIdle();
     assert.ok(eng.hasPending());
     const st = eng.control('stop');
@@ -369,10 +370,10 @@ describe('sim routes', () => {
     app.ghosty.state.subscribe((e) => sse.push(e as never));
     const h = { 'x-device-token': 'tok' };
 
-    assert.equal((await app.inject({ method: 'POST', url: '/sim/run', payload: { scenarioId: 'test-shock' } })).statusCode, 401);
+    assert.equal((await app.inject({ method: 'POST', url: '/sim/run', payload: { scenarioId: 'test-war-hack-shock' } })).statusCode, 401);
     assert.equal((await app.inject({ method: 'POST', url: '/sim/run', headers: h, payload: { scenarioId: 'nope' } })).statusCode, 404);
     assert.equal((await app.inject({ method: 'POST', url: '/sim/run', headers: h, payload: {} })).statusCode, 400);
-    const run = await app.inject({ method: 'POST', url: '/sim/run', headers: h, payload: { scenarioId: 'test-shock', speed: 1800 } });
+    const run = await app.inject({ method: 'POST', url: '/sim/run', headers: h, payload: { scenarioId: 'test-war-hack-shock', speed: 1800 } });
     assert.equal(run.statusCode, 200);
     const { runId } = run.json();
     await app.ghosty.sim.runUntilIdle();
@@ -427,7 +428,7 @@ describe('sim routes', () => {
     });
     assert.equal((await app.inject({ method: 'GET', url: '/sim/run' })).json().status, 'idle');
     assert.equal((await app.inject({ method: 'POST', url: '/sim/control', payload: { action: 'pause' } })).statusCode, 409);
-    await app.inject({ method: 'POST', url: '/sim/run', payload: { scenarioId: 'test-shock', autoPauseOnAlert: false } });
+    await app.inject({ method: 'POST', url: '/sim/run', payload: { scenarioId: 'test-war-hack-shock', autoPauseOnAlert: false } });
     assert.equal((await app.inject({ method: 'POST', url: '/sim/control', payload: { action: 'pause' } })).json().status, 'paused');
     await app.ghosty.sim.step(60_000);
     assert.equal(app.ghosty.sim.status().simTime, '2025-01-01T00:00:00.000Z');
