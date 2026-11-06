@@ -311,8 +311,18 @@ body:has(.lv-app) {
 }
 
 @media (max-width: 479px) {
-  .lv-wordmark-text {
+  .lv-wordmark-text,
+  .lv-tab-pro {
     display: none;
+  }
+
+  /* Keep the word on the network pill: an icon-only pill reads as a stray dot. */
+  .lv-network .lv-status-text {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip: auto;
   }
 
   .lv-nav {
@@ -479,7 +489,7 @@ body:has(.lv-app) {
 }
 
 .lv-device-full .orb {
-  --orb: clamp(200px, 58vmin, 320px);
+  --orb: clamp(220px, 70vmin, 340px);
 }
 
 @media (min-width: 900px) {
@@ -523,6 +533,22 @@ body:has(.lv-app) {
   will-change: transform, opacity;
 }
 
+/* Listening: a ring that follows the mic level (opacity + scale only). */
+.orb-listen {
+  inset: 10%;
+  border: 2px solid var(--color-ghost);
+  opacity: 0;
+  transform: scale(calc(1 + var(--level) * 0.22));
+  transition:
+    transform 90ms linear,
+    opacity var(--dur-base) var(--ease-out);
+  will-change: transform, opacity;
+}
+
+.orb[data-mode='listening'] .orb-listen {
+  opacity: calc(0.45 + var(--level) * 0.55);
+}
+
 .orb-halo-alert {
   background: radial-gradient(circle, rgb(245 184 74 / 0.55) 0%, transparent 62%);
   opacity: 0;
@@ -533,7 +559,23 @@ body:has(.lv-app) {
   opacity: 0;
 }
 
-.orb[data-mode='alert'] .orb-halo-alert {
+.orb[data-mode='alert'] /* Listening: a ring that follows the mic level (opacity + scale only). */
+.orb-listen {
+  inset: 10%;
+  border: 2px solid var(--color-ghost);
+  opacity: 0;
+  transform: scale(calc(1 + var(--level) * 0.22));
+  transition:
+    transform 90ms linear,
+    opacity var(--dur-base) var(--ease-out);
+  will-change: transform, opacity;
+}
+
+.orb[data-mode='listening'] .orb-listen {
+  opacity: calc(0.45 + var(--level) * 0.55);
+}
+
+.orb-halo-alert {
   opacity: calc(0.7 + var(--level) * 0.3);
 }
 
@@ -1950,9 +1992,17 @@ body:has(.lv-app) {
   color: var(--color-warn);
 }
 
+/* Credibility is not price direction: neutral ink with a check, amber only when the source is doubtful. */
 .lv-cred-reputable,
 .lv-cred-exemplary {
-  color: var(--color-up);
+  color: var(--color-text);
+}
+
+.lv-cred-reputable::before,
+.lv-cred-exemplary::before {
+  content: '✓';
+  margin-right: var(--space-1);
+  color: var(--color-ghost);
 }
 
 .lv-cred-questionable,

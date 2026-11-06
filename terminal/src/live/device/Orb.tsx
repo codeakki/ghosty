@@ -43,6 +43,7 @@ export const Orb = memo(function Orb({ mode, levelRef, localSpeech }: { mode: De
       <div className="orb-ripple orb-ripple-3" />
       <div className="orb-halo" />
       <div className="orb-halo orb-halo-alert" />
+      <div className="orb-listen" />
       <div className="orb-orbit" />
       <div className="orb-breathe">
         <div className="orb-core">
