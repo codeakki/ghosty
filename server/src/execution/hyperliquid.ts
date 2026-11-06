@@ -8,6 +8,8 @@ import { ExchangeClient, HttpTransport, InfoClient } from '@nktkas/hyperliquid';
 import { formatPrice } from '@nktkas/hyperliquid/utils';
 import { privateKeyToAccount } from 'viem/accounts';
 import type { Config } from '../config.js';
+import { isTestMode } from '../mode.js';
+import { NotConfiguredVenue } from '../notConfigured.js';
 import { isAddress, normalizePrivateKey } from '../wallet/account.js';
 
 /** Hyperliquid rejects orders under $10 notional. */
@@ -427,10 +429,19 @@ export function hyperliquidVenueOptions(
   };
 }
 
-/** Real venue when HL_AGENT_PRIVATE_KEY and HL_MASTER_ADDRESS are set, else the fake. */
+/**
+ * Real venue when HL_AGENT_PRIVATE_KEY and HL_MASTER_ADDRESS are set. Otherwise the fake in test mode, and in live mode
+ * NotConfiguredVenue: orders throw not_configured, market listing stays real through a keyless read-only venue.
+ */
 export function createPerpVenue(
-  config: Pick<Config, 'HL_TESTNET' | 'HL_AGENT_PRIVATE_KEY' | 'HL_MASTER_ADDRESS' | 'HL_DEXES' | 'HL_FALLBACK_COINS'>,
+  config: Pick<Config, 'HL_TESTNET' | 'HL_AGENT_PRIVATE_KEY' | 'HL_MASTER_ADDRESS' | 'HL_DEXES' | 'HL_FALLBACK_COINS'> &
+    Partial<Pick<Config, 'GHOSTY_MODE'>>,
 ): PerpVenue {
-  if (!normalizePrivateKey(config.HL_AGENT_PRIVATE_KEY) || !isAddress(config.HL_MASTER_ADDRESS)) return new FakeHyperliquid();
-  return new HyperliquidVenue(hyperliquidVenueOptions(config));
+  const hasKey = Boolean(normalizePrivateKey(config.HL_AGENT_PRIVATE_KEY));
+  const hasMaster = isAddress(config.HL_MASTER_ADDRESS);
+  if (hasKey && hasMaster) return new HyperliquidVenue(hyperliquidVenueOptions(config));
+  if (isTestMode(config)) return new FakeHyperliquid();
+  const missing = [...(hasMaster ? [] : ['HL_MASTER_ADDRESS']), ...(hasKey ? [] : ['HL_AGENT_PRIVATE_KEY'])];
+  const readOnly = new HyperliquidVenue({ ...hyperliquidVenueOptions({ ...config, HL_AGENT_PRIVATE_KEY: undefined }), exchange: undefined });
+  return new NotConfiguredVenue(missing, readOnly);
 }

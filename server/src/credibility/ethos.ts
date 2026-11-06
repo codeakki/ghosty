@@ -3,6 +3,8 @@
  * Ethos scores run 0–2800. We map them to a 0.2–1.0 weight and a coarse level the decision loop can use.
  */
 import type { Config } from '../config.js';
+import { isTestMode } from '../mode.js';
+import { NotConfiguredScorer } from '../notConfigured.js';
 import type { NewsItem } from '../news/types.js';
 import { sourceWeight } from './sources.js';
 
@@ -260,8 +262,10 @@ export async function weightItems(items: NewsItem[], scorer: CredibilityScorer):
   });
 }
 
-/** Real Ethos when ETHOS_ENABLED=true (no key needed), else the deterministic fake. */
-export function createCredibilityScorer(config: Pick<Config, 'ETHOS_ENABLED' | 'ETHOS_CLIENT' | 'ETHOS_API_URL'>): CredibilityScorer {
+/** Real Ethos when ETHOS_ENABLED=true (no key needed), else the fake (test mode) or NotConfiguredScorer (live mode). */
+export function createCredibilityScorer(
+  config: Pick<Config, 'ETHOS_ENABLED' | 'ETHOS_CLIENT' | 'ETHOS_API_URL'> & Partial<Pick<Config, 'GHOSTY_MODE'>>,
+): CredibilityScorer {
   if (config.ETHOS_ENABLED) return new EthosScorer({ client: config.ETHOS_CLIENT, baseUrl: config.ETHOS_API_URL });
-  return new FakeEthosScorer();
+  return isTestMode(config) ? new FakeEthosScorer() : new NotConfiguredScorer();
 }

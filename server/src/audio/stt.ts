@@ -1,4 +1,6 @@
 import type { Config } from '../config.js';
+import { isTestMode } from '../mode.js';
+import { NotConfiguredStt } from '../notConfigured.js';
 import { encodeWav, type WavAudio } from './wav.js';
 
 export interface Transcript {
@@ -119,8 +121,8 @@ export class GroqStt implements SpeechToText {
 //   }
 // }
 
-/** Real Groq STT when GROQ_API_KEY is set, else the deterministic fake. */
-export function createStt(config: Pick<Config, 'GROQ_API_KEY' | 'GROQ_STT_MODEL'>): SpeechToText {
+/** Real Groq STT when GROQ_API_KEY is set; otherwise the fake in test mode, NotConfiguredStt in live mode. */
+export function createStt(config: Pick<Config, 'GROQ_API_KEY' | 'GROQ_STT_MODEL'> & Partial<Pick<Config, 'GHOSTY_MODE'>>): SpeechToText {
   if (config.GROQ_API_KEY) return new GroqStt({ apiKey: config.GROQ_API_KEY, model: config.GROQ_STT_MODEL });
-  return new FakeStt();
+  return isTestMode(config) ? new FakeStt() : new NotConfiguredStt();
 }

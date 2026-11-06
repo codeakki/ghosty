@@ -9,6 +9,7 @@ import type { OrderResult, PerpVenue } from './execution/hyperliquid.js';
 import { planSteps, type PlannedAction, type PlanStep, type SpotLegSpec } from './execution/playbook.js';
 import { FakeSpotLeg, type SpotLeg } from './wallet/uniswap.js';
 import { fetchAll, type NewsItem, type NewsProvider } from './news/types.js';
+import { ProviderNotConfiguredError, type NotConfiguredInfo } from './mode.js';
 
 /** What started a decision. `text` and `inject` come from the virtual pod, never from the firmware. */
 export type DecisionTrigger = 'voice' | 'text' | 'button' | 'inject';
@@ -52,8 +53,10 @@ export interface PipelineDeps {
 export interface VoiceResult {
   transcript: string;
   decision: Decision;
-  /** PCM s16le mono 16 kHz */
+  /** PCM s16le mono 16 kHz. Empty when TTS is not configured (live mode, text turns only). */
   audio: Buffer;
+  /** Set when the decision was made but TTS is not configured; /voice refuses earlier, /voice/text reports it. */
+  ttsNotConfigured?: NotConfiguredInfo;
 }
 
 export interface ButtonResult {
@@ -154,8 +157,16 @@ export class Pipeline {
 
   private async answer(transcript: string, trigger: DecisionTrigger): Promise<VoiceResult> {
     const decision = await this.decide(transcript, trigger);
-    const audio = await this.deps.tts.synthesize(decision.rationale);
-    return { transcript, decision, audio };
+    try {
+      const audio = await this.deps.tts.synthesize(decision.rationale);
+      return { transcript, decision, audio };
+    } catch (err) {
+      // A text turn still returns its (real) decision without audio; never a placeholder sound.
+      if (err instanceof ProviderNotConfiguredError && trigger === 'text') {
+        return { transcript, decision, audio: Buffer.alloc(0), ttsNotConfigured: { provider: err.provider, missingEnv: err.missingEnv } };
+      }
+      throw err;
+    }
   }
 
   private async decide(transcript: string, trigger: DecisionTrigger, headline?: NewsItem): Promise<Decision> {

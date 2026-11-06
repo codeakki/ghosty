@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { zeroGStatus, ZeroGEpisodeLog, type Agent } from './agent/index.js';
 import { zeroGState } from './agent/status.js';
 import type { Config } from './config.js';
+import { notConfiguredInfo, ProviderNotConfiguredError } from './mode.js';
 import type { Executor } from './execution/executor.js';
 import { HyperliquidVenue, parseFallbackCoins, resolveCoinIn, type MarketInfo } from './execution/hyperliquid.js';
 import { HcsAuditLog, type Payments } from './payments/index.js';
@@ -36,7 +37,7 @@ const MarketsQuery = z.object({
 });
 
 export interface LastPayment {
-  mode: 'real' | 'fake';
+  mode: Payments['mode'];
   txId: string;
   hashscanUrl: string;
   amountTinybar?: number;
@@ -50,6 +51,13 @@ export function zeroGExplorers(config: Pick<Config, 'OG_RPC_URL'>): { chainscan:
   return testnet
     ? { chainscan: 'https://chainscan-galileo.0g.ai', storagescan: 'https://storagescan-galileo.0g.ai' }
     : { chainscan: 'https://chainscan.0g.ai', storagescan: 'https://storagescan.0g.ai' };
+}
+
+/** 'real' for the real class, 'not_configured' for a live-mode stand-in, else 'fake' (test mode only). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function modeOfSlot(slot: unknown, real: abstract new (...args: any[]) => unknown): 'real' | 'fake' | 'not_configured' {
+  if (slot instanceof real) return 'real';
+  return notConfiguredInfo(slot) ? 'not_configured' : 'fake';
 }
 
 export function registerIntegrationRoutes(app: FastifyInstance, ctx: IntegrationContext): void {
@@ -122,6 +130,8 @@ export function registerIntegrationRoutes(app: FastifyInstance, ctx: Integration
       req.log.info({ txId: paid.txId, hashscanUrl: paid.hashscanUrl, mode: payments.mode }, 'sim paid for /signal');
       return { ...lastPayment, status: paid.status, body: paid.body, audit: paid.audit ?? null };
     } catch (err) {
+      // Live mode without Hedera keys: 503 not_configured from the app error handler.
+      if (err instanceof ProviderNotConfiguredError) throw err;
       if (err instanceof PaymentPolicyError || err instanceof HostNotAllowedError || err instanceof SpendCapExceededError) {
         return reply.code(409).send({ error: 'payment_refused', message: err.message });
       }
@@ -140,6 +150,7 @@ export function registerIntegrationRoutes(app: FastifyInstance, ctx: Integration
     try {
       all = await executor.venue.listMarkets({ includeDelisted: true });
     } catch (err) {
+      if (err instanceof ProviderNotConfiguredError) throw err;
       req.log.warn({ err }, 'Hyperliquid market list failed');
       return reply.code(502).send({ error: 'venue_unavailable', message: (err as Error).message });
     }
@@ -158,8 +169,8 @@ export function registerIntegrationRoutes(app: FastifyInstance, ctx: Integration
       (m) => !m.delisted && (query.dex === undefined || m.dex === query.dex) && (!needle || m.coin.toLowerCase().includes(needle)),
     );
     return {
-      perpMode: executor.venue instanceof HyperliquidVenue ? 'real' : 'fake',
-      spotMode: executor.spot instanceof UniswapSpotLeg ? 'real' : 'fake',
+      perpMode: modeOfSlot(executor.venue, HyperliquidVenue),
+      spotMode: modeOfSlot(executor.spot, UniswapSpotLeg),
       testnet: config.HL_TESTNET,
       dexes: config.HL_DEXES.split(',').map((d) => d.trim()).filter(Boolean),
       spotLeg: executor.spotLeg ?? null,

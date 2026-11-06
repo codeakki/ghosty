@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Config } from '../config.js';
+import { isTestMode } from '../mode.js';
+import { missingKeys, NotConfiguredSpotLeg } from '../notConfigured.js';
 import { createEvmClients, explorerTxUrl, isAddress, type Address, type Hex } from './account.js';
 
 /**
@@ -257,15 +259,20 @@ export class UniswapSpotLeg implements SpotLeg {
   }
 }
 
-/** Real leg when UNISWAP_API_KEY and EVM_PRIVATE_KEY are set, else the fake. */
+/** Real leg when UNISWAP_API_KEY and EVM_PRIVATE_KEY are set, else the fake (test mode) or NotConfiguredSpotLeg (live). */
 export function createSpotLeg(
   config: Pick<
     Config,
     'UNISWAP_API_KEY' | 'UNISWAP_API_URL' | 'UNISWAP_SLIPPAGE_PCT' | 'EVM_PRIVATE_KEY' | 'EVM_CHAIN_ID' | 'EVM_RPC_URL'
-  >,
+  > &
+    Partial<Pick<Config, 'GHOSTY_MODE'>>,
 ): SpotLeg {
   const clients = config.UNISWAP_API_KEY ? createEvmClients(config) : undefined;
-  if (!config.UNISWAP_API_KEY || !clients) return new FakeSpotLeg();
+  if (!config.UNISWAP_API_KEY || !clients) {
+    if (isTestMode(config)) return new FakeSpotLeg();
+    const missing = missingKeys(config, ['UNISWAP_API_KEY', 'EVM_PRIVATE_KEY']);
+    return new NotConfiguredSpotLeg(missing.length > 0 ? missing : ['EVM_PRIVATE_KEY']);
+  }
   const { account, chain, walletClient, publicClient } = clients;
   return new UniswapSpotLeg({
     apiKey: config.UNISWAP_API_KEY,

@@ -54,13 +54,16 @@ export function registerSimRoutes(app: FastifyInstance, ctx: SimRouteContext): v
   });
 
   // Server-sent events: a `state` snapshot on connect, then `news`, `decision`, `alert`, `order`,
-  // `episode` and coalesced `state` events as the pipeline runs.
+  // `episode` and coalesced `state` events as the pipeline runs. index.ts adds `providers` (on a provider
+  // state change) and `market` (watchlist mids, at most 1/s).
   const streams = new Set<ServerResponse>();
   app.get('/events', async (req, reply) => {
     state.setSafeStop(await ctx.safeStopEngaged());
     reply.hijack();
     const res = reply.raw;
     res.writeHead(200, {
+      // Keep headers set by hooks (CORS) that reply.hijack() would otherwise drop.
+      ...(reply.getHeaders() as Record<string, string>),
       'content-type': 'text/event-stream; charset=utf-8',
       'cache-control': 'no-cache, no-transform',
       connection: 'keep-alive',
@@ -144,6 +147,8 @@ export function registerSimRoutes(app: FastifyInstance, ctx: SimRouteContext): v
       sampleRate: OUTPUT_SAMPLE_RATE,
       audioBytes: result.audio.length,
       audioBase64: result.audio.toString('base64'),
+      // Live mode without TTS keys: the decision stands, the audio is empty.
+      tts: result.ttsNotConfigured ? { error: 'not_configured', ...result.ttsNotConfigured } : null,
     };
   });
 

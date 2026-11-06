@@ -1,4 +1,5 @@
 import type { Config } from '../config.js';
+import { isTestMode } from '../mode.js';
 import type { CredibilityScorer } from '../credibility/ethos.js';
 import { NewsAggregator } from './aggregator.js';
 import { CryptoPanicProvider, FakeCryptoPanicProvider } from './cryptopanic.js';
@@ -21,32 +22,36 @@ type NewsConfig = Pick<
   | 'XAI_MODEL'
   | 'XAI_X_HANDLES'
   | 'XAI_MIN_INTERVAL_SECONDS'
->;
+> &
+  Partial<Pick<Config, 'GHOSTY_MODE'>>;
 
 /**
- * One provider per source. Real when enabled, fake otherwise:
- *  - RSS, Polymarket: real when NEWS_LIVE=true (no key needed)
+ * One provider per source. Real when enabled; fakes only in test mode:
+ *  - RSS, Polymarket: real when NEWS_LIVE=true (no key needed; default true in live mode)
  *  - CryptoPanic: real when CRYPTOPANIC_TOKEN is set
  *  - Grok: real when XAI_API_KEY is set
- * With NEWS_LIVE=true, sources without a key are left out instead of faked, so live mode never
- * mixes canned headlines into real ones.
+ * Fake headlines appear only with GHOSTY_MODE=test and NEWS_LIVE=false. Otherwise sources without a key are
+ * left out, so canned headlines are never mixed into real ones.
  */
 export function createNewsProviders(config: NewsConfig): NewsProvider[] {
   const timeoutMs = config.NEWS_PROVIDER_TIMEOUT_MS;
   const live = config.NEWS_LIVE;
-  const providers: NewsProvider[] = [
-    live ? new RssProvider({ feeds: parseFeedList(config.NEWS_RSS_FEEDS), timeoutMs }) : new FakeRssProvider(),
-  ];
+  const fakes = !live && isTestMode(config);
+  const providers: NewsProvider[] = [];
+  if (live) providers.push(new RssProvider({ feeds: parseFeedList(config.NEWS_RSS_FEEDS), timeoutMs }));
+  else if (fakes) providers.push(new FakeRssProvider());
   if (config.CRYPTOPANIC_TOKEN) {
     providers.push(new CryptoPanicProvider({ token: config.CRYPTOPANIC_TOKEN, baseUrl: config.CRYPTOPANIC_API_URL, timeoutMs }));
-  } else if (!live) {
+  } else if (fakes) {
     providers.push(new FakeCryptoPanicProvider());
   }
-  providers.push(
-    live
-      ? new PolymarketProvider({ keywords: csv(config.NEWS_POLYMARKET_KEYWORDS), tagSlug: config.NEWS_POLYMARKET_TAG, timeoutMs })
-      : new FakePolymarketProvider(),
-  );
+  if (live) {
+    providers.push(
+      new PolymarketProvider({ keywords: csv(config.NEWS_POLYMARKET_KEYWORDS), tagSlug: config.NEWS_POLYMARKET_TAG, timeoutMs }),
+    );
+  } else if (fakes) {
+    providers.push(new FakePolymarketProvider());
+  }
   if (config.XAI_API_KEY) {
     providers.push(
       new GrokProvider({
@@ -56,7 +61,7 @@ export function createNewsProviders(config: NewsConfig): NewsProvider[] {
         minIntervalMs: config.XAI_MIN_INTERVAL_SECONDS * 1000,
       }),
     );
-  } else if (!live) {
+  } else if (fakes) {
     providers.push(new FakeGrokProvider());
   }
   return providers;

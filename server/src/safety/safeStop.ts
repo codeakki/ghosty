@@ -1,4 +1,5 @@
 import type { Config } from '../config.js';
+import { isTestMode } from '../mode.js';
 
 /**
  * Runtime override for SIMULATE_BRAIN_OFFLINE, one per app instance.
@@ -15,12 +16,13 @@ export class BrainSwitch {
  * - SAFE_STOP_ENABLED=false bypasses the check entirely.
  * - SIMULATE_BRAIN_OFFLINE=true always reports offline (demo switch). The sim's BrainSwitch
  *   (`POST /sim/safe-stop`) overrides it at runtime when passed as `opts.sim`.
- * - OG_API_KEY unset: the brain is the local FakeDecider, so it counts as online.
+ * - OG_API_KEY unset: in test mode the brain is the local FakeDecider, so it counts as online. In live mode there
+ *   is no brain at all, so safe-stop is engaged (no fake decisions).
  * - OG_API_KEY set: GET <OG_ROUTER_URL>/models with a 3 s timeout, cached for 10 s.
  *   A failed 0G decide() call also marks the brain offline for one cache window (reportBrainFailure).
  */
 export type SafeStopConfig = Pick<Config, 'SAFE_STOP_ENABLED' | 'SIMULATE_BRAIN_OFFLINE' | 'OG_ROUTER_URL'> &
-  Partial<Pick<Config, 'OG_API_KEY'>>;
+  Partial<Pick<Config, 'OG_API_KEY' | 'GHOSTY_MODE'>>;
 
 export interface BrainProbeOptions {
   fetch?: typeof fetch;
@@ -47,7 +49,7 @@ function routerKey(url: string): string {
 export async function isBrainOnline(config: SafeStopConfig, opts: BrainProbeOptions = {}): Promise<boolean> {
   if (!config.SAFE_STOP_ENABLED) return true;
   if (opts.sim?.simulateOffline ?? config.SIMULATE_BRAIN_OFFLINE) return false;
-  if (!config.OG_API_KEY) return true;
+  if (!config.OG_API_KEY) return isTestMode(config);
 
   const now = opts.now ?? Date.now;
   const key = routerKey(config.OG_ROUTER_URL);

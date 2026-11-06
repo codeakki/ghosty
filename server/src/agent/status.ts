@@ -3,8 +3,8 @@
  * Kept in one place so the HTTP layer can expose it without holding references to the instances.
  */
 export interface ZeroGRuntimeState {
-  computeMode: '0g' | 'fake';
-  storageMode: '0g' | 'memory';
+  computeMode: '0g' | 'fake' | 'not_configured';
+  storageMode: '0g' | 'memory' | 'not_configured';
   lastRequestId: string | null;
   lastDecisionAt: string | null;
   memoryRootHash: string | null;
