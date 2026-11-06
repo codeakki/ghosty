@@ -1,0 +1,2151 @@
+/*
+ * Ghosty Live view. Tokens: src/design/tokens.css. Spec: docs/design/ghosty-design.md.
+ * Rules: spacing only from --space-*, sizes from --size-*, motion only on transform/opacity, every async region
+ * has reserved space. Everything is scoped under .lv-app (this file also ships on /pro, which has its own globals).
+ */
+
+body:has(.lv-app) {
+  margin: 0;
+  background: var(--color-bg);
+}
+
+@media (pointer: fine) {
+  html:has(.lv-app) {
+    overscroll-behavior: none;
+  }
+}
+
+.lv-app {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font: 400 var(--text-sm) / var(--leading-sm) var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: light) {
+  .lv-app {
+    color-scheme: light;
+  }
+}
+
+.lv-app *,
+.lv-app *::before,
+.lv-app *::after {
+  box-sizing: border-box;
+}
+
+.lv-app :is(h1, h2, h3, p, figure, blockquote, ol, ul) {
+  margin: 0;
+  padding: 0;
+}
+
+.lv-app :is(h1, h2, h3) {
+  text-wrap: balance;
+}
+
+.lv-app :focus-visible {
+  outline: 2px solid var(--color-ghost);
+  outline-offset: 2px;
+}
+
+.lv-app button {
+  font: inherit;
+  touch-action: manipulation;
+}
+
+.lv-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Numbers: tabular mono, so a changing price never changes width. Everything else is the UI sans. */
+.lv-num,
+.lv-delta {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.lv-card-time {
+  font-variant-numeric: tabular-nums;
+}
+
+.lv-mono {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+}
+
+.lv-skip {
+  position: absolute;
+  left: var(--space-4);
+  top: calc(-1 * var(--space-7));
+  z-index: 50;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-sm);
+  background: var(--color-ghost);
+  color: var(--color-ghost-ink);
+  font-weight: 600;
+  text-decoration: none;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.lv-skip:focus-visible {
+  transform: translateY(calc(var(--space-7) + var(--space-2)));
+}
+
+/* ---------------------------------------------------------------------------
+ * Top nav
+ * ------------------------------------------------------------------------- */
+
+.lv-nav {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: calc(var(--nav-h) + env(safe-area-inset-top));
+  padding: env(safe-area-inset-top) max(var(--gutter), env(safe-area-inset-right)) 0 max(var(--gutter), env(safe-area-inset-left));
+  background: color-mix(in oklab, var(--color-bg) 86%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--color-line);
+}
+
+.lv-wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--size-control);
+  color: var(--color-text);
+  font-weight: 600;
+  font-size: 17px;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+}
+
+.lv-mark {
+  flex: none;
+}
+
+.lv-mark-halo {
+  fill: var(--color-ghost);
+  opacity: 0.18;
+}
+
+.lv-mark-core {
+  fill: var(--color-ghost);
+}
+
+.lv-mark-eye {
+  fill: #07211b;
+}
+
+@media (prefers-color-scheme: light) {
+  .lv-mark-eye {
+    fill: #ffffff;
+  }
+}
+
+.lv-tabs {
+  display: flex;
+  gap: var(--space-0);
+  margin: 0 auto;
+  padding: var(--space-0);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-1);
+}
+
+.lv-tab {
+  display: inline-flex;
+  align-items: center;
+  height: var(--size-control-sm);
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-pill);
+  color: var(--color-muted);
+  font-weight: 500;
+  text-decoration: none;
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out);
+}
+
+.lv-tab:hover {
+  color: var(--color-text);
+  background: var(--color-raised);
+}
+
+.lv-tab[aria-current='page'] {
+  color: var(--color-text);
+  background: var(--color-raised);
+  box-shadow: inset 0 0 0 1px var(--color-line-strong);
+}
+
+.lv-tab-pro {
+  font-size: var(--text-xs);
+  padding: 0 var(--space-3);
+}
+
+.lv-nav-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: none;
+}
+
+/* Fixed width: "Connecting…" → "0G live" never re-centres the tabs. */
+.lv-status-dot {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  justify-content: center;
+  min-width: 7.5rem;
+  height: var(--size-control-sm);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-1);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.lv-status-icon {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: var(--space-3);
+  height: var(--space-3);
+  font-size: 10px;
+}
+
+/* Heartbeat: one ring per SSE event. */
+.lv-beat {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1px solid currentColor;
+  opacity: 0;
+  animation: lv-beat 900ms var(--ease-out);
+  pointer-events: none;
+}
+
+@keyframes lv-beat {
+  from {
+    transform: scale(0.6);
+    opacity: 0.9;
+  }
+  to {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}
+
+.lv-tone-ok .lv-status-icon {
+  color: var(--color-ghost);
+}
+
+.lv-tone-warn .lv-status-icon {
+  color: var(--color-warn);
+}
+
+.lv-tone-bad .lv-status-icon {
+  color: var(--color-down);
+}
+
+.lv-tone-muted .lv-status-icon {
+  color: var(--color-muted);
+}
+
+/* Same quiet pill as the status; mainnet only adds a small amber diamond (real money), never a loud box. */
+.lv-status-dot.lv-network {
+  min-width: 0;
+  color: var(--color-muted);
+}
+
+.lv-network .lv-status-icon {
+  color: var(--color-muted);
+  font-size: 9px;
+}
+
+.lv-network-main .lv-status-icon {
+  color: var(--color-warn);
+}
+
+@media (max-width: 640px) {
+  .lv-status-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .lv-status-dot {
+    min-width: 0;
+    padding: 0 var(--space-2);
+  }
+
+  .lv-tab {
+    padding: 0 var(--space-3);
+  }
+
+  .lv-tab-pro {
+    padding: 0 var(--space-2);
+  }
+}
+
+@media (max-width: 479px) {
+  .lv-wordmark-text {
+    display: none;
+  }
+
+  .lv-nav {
+    gap: var(--space-2);
+  }
+
+  .lv-tab {
+    padding: 0 var(--space-3);
+    font-size: 13px;
+  }
+}
+
+/* Overlays the top of the page (never pushes it): the server dropping out is not a layout change. */
+.lv-offline-bar {
+  position: fixed;
+  top: calc(var(--nav-h) + env(safe-area-inset-top));
+  left: 0;
+  right: 0;
+  z-index: 19;
+  padding: var(--space-2) var(--gutter);
+  background: color-mix(in oklab, var(--color-warn) 16%, var(--color-bg));
+  color: var(--color-text);
+  border-bottom: 1px solid var(--color-line);
+  box-shadow: var(--shadow-2);
+  animation: lv-fade-down var(--dur-spring) var(--ease-spring) both;
+}
+
+/* ---------------------------------------------------------------------------
+ * Layouts. The feed is always a fixed-height panel that scrolls itself, so inserts can be scroll-anchored.
+ * ------------------------------------------------------------------------- */
+
+.lv-main {
+  flex: 1;
+  min-height: 0;
+  outline: none;
+}
+
+.lv-main-live > .lv-feed,
+.lv-main-feed > .lv-feed {
+  height: calc(100dvh - var(--nav-h));
+}
+
+.lv-main-feed {
+  flex: none;
+  display: flex;
+  justify-content: center;
+  height: calc(100dvh - var(--nav-h));
+}
+
+@media (min-width: 900px) {
+  /* Fixed-height columns that scroll on their own (flex: none so the height wins over flex-grow). */
+  .lv-main-live {
+    flex: none;
+    display: grid;
+    grid-template-columns: minmax(360px, 4fr) 6fr;
+    grid-template-rows: minmax(0, 1fr);
+    height: calc(100dvh - var(--nav-h));
+  }
+
+  .lv-main-live > .lv-device {
+    overflow-y: auto;
+    border-right: 1px solid var(--color-line);
+  }
+
+  .lv-main-live > .lv-feed {
+    height: 100%;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Device
+ * ------------------------------------------------------------------------- */
+
+.lv-device {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+  min-width: 0;
+  padding: var(--space-6) var(--gutter);
+  text-align: center;
+  isolation: isolate;
+}
+
+/* Static ambient light behind the orb; state tints cross-fade on top of it. */
+.lv-device::before,
+.lv-device::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  transition: opacity 400ms var(--ease-in-out);
+}
+
+.lv-device::before {
+  background: radial-gradient(60% 40% at 50% 26%, var(--color-ghost-tint), transparent 70%);
+}
+
+.lv-device::after {
+  background: radial-gradient(60% 40% at 50% 26%, var(--color-warn-tint), transparent 70%);
+  opacity: 0;
+}
+
+.lv-device[data-mode='alert']::before,
+.lv-device[data-mode='offline']::before {
+  opacity: 0;
+}
+
+.lv-device[data-mode='alert']::after {
+  opacity: 1;
+}
+
+.lv-device-full {
+  min-height: calc(100dvh - var(--nav-h));
+  justify-content: center;
+  margin: 0 auto;
+  width: min(100%, 520px);
+  padding-bottom: max(var(--space-6), env(safe-area-inset-bottom));
+}
+
+.lv-device-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-5);
+  padding-block: var(--space-5) var(--space-2);
+}
+
+/* Fixed height: label changes never move the controls below. */
+.lv-device-state {
+  height: var(--leading-lg);
+  font-size: var(--text-lg);
+  line-height: var(--leading-lg);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  transition: color var(--dur-base) var(--ease-out);
+}
+
+.lv-device[data-mode='alert'] .lv-device-state {
+  color: var(--color-warn);
+}
+
+.lv-device[data-mode='offline'] .lv-device-state {
+  color: var(--color-muted);
+}
+
+/* ---- The orb ------------------------------------------------------------ */
+
+.orb {
+  --level: 0;
+  --orb: clamp(180px, 44vmin, 300px);
+  --orb-hi: #f4fffb;
+  --orb-core: #a6f4e0;
+  --orb-deep: #1c6f60;
+  --orb-glow: rgb(166 244 224 / 0.5);
+  --orb-eye: #07211b;
+  position: relative;
+  width: var(--orb);
+  height: var(--orb);
+  flex: none;
+}
+
+.lv-device-full .orb {
+  --orb: clamp(200px, 58vmin, 320px);
+}
+
+@media (min-width: 900px) {
+  .lv-main-live .orb {
+    --orb: clamp(200px, 19vw, 272px);
+  }
+
+  .lv-main-live .lv-device {
+    padding-top: var(--space-5);
+  }
+
+  .lv-main-live .lv-device-stage {
+    padding-block: var(--space-2) 0;
+  }
+}
+
+@media (prefers-color-scheme: light) {
+  .orb {
+    --orb-hi: #ffffff;
+    --orb-core: #8ee8d2;
+    --orb-deep: #0b7363;
+    --orb-glow: rgb(20 170 145 / 0.35);
+  }
+}
+
+.orb > *,
+.orb-breathe > *,
+.orb-core > * {
+  position: absolute;
+  border-radius: 50%;
+}
+
+.orb-halo {
+  inset: -14%;
+  background: radial-gradient(circle, var(--orb-glow) 0%, transparent 62%);
+  opacity: calc(0.55 + var(--level) * 0.45);
+  transform: scale(calc(1 + var(--level) * 0.3));
+  transition:
+    transform 90ms linear,
+    opacity 400ms var(--ease-in-out);
+  will-change: transform, opacity;
+}
+
+.orb-halo-alert {
+  background: radial-gradient(circle, rgb(245 184 74 / 0.55) 0%, transparent 62%);
+  opacity: 0;
+}
+
+.orb[data-mode='alert'] .orb-halo:not(.orb-halo-alert),
+.orb[data-mode='offline'] .orb-halo {
+  opacity: 0;
+}
+
+.orb[data-mode='alert'] .orb-halo-alert {
+  opacity: calc(0.7 + var(--level) * 0.3);
+}
+
+.orb-breathe {
+  inset: 0;
+}
+
+.orb[data-mode='idle'] .orb-breathe {
+  animation: lv-breathe var(--dur-breathe) var(--ease-in-out) infinite;
+}
+
+.orb-core {
+  inset: 15%;
+  overflow: hidden;
+  background: radial-gradient(circle at 36% 30%, var(--orb-hi) 0%, var(--orb-core) 34%, var(--orb-deep) 100%);
+  box-shadow:
+    0 0 48px var(--orb-glow),
+    inset 0 -10px 30px rgb(0 0 0 / 0.18);
+  transform: scale(calc(1 + var(--level) * 0.14));
+  transition: transform 90ms linear;
+  will-change: transform;
+}
+
+/* State colours: whole layers that cross-fade by opacity. */
+.orb-tint {
+  inset: 0;
+  opacity: 0;
+  transition: opacity 400ms var(--ease-in-out);
+}
+
+.orb-tint-think {
+  background: radial-gradient(circle at 36% 30%, #f6f3ff 0%, #c9e9f0 30%, #4b3a85 100%);
+}
+
+.orb-tint-alert {
+  background: radial-gradient(circle at 36% 30%, #fff6e3 0%, #f9cf7c 34%, #8a5208 100%);
+}
+
+.orb-tint-off {
+  background: radial-gradient(circle at 36% 30%, #b5bdc8 0%, #6b7584 34%, #2a313b 100%);
+}
+
+.orb[data-mode='thinking'] .orb-tint-think,
+.orb[data-mode='alert'] .orb-tint-alert,
+.orb[data-mode='offline'] .orb-tint-off {
+  opacity: 1;
+}
+
+.orb-sheen {
+  inset: 9% 30% 62% 18%;
+  background: radial-gradient(ellipse, rgb(255 255 255 / 0.55), transparent 70%);
+  transform: rotate(-24deg);
+}
+
+.orb-face {
+  inset: 0;
+  border-radius: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 15%;
+  padding-bottom: 6%;
+  transition: transform var(--dur-base) var(--ease-out);
+}
+
+.orb-eye {
+  width: 9%;
+  height: 14%;
+  border-radius: 50%;
+  background: var(--orb-eye);
+  transform-origin: center;
+  transition: transform var(--dur-base) var(--ease-out);
+}
+
+.orb[data-mode='idle'] .orb-eye {
+  animation: lv-blink 5.6s steps(1, end) infinite;
+}
+
+.orb[data-mode='listening'] .orb-eye {
+  transform: scale(1.12);
+}
+
+.orb[data-mode='thinking'] .orb-face {
+  transform: translate(6%, -8%);
+}
+
+.orb[data-mode='alert'] .orb-eye {
+  transform: scale(1.2);
+}
+
+.orb[data-mode='offline'] .orb-eye {
+  transform: scaleY(0.16);
+}
+
+.orb-orbit {
+  inset: 6%;
+  opacity: 0;
+  background: conic-gradient(from 0deg, transparent 0 62%, rgb(198 155 255 / 0.05) 70%, var(--color-track-0g) 90%, #fff 94%, transparent 95%);
+  mask: radial-gradient(circle, transparent 63%, #000 64%, #000 69%, transparent 70%);
+  -webkit-mask: radial-gradient(circle, transparent 63%, #000 64%, #000 69%, transparent 70%);
+  transition: opacity 400ms var(--ease-in-out);
+  will-change: transform;
+}
+
+.orb[data-mode='thinking'] .orb-orbit {
+  opacity: 1;
+  animation: lv-spin var(--dur-orbit) linear infinite;
+}
+
+.orb-ripple {
+  inset: 12%;
+  border: 2px solid var(--color-warn);
+  opacity: 0;
+  will-change: transform, opacity;
+}
+
+.orb[data-mode='alert'] .orb-ripple {
+  animation: lv-ripple var(--dur-ripple) var(--ease-out) infinite;
+}
+
+.orb[data-mode='alert'] .orb-ripple-2 {
+  animation-delay: calc(var(--dur-ripple) / 3);
+}
+
+.orb[data-mode='alert'] .orb-ripple-3 {
+  animation-delay: calc(var(--dur-ripple) * 2 / 3);
+}
+
+/* The browser is reading an alert aloud (no amplitude available): a gentle speaking pulse. */
+.orb[data-local-speech='true'] .orb-core {
+  animation: lv-talk 0.9s var(--ease-in-out) infinite;
+}
+
+@keyframes lv-breathe {
+  0%,
+  100% {
+    transform: scale(0.97);
+  }
+  50% {
+    transform: scale(1.03);
+  }
+}
+
+@keyframes lv-blink {
+  0%,
+  95%,
+  100% {
+    transform: scaleY(1);
+  }
+  96%,
+  98% {
+    transform: scaleY(0.1);
+  }
+}
+
+@keyframes lv-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+@keyframes lv-ripple {
+  0% {
+    transform: scale(0.95);
+    opacity: 0.75;
+  }
+  100% {
+    transform: scale(1.65);
+    opacity: 0;
+  }
+}
+
+@keyframes lv-talk {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.07);
+  }
+}
+
+/* ---- Alert, caption, button ----------------------------------------------- */
+
+/* Reserved slot for the trade card or the caption: an alert arriving never moves the button. */
+.lv-device-info {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: min(100%, 420px);
+  min-height: calc(var(--space-8) + var(--space-5));
+}
+
+.lv-alert {
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-warn-tint);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--color-warn) 45%, transparent);
+  text-align: left;
+  animation: lv-fade-up var(--dur-spring) var(--ease-spring) both;
+}
+
+.lv-alert-kicker {
+  color: var(--color-warn);
+  font-size: var(--text-xs);
+  font-weight: 500;
+}
+
+.lv-alert-leg {
+  margin-top: var(--space-1);
+  font-size: var(--text-md);
+  line-height: var(--leading-md);
+  font-weight: 600;
+}
+
+.lv-alert-more,
+.lv-alert-headline {
+  margin-top: var(--space-1);
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
+.lv-caption {
+  width: 100%;
+}
+
+.lv-caption-label {
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+}
+
+.lv-caption-empty {
+  font-size: var(--text-sm);
+  text-wrap: pretty;
+}
+
+.lv-caption-text {
+  margin-top: var(--space-1);
+  font-size: var(--text-md);
+  line-height: var(--leading-md);
+  text-wrap: pretty;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.lv-device-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.lv-talk {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  width: min(100%, 360px);
+  height: var(--size-control-lg);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--color-ghost);
+  color: var(--color-ghost-ink);
+  font-size: var(--text-md);
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: none;
+  box-shadow: 0 0 0 0 var(--color-ghost-glow);
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    background-color var(--dur-base) var(--ease-out),
+    box-shadow var(--dur-base) var(--ease-out);
+}
+
+.lv-device-full .lv-talk {
+  height: var(--size-control-xl);
+  font-size: var(--text-lg);
+}
+
+.lv-talk:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--color-ghost) 86%, var(--color-text));
+}
+
+.lv-talk:active:not(:disabled),
+.lv-talk[data-mode='listening'] {
+  transform: scale(0.97);
+  box-shadow: 0 0 0 var(--space-2) var(--color-ghost-tint);
+}
+
+.lv-talk[data-mode='alert'] {
+  background: var(--color-warn);
+  color: var(--color-warn-ink);
+  box-shadow: 0 0 0 var(--space-2) var(--color-warn-tint);
+}
+
+.lv-talk[data-mode='alert']:hover {
+  background: color-mix(in oklab, var(--color-warn) 88%, var(--color-text));
+}
+
+.lv-talk:disabled {
+  background: var(--color-raised);
+  color: var(--color-muted);
+  cursor: not-allowed;
+  box-shadow: inset 0 0 0 1px var(--color-line-strong);
+}
+
+.lv-talk-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.55;
+}
+
+.lv-talk[data-mode='listening'] .lv-talk-dot {
+  opacity: 1;
+  animation: lv-talk 0.8s var(--ease-in-out) infinite;
+}
+
+/* Reserved for "Not Now", so the hint below never jumps when an alert arrives. */
+.lv-device-secondary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--size-control);
+}
+
+.lv-btn-quiet {
+  min-height: var(--size-control);
+  padding: 0 var(--space-5);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--color-text);
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out);
+}
+
+.lv-btn-quiet:hover {
+  border-color: var(--color-muted);
+  background: var(--color-raised);
+}
+
+.lv-talk-hint {
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+}
+
+@media (pointer: coarse) {
+  .lv-kbd-hint {
+    display: none;
+  }
+}
+
+/* Reserved for a two-line note, so a note appearing never moves the text field below. */
+.lv-note-slot {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  width: min(100%, 420px);
+  min-height: calc(var(--space-7) + var(--space-2));
+}
+
+.lv-note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  text-align: left;
+  animation: lv-fade 200ms var(--ease-out) both;
+}
+
+.lv-note > span:first-child {
+  flex: none;
+  width: var(--size-icon);
+  height: var(--size-icon);
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  font: 700 12px / 1 var(--font-mono);
+}
+
+.lv-note-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.lv-note-warn {
+  background: var(--color-warn-tint);
+}
+
+.lv-note-warn > span:first-child {
+  background: var(--color-warn);
+  color: var(--color-warn-ink);
+}
+
+.lv-note-info {
+  background: var(--color-ghost-tint);
+}
+
+.lv-note-calm {
+  background: var(--color-raised);
+  color: var(--color-muted);
+}
+
+.lv-note-calm > span:first-child {
+  background: var(--color-line-strong);
+  color: var(--color-text);
+}
+
+.lv-note-info > span:first-child {
+  background: var(--color-ghost);
+  color: var(--color-ghost-ink);
+}
+
+.lv-type {
+  display: flex;
+  gap: var(--space-2);
+  width: min(100%, 420px);
+}
+
+.lv-input {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  height: var(--size-control);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-pill);
+  background: var(--color-raised);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 16px; /* no iOS zoom on focus */
+}
+
+.lv-input::placeholder {
+  color: var(--color-muted);
+}
+
+.lv-input:focus-visible {
+  outline: 2px solid var(--color-ghost);
+  outline-offset: 0;
+}
+
+.lv-input:disabled {
+  opacity: 0.6;
+}
+
+.lv-btn {
+  flex: none;
+  height: var(--size-control);
+  padding: 0 var(--space-5);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-pill);
+  background: var(--color-raised);
+  color: var(--color-text);
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+
+.lv-btn:hover:not(:disabled) {
+  border-color: var(--color-ghost);
+}
+
+.lv-btn:disabled {
+  color: var(--color-muted);
+  cursor: not-allowed;
+}
+
+.lv-link-btn {
+  min-height: var(--size-control);
+  padding: 0 var(--space-3);
+  border: 0;
+  background: none;
+  color: var(--color-muted);
+  text-decoration: underline;
+  text-decoration-color: var(--color-line-strong);
+  text-underline-offset: 3px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.lv-link-btn:hover {
+  color: var(--color-text);
+  text-decoration-color: var(--color-ghost);
+}
+
+.lv-icon-btn {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: var(--size-control-sm);
+  height: var(--size-control-sm);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-muted);
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out);
+}
+
+.lv-icon-btn:hover {
+  color: var(--color-text);
+  background: var(--color-raised);
+}
+
+/* ---------------------------------------------------------------------------
+ * Feed
+ * ------------------------------------------------------------------------- */
+
+.lv-feed {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.lv-feed-full {
+  width: min(100%, 760px);
+}
+
+.lv-feed-top {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--gutter) var(--space-3);
+  border-bottom: 1px solid var(--color-line);
+}
+
+.lv-main-live .lv-feed-top {
+  border-top: 1px solid var(--color-line);
+}
+
+@media (min-width: 900px) {
+  .lv-main-live .lv-feed-top {
+    border-top: 0;
+  }
+}
+
+/* ---- Pulse strip: fixed tiles, right-aligned tabular numbers ---------------- */
+
+.lv-pulse {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(var(--size-ticker), 1fr);
+  gap: var(--space-2);
+  list-style: none;
+  overflow-x: auto;
+  scrollbar-width: none;
+  margin: 0 calc(-1 * var(--gutter));
+  padding: 0 var(--gutter);
+}
+
+.lv-pulse::-webkit-scrollbar {
+  display: none;
+}
+
+.lv-pulse-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    'name delta'
+    'px px';
+  row-gap: var(--space-1);
+  column-gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-1);
+}
+
+.lv-pulse-name {
+  grid-area: name;
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.lv-pulse-px {
+  grid-area: px;
+  justify-self: end;
+  min-height: var(--leading-md);
+  font-size: var(--text-md);
+  line-height: var(--leading-md);
+  font-weight: 500;
+}
+
+.lv-pulse-item .lv-delta {
+  grid-area: delta;
+  justify-self: end;
+  align-self: start;
+}
+
+.lv-pulse-skel {
+  animation: lv-skel 1.4s var(--ease-in-out) infinite;
+}
+
+/* A price changing: same box, an up/down tint fades out over --dur-flash (opacity only). */
+.lv-tick {
+  position: relative;
+  display: inline-block;
+  isolation: isolate;
+  text-align: right;
+}
+
+.lv-tick-flash {
+  position: absolute;
+  inset: calc(-1 * var(--space-0)) calc(-1 * var(--space-1));
+  z-index: -1;
+  border-radius: var(--radius-sm);
+  opacity: 0;
+  animation: lv-flash var(--dur-flash) var(--ease-out);
+}
+
+.lv-tick-up {
+  background: color-mix(in oklab, var(--color-up) 28%, transparent);
+}
+
+.lv-tick-down {
+  background: color-mix(in oklab, var(--color-down) 28%, transparent);
+}
+
+@keyframes lv-flash {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.lv-delta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.lv-delta-up {
+  color: var(--color-up);
+}
+
+.lv-delta-down {
+  color: var(--color-down);
+}
+
+.lv-delta-flat {
+  color: var(--color-muted);
+}
+
+.lv-delta > span[aria-hidden] {
+  font-size: 9px;
+}
+
+.lv-setup {
+  margin-bottom: var(--card-gap);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-1);
+}
+
+.lv-setup summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--size-control-sm);
+  list-style: none;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.lv-setup summary::-webkit-details-marker {
+  display: none;
+}
+
+.lv-setup-tag {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: var(--size-tag);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--color-raised);
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.lv-setup-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.lv-setup-more {
+  flex: none;
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  text-decoration: underline;
+  text-decoration-color: var(--color-line-strong);
+  text-underline-offset: 3px;
+}
+
+.lv-setup summary:hover .lv-setup-more {
+  color: var(--color-text);
+}
+
+.lv-setup-group {
+  margin-top: var(--space-3);
+  color: var(--color-text);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.lv-setup-list {
+  display: grid;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+  list-style: none;
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+}
+
+.lv-setup-label {
+  color: var(--color-text);
+  font-weight: 500;
+}
+
+.lv-setup-foot {
+  margin: var(--space-2) 0 var(--space-1);
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+}
+
+.lv-intro {
+  margin-bottom: var(--space-4);
+  padding: var(--space-2) 0;
+}
+
+.lv-intro-title {
+  font-size: var(--text-md);
+  line-height: var(--leading-md);
+  font-weight: 600;
+  text-wrap: pretty;
+}
+
+.lv-intro-body {
+  margin-top: var(--space-1);
+  color: var(--color-muted);
+  text-wrap: pretty;
+}
+
+.lv-feed-title {
+  font-size: var(--text-md);
+  line-height: var(--leading-md);
+  font-weight: 600;
+}
+
+.lv-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* Phones: one row that scrolls sideways, so the header stays short. */
+@media (max-width: 599px) {
+  .lv-chips {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    margin: 0 calc(-1 * var(--gutter));
+    padding: 0 var(--gutter);
+  }
+
+  .lv-chips::-webkit-scrollbar {
+    display: none;
+  }
+
+  .lv-chip {
+    flex: none;
+  }
+}
+
+.lv-chip {
+  min-height: var(--size-control-sm);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--color-muted);
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out);
+}
+
+.lv-chip:hover {
+  color: var(--color-text);
+  border-color: var(--color-line-strong);
+}
+
+.lv-chip[aria-pressed='true'] {
+  color: var(--color-text);
+  background: var(--color-ghost-tint);
+  border-color: var(--color-ghost);
+}
+
+/* ---- Scroller, "N New" rail, cards ---------------------------------------- */
+
+.lv-feed-scroll {
+  position: relative; /* offsetParent for scroll anchoring */
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  overflow-anchor: none; /* anchoring is done by hand, also at scrollTop 0 */
+  padding: var(--space-4) var(--gutter) var(--space-7);
+}
+
+/* Title row with a fixed height: the "N New" pill appears here without moving anything. */
+.lv-feed-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: var(--size-control-sm);
+}
+
+.lv-new-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: var(--size-control-sm);
+  padding: 0 var(--space-4);
+  border: 1px solid color-mix(in oklab, var(--color-ghost) 60%, transparent);
+  border-radius: var(--radius-pill);
+  background: var(--color-ghost);
+  color: var(--color-ghost-ink);
+  box-shadow: var(--shadow-2);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  cursor: pointer;
+  animation: lv-fade-down var(--dur-spring) var(--ease-spring) both;
+}
+
+.lv-new-pill:hover {
+  background: color-mix(in oklab, var(--color-ghost) 86%, var(--color-text));
+}
+
+.lv-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--card-gap);
+  list-style: none;
+}
+
+.lv-card {
+  position: relative;
+  min-width: 0;
+  padding: var(--card-pad-y) var(--card-pad-x);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-1);
+  border-left: 3px solid transparent;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.lv-card:nth-child(n + 16) {
+  content-visibility: auto;
+  contain-intrinsic-size: auto var(--size-card-min);
+}
+
+/* Entrance: staggered within a batch (--i), spring settle. Transform + opacity only. */
+.lv-card-in {
+  animation: lv-card-in var(--dur-spring) var(--ease-spring) both;
+  animation-delay: calc(var(--i, 0) * var(--stagger));
+}
+
+/* "New" glow on the cards of the latest batch: an inset ring that fades out (opacity only). */
+.lv-card-glow::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow:
+    inset 0 0 0 1px var(--color-ghost),
+    inset 0 0 24px var(--color-ghost-tint);
+  opacity: 0;
+  animation: lv-glow var(--dur-glow) var(--ease-out);
+  animation-delay: calc(var(--i, 0) * var(--stagger));
+  pointer-events: none;
+}
+
+@keyframes lv-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(calc(-1 * var(--space-2))) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes lv-glow {
+  0%,
+  20% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes lv-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes lv-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(var(--space-2));
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes lv-fade-down {
+  from {
+    opacity: 0;
+    transform: translateY(calc(-1 * var(--space-2)));
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.lv-card[data-track='0g'] {
+  border-left-color: var(--color-track-0g);
+}
+
+.lv-card[data-track='hedera'] {
+  border-left-color: var(--color-track-hedera);
+}
+
+.lv-card[data-track='uniswap'] {
+  border-left-color: var(--color-track-uniswap);
+}
+
+.lv-card[data-track='hyperliquid'] {
+  border-left-color: var(--color-track-hyperliquid);
+}
+
+.lv-card-alert {
+  border-left-color: var(--color-warn);
+  background: linear-gradient(90deg, var(--color-warn-tint), transparent 70%), var(--color-surface);
+}
+
+/* Reserved height: "thinking" resolves into the decision without pushing the list. */
+.lv-card-brain {
+  border-left-color: var(--color-ghost);
+  min-height: var(--size-card-brain);
+}
+
+.lv-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+}
+
+.lv-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.lv-kind::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-muted);
+}
+
+.lv-kind-brain::before {
+  background: var(--color-ghost);
+}
+
+.lv-kind-alert::before {
+  background: var(--color-warn);
+}
+
+.lv-card[data-dir='up'] .lv-kind::before {
+  background: var(--color-up);
+}
+
+.lv-card[data-dir='down'] .lv-kind::before {
+  background: var(--color-down);
+}
+
+.lv-card[data-track] .lv-kind::before {
+  display: none;
+}
+
+.lv-card[data-track='0g'] .lv-kind {
+  color: var(--color-track-0g);
+}
+
+.lv-card[data-track='hedera'] .lv-kind {
+  color: var(--color-track-hedera);
+}
+
+.lv-card[data-track='uniswap'] .lv-kind {
+  color: var(--color-track-uniswap);
+}
+
+.lv-card[data-track='hyperliquid'] .lv-kind {
+  color: var(--color-track-hyperliquid);
+}
+
+.lv-card-source {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lv-card-source::before {
+  content: '·';
+  margin-right: var(--space-2);
+}
+
+/* Ticking time: fixed width, right-aligned, so "just now" → "12s ago" never reflows the row. */
+.lv-card-time {
+  flex: none;
+  margin-left: auto;
+  min-width: 8ch;
+  text-align: right;
+}
+
+.lv-app .lv-card-title {
+  margin-top: var(--space-2);
+  font-size: var(--text-md);
+  line-height: var(--leading-md);
+  font-weight: 600;
+  text-wrap: pretty;
+}
+
+.lv-news-title a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.lv-news-title a:hover {
+  text-decoration: underline;
+  text-decoration-color: var(--color-ghost);
+  text-underline-offset: 3px;
+}
+
+.lv-card-meta {
+  margin-top: var(--space-2);
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+}
+
+.lv-card-meta strong {
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.lv-card-body {
+  margin-top: var(--space-2);
+  color: var(--color-text);
+  text-wrap: pretty;
+}
+
+.lv-card-quote {
+  margin-top: var(--space-2);
+  font-size: var(--text-sm);
+  text-wrap: pretty;
+}
+
+.lv-fail {
+  color: var(--color-warn);
+}
+
+.lv-conf {
+  color: var(--color-muted);
+  font-weight: 500;
+  font-size: var(--text-sm);
+}
+
+.lv-prompt {
+  color: var(--color-text);
+}
+
+.lv-legs {
+  margin-top: var(--space-2);
+  list-style: none;
+  font-size: var(--text-sm);
+}
+
+.lv-legs strong {
+  font-weight: 600;
+}
+
+.lv-card-proof {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.lv-id {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-0);
+  color: var(--color-text);
+}
+
+.lv-ext {
+  color: var(--color-text);
+  text-decoration: underline;
+  text-decoration-color: var(--color-line-strong);
+  text-underline-offset: 3px;
+  border-radius: var(--space-0);
+}
+
+.lv-ext:hover {
+  text-decoration-color: var(--color-ghost);
+}
+
+.lv-status {
+  color: var(--color-muted);
+  font-weight: 500;
+}
+
+.lv-status-filled {
+  color: var(--color-up);
+}
+
+.lv-status-rejected {
+  color: var(--color-warn);
+}
+
+/* Settled tx: the check pops in once (transform + opacity). */
+.lv-check {
+  display: inline-block;
+  margin-right: var(--space-1);
+  vertical-align: -3px;
+  fill: none;
+  stroke: var(--color-up);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transform-origin: center;
+  animation: lv-pop var(--dur-spring) var(--ease-spring) both;
+}
+
+@keyframes lv-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.lv-warn-icon,
+.lv-sys-icon {
+  display: inline-grid;
+  place-items: center;
+  width: var(--size-icon);
+  height: var(--size-icon);
+  border-radius: 50%;
+  font: 700 12px / 1 var(--font-mono);
+  vertical-align: 2px;
+}
+
+.lv-warn-icon,
+.lv-sys-warn {
+  background: var(--color-warn);
+  color: var(--color-warn-ink);
+}
+
+.lv-sys-ok {
+  color: var(--color-up);
+  font-size: 12px;
+}
+
+.lv-details {
+  margin-top: var(--space-2);
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+}
+
+.lv-details summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--size-control-sm);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.lv-details summary:hover {
+  color: var(--color-text);
+}
+
+.lv-details ul {
+  list-style: none;
+  display: grid;
+  gap: var(--space-1);
+}
+
+/* ---- Market move rows: secondary, one line on desktop, two on phones -------- */
+
+.lv-row {
+  position: relative;
+  min-width: 0;
+  padding: var(--space-2) var(--card-pad-x);
+  border-radius: var(--radius-md);
+  box-shadow: inset 0 0 0 1px var(--color-line);
+  overflow: hidden;
+}
+
+.lv-row-body {
+  display: grid;
+  grid-template-columns: minmax(4.5rem, auto) minmax(5.5rem, auto) minmax(5.5rem, auto) 1fr auto 8ch;
+  grid-template-areas: 'name px delta why spark time';
+  align-items: center;
+  column-gap: var(--space-3);
+  min-height: var(--size-control-sm);
+}
+
+.lv-row-name {
+  grid-area: name;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.lv-row-px {
+  grid-area: px;
+  justify-self: end;
+}
+
+.lv-row-body .lv-delta {
+  grid-area: delta;
+  justify-self: end;
+}
+
+.lv-row-why {
+  grid-area: why;
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.lv-row-body .lv-spark {
+  grid-area: spark;
+  width: 64px;
+  height: 20px;
+}
+
+.lv-row-body .lv-card-time {
+  grid-area: time;
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+}
+
+@media (max-width: 599px) {
+  .lv-row-body {
+    grid-template-columns: minmax(3.5rem, auto) 1fr auto auto;
+    grid-template-areas:
+      'name px delta spark'
+      'why why time time';
+    row-gap: var(--space-1);
+  }
+
+  .lv-row-body .lv-card-time {
+    justify-self: end;
+  }
+}
+
+.lv-spark {
+  flex: none;
+  overflow: visible;
+}
+
+.lv-spark-line {
+  fill: none;
+  stroke: var(--color-muted);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Draw-in: the cover shrinks to the right (transform only). */
+.lv-spark-cover {
+  fill: var(--color-surface);
+  transform-box: fill-box;
+  transform-origin: right center;
+  transform: scaleX(0);
+  animation: lv-uncover 700ms var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * var(--stagger) + 120ms);
+}
+
+@keyframes lv-uncover {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+.lv-spark-dot {
+  stroke: var(--color-surface);
+  stroke-width: 2;
+}
+
+.lv-spark-up .lv-spark-dot {
+  fill: var(--color-up);
+}
+
+.lv-spark-down .lv-spark-dot {
+  fill: var(--color-down);
+}
+
+/* ---- Tags ------------------------------------------------------------------- */
+
+.lv-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.lv-badges:empty {
+  display: none;
+}
+
+.lv-tag {
+  display: inline-flex;
+  align-items: center;
+  height: var(--size-tag);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--color-raised);
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.lv-tag-shock {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+.lv-tag-war {
+  background: var(--color-down-tint);
+  color: var(--color-down);
+}
+
+.lv-tag-sanction,
+.lv-tag-hack,
+.lv-tag-warn {
+  background: var(--color-warn-tint);
+  color: var(--color-warn);
+}
+
+.lv-cred-reputable,
+.lv-cred-exemplary {
+  color: var(--color-up);
+}
+
+.lv-cred-questionable,
+.lv-cred-untrusted {
+  color: var(--color-warn);
+}
+
+.lv-tag-poly {
+  color: var(--color-text);
+}
+
+/* ---- Brain "thinking" shimmer ------------------------------------------- */
+
+.lv-thinking {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.lv-thinking-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--color-ghost), var(--color-track-0g));
+  animation: lv-talk 0.9s var(--ease-in-out) infinite;
+}
+
+.lv-card[data-status='thinking']::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, color-mix(in oklab, var(--color-track-0g) 12%, transparent), transparent);
+  transform: translateX(-100%);
+  animation: lv-shimmer 1.6s var(--ease-in-out) infinite;
+  pointer-events: none;
+}
+
+@keyframes lv-shimmer {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* ---- Skeletons (final dimensions) ------------------------------------------ */
+
+.lv-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: var(--size-card-min);
+  animation: lv-skel 1.4s var(--ease-in-out) infinite;
+}
+
+.lv-skel-line {
+  display: block;
+  height: var(--space-3);
+  border-radius: var(--radius-pill);
+  background: var(--color-raised);
+}
+
+.lv-skel-short {
+  width: 30%;
+}
+
+.lv-skel-mid {
+  width: 55%;
+}
+
+@keyframes lv-skel {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+/* ---- View Transitions: only the brain card's in-place morph uses them ------- */
+
+:root:has(.lv-app) {
+  view-transition-name: none;
+}
+
+::view-transition {
+  pointer-events: none;
+}
+
+::view-transition-group(*) {
+  animation-duration: var(--dur-spring);
+  animation-timing-function: var(--ease-spring);
+}
+
+/* ---- Empty + test headline ------------------------------------------------ */
+
+.lv-empty {
+  padding: var(--space-5) var(--space-4);
+  border: 1px dashed var(--color-line-strong);
+  border-radius: var(--radius-md);
+  color: var(--color-muted);
+  text-align: center;
+  text-wrap: pretty;
+}
+
+.lv-test {
+  margin-top: var(--space-5);
+  color: var(--color-muted);
+}
+
+.lv-test summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--size-control);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.lv-test summary:hover {
+  color: var(--color-text);
+}
+
+.lv-test-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.lv-test-label {
+  font-size: var(--text-xs);
+}
+
+.lv-test-row {
+  display: flex;
+  gap: var(--space-2);
+}
+
+/* Reserved line for the result, so it appearing never moves the form. */
+.lv-test-result {
+  min-height: var(--leading-sm);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+}
+
+/* ---------------------------------------------------------------------------
+ * Reduced motion: no transforms, no loops. State still changes (colour, label, static ring), and new cards and
+ * notes appear with a short opacity fade only.
+ * ------------------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .orb *,
+  .orb[data-mode] .orb-breathe,
+  .orb[data-mode] .orb-eye,
+  .orb[data-mode] .orb-orbit,
+  .orb[data-mode] .orb-ripple,
+  .orb[data-local-speech='true'] .orb-core,
+  .lv-thinking-dot,
+  .lv-talk-dot,
+  .lv-pulse-skel,
+  .lv-skeleton,
+  .lv-beat,
+  .lv-card[data-status='thinking']::after {
+    animation: none !important;
+  }
+
+  .orb-halo,
+  .orb-core {
+    transition: opacity 150ms linear !important;
+  }
+
+  .orb[data-mode='alert'] .orb-ripple:first-child {
+    opacity: 0.7;
+    transform: scale(1.18);
+  }
+
+  .lv-card-in,
+  .lv-alert,
+  .lv-new-pill,
+  .lv-check {
+    animation: lv-fade 150ms linear both !important;
+  }
+
+  .lv-card-glow::before {
+    animation: lv-glow 1.2s linear !important;
+  }
+
+  .lv-spark-cover {
+    display: none;
+  }
+
+  ::view-transition-old(*),
+  ::view-transition-new(*),
+  ::view-transition-group(*) {
+    animation-duration: 0s !important;
+    animation-delay: 0s !important;
+  }
+}

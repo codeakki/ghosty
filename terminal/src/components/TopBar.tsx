@@ -62,6 +62,10 @@ export const TopBar = memo(function TopBar({ state, settings, onSettings, onSafe
           GHOSTY
         </h1>
         <span className="tagline">Market intelligence you wear</span>
+        {/* Full page load on purpose: it drops the Pro stylesheet when going back to the Live view. */}
+        <a className="tagline" href="/">
+          ← Live view
+        </a>
       </div>
 
       <div className="topbar-badges">
