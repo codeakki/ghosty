@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { BrainOfflineError, classifyText, type Decider, type Decision } from '../agent/decide.js';
+import { BrainOfflineError, classifyText, isActionable, spokenRationale, type Decider, type Decision } from '../agent/decide.js';
 import type { EpisodeOutcome } from '../agent/episode.js';
 import { errorMessage, noopLogger, type Logger } from '../agent/log.js';
 import { defaultMemory, type MemoryStore, type UserMemory } from '../agent/memory.js';
@@ -500,6 +500,8 @@ export class SimEngine {
       });
       return;
     }
+    // Same rule as live: a decision with nothing to confirm never says "Press to confirm".
+    decision.rationale = spokenRationale(decision);
 
     this.record(run, {
       ...entryBase,
@@ -512,7 +514,7 @@ export class SimEngine {
     });
     this.logEpisode(run, decision, item, 'proposed', []);
 
-    if (decision.signal !== 'none' && decision.suggestedActions.length > 0) {
+    if (isActionable(decision)) {
       const alertId = `sim-alert-${++run.alertSeq}`;
       run.pending = { decision, item, alertId };
       this.deps.publish(

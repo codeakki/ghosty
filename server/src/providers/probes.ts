@@ -357,6 +357,29 @@ const hcsAudit: ProviderProbe = {
 // ---------------------------------------------------------------------------
 // Hyperliquid
 
+/**
+ * Below this much shared USDC a unified account is "degraded": a $10 leg at 5x needs $2 of margin.
+ * Exported for tests and hl:check.
+ */
+export const HL_UNIFIED_MIN_COLLATERAL_USD = 2;
+
+/** info {type:"userAbstraction"} → e.g. "unifiedAccount", "portfolioMargin", "disabled"; undefined when unknown. */
+async function hlAbstraction(ctx: ProbeContext, url: string, user: string): Promise<string | undefined> {
+  try {
+    const res = await postJson(ctx, url, { type: 'userAbstraction', user });
+    return res.ok && typeof res.body === 'string' ? res.body : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** USDC `total` from spotClearinghouseState balances (0 when absent). */
+export function spotUsdc(body: unknown): number {
+  const balances = (body as { balances?: Array<{ coin?: unknown; total?: unknown }> } | null)?.balances;
+  const usdc = Array.isArray(balances) ? balances.find((b) => b?.coin === 'USDC') : undefined;
+  return Number(usdc?.total ?? 0) || 0;
+}
+
 const hyperliquid: ProviderProbe = {
   id: 'hyperliquid',
   label: 'Hyperliquid perps (execution)',
@@ -378,24 +401,38 @@ const hyperliquid: ProviderProbe = {
       return notConfigured(miss, `${reach}; orders answer 503 not_configured`, `Approve an API wallet at ${app}/API, then set HL_MASTER_ADDRESS + HL_AGENT_PRIVATE_KEY`);
     }
     const dexes = ['', ...config.HL_DEXES.split(',').map((d) => d.trim()).filter(Boolean)];
-    const states = await Promise.all(
-      dexes.map((dex) => postJson(ctx, url, { type: 'clearinghouseState', user: master, ...(dex ? { dex } : {}) })),
-    );
-    const margins: Record<string, number> = {};
-    for (const [i, res] of states.entries()) {
-      const dex = dexes[i] ?? '';
-      if (!res.ok) return { state: 'offline', detail: `clearinghouseState(${dex || 'main'}) answered ${res.status}` };
-      margins[dex || 'main'] = Number((res.body as { marginSummary?: { accountValue?: unknown } })?.marginSummary?.accountValue ?? 0) || 0;
-    }
-    const marginText = Object.entries(margins)
-      .map(([d, v]) => `${d} $${v.toFixed(2)}`)
-      .join(', ');
     const problems: string[] = [];
     let nextAction: string | undefined;
-    for (const dex of dexes.slice(1)) {
-      if ((margins[dex] ?? 0) <= 0) {
-        problems.push(`${dex} dex margin is 0`);
-        nextAction = `Move USDC into the ${dex} dex margin at ${app}/trade (HIP-3 markets use their own margin)`;
+    let marginText: string;
+    if ((await hlAbstraction(ctx, url, master)) === 'unifiedAccount') {
+      // Unified account: the spot USDC balance is the collateral for the main dex and every HIP-3 dex alike.
+      // clearinghouseState reports ~0 per dex here, so it must not be read as "unfunded".
+      const spot = await postJson(ctx, url, { type: 'spotClearinghouseState', user: master });
+      if (!spot.ok) return { state: 'offline', detail: `spotClearinghouseState answered ${spot.status}` };
+      const usdc = spotUsdc(spot.body);
+      marginText = `unified account: ${usdc.toFixed(2)} USDC shared across ${dexes.map((d) => d || 'main').join(' + ')}`;
+      if (usdc < HL_UNIFIED_MIN_COLLATERAL_USD) {
+        problems.push(`below $${HL_UNIFIED_MIN_COLLATERAL_USD} collateral (a $10 leg at 5x needs $2)`);
+        nextAction = `Deposit USDC to ${shortAddr(master)} at ${app}/trade`;
+      }
+    } else {
+      const states = await Promise.all(
+        dexes.map((dex) => postJson(ctx, url, { type: 'clearinghouseState', user: master, ...(dex ? { dex } : {}) })),
+      );
+      const margins: Record<string, number> = {};
+      for (const [i, res] of states.entries()) {
+        const dex = dexes[i] ?? '';
+        if (!res.ok) return { state: 'offline', detail: `clearinghouseState(${dex || 'main'}) answered ${res.status}` };
+        margins[dex || 'main'] = Number((res.body as { marginSummary?: { accountValue?: unknown } })?.marginSummary?.accountValue ?? 0) || 0;
+      }
+      marginText = `margin: ${Object.entries(margins)
+        .map(([d, v]) => `${d} $${v.toFixed(2)}`)
+        .join(', ')}`;
+      for (const dex of dexes.slice(1)) {
+        if ((margins[dex] ?? 0) <= 0) {
+          problems.push(`${dex} dex margin is 0`);
+          nextAction = `Move USDC into the ${dex} dex margin at ${app}/trade (HIP-3 markets use their own margin), or enable unified account`;
+        }
       }
     }
     if (agentKey) {
@@ -412,7 +449,7 @@ const hyperliquid: ProviderProbe = {
       problems.push('HL_AGENT_PRIVATE_KEY not set: read-only');
       nextAction ??= `Approve an API wallet at ${app}/API and set HL_AGENT_PRIVATE_KEY`;
     }
-    const detail = `${net} ${shortAddr(master)} margin: ${marginText}${problems.length ? `; ${problems.join('; ')}` : ''}`;
+    const detail = `${net} ${shortAddr(master)} ${marginText}${problems.length ? `; ${problems.join('; ')}` : ''}`;
     if (!agentKey) return { state: 'not_configured', detail, missingEnv: miss, nextAction };
     return { state: problems.length ? 'degraded' : 'live', detail, nextAction };
   },

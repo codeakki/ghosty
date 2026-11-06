@@ -222,7 +222,7 @@ No placeholder data: when a provider is missing the panel says so (for example "
 |---|---|---|---|
 | `GET` | `/health` | — | `{"ok":true,"version":"0.1.0","safeStop":false}`; `safeStop: true` = 0G unreachable, trading blocked |
 | `POST` | `/voice` | WAV body (16 kHz, 16-bit, mono) as `audio/wav` or `application/octet-stream`; `X-Device-Token` when `DEVICE_TOKEN` is set | `200 application/octet-stream`: raw PCM s16le, 16 kHz, mono, with headers `x-sample-rate`, `x-request-id`, `x-signal`. `400` bad WAV, `401` bad token, `503 {"error":"brain_offline"}` (no audio) |
-| `POST` | `/button` | JSON `{"action":"confirm"\|"cancel"}`, same token header | `200 {action, requestId, signal, executed, actions, orders}`; with nothing pending it decides from current news. `400`, `401`, `503 brain_offline` |
+| `POST` | `/button` | JSON `{"action":"confirm"\|"cancel"}`, same token header | `200 {action, requestId, signal, executed, actions, orders}`; only confirms an alert you have heard. `409 nothing_pending` when nothing is pending, `409 alert_expired` after `PENDING_DECISION_TTL_SEC`; `400`, `401`, `503 brain_offline` |
 
 The device streams the PCM reply straight to I2S in 1–2 KB chunks. No MP3 decoding on the device. On `503` (safe-stop) the pod plays nothing and blinks the red LED 3 times. Details: [docs/api.md](docs/api.md).
 

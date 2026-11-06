@@ -88,6 +88,7 @@ See [`.env.example`](.env.example) for every variable with a comment. All keys a
 | `CRYPTOPANIC_TOKEN`, `ETHOS_CLIENT`, `XAI_API_KEY` | `ETHOS_CLIENT=ghosty@0.1.0` | `news/`, `credibility/` |
 | `SAFE_STOP_ENABLED`, `SIMULATE_BRAIN_OFFLINE` | `true`, `false` | `safety/` |
 | `MAX_TRADE_USD` | `25` | `execution/playbook.ts` (total notional cap per decision) |
+| `PENDING_DECISION_TTL_SEC` | `120` | `pipeline.ts` (how long a presented alert can be confirmed; then `/button` answers `409 alert_expired`) |
 
 ## Endpoints
 
@@ -95,7 +96,7 @@ See [`.env.example`](.env.example) for every variable with a comment. All keys a
 |---|---|---|---|
 | `GET` | `/health` | none | `{"ok":true,"version":"0.1.0","safeStop":false}`. `safeStop: true` means 0G is unreachable and trading is blocked. |
 | `POST` | `/voice` | Body: WAV, 16-bit mono (16 kHz expected). `Content-Type: audio/wav` or `application/octet-stream`. Header `X-Device-Token` when `DEVICE_TOKEN` is set. | `200 application/octet-stream`: raw PCM s16le, mono, 16 kHz, no header. Headers `x-sample-rate`, `x-request-id` (0G inference id, or Claude `msg_…` id), `x-signal`, `x-answered-by` (`claude` or `0g`). `400 bad_wav` for stereo or non-16-bit input, `401 unauthorized`, `503 {"error":"brain_offline"}`. |
-| `POST` | `/button` | JSON `{"action":"confirm"}` or `{"action":"cancel"}`, same token header | `200 {action, requestId, signal, executed, actions[], orders[], swaps[]}`. Acts on the last spoken decision; with none pending it decides from the news alone. Confirm runs the Uniswap spot leg (if `UNISWAP_SPOT_LEG=true`) then the perp legs. `400` on a bad body, `503 brain_offline` or `503 memory_unavailable`. |
+| `POST` | `/button` | JSON `{"action":"confirm"}` or `{"action":"cancel"}`, same token header | `200 {action, requestId, signal, executed, actions[], orders[], swaps[]}`. Acts only on the pending decision the wearer heard (spoken reply or alert, at most `PENDING_DECISION_TTL_SEC` old); never decides on its own. `409 nothing_pending` / `409 alert_expired` when there is nothing to act on. Confirm runs the Uniswap spot leg (if `UNISWAP_SPOT_LEG=true`) then the perp legs. `400` on a bad body, `503 brain_offline` or `503 memory_unavailable`. |
 | `GET` | `/hedera/audit` | none | Decoded HCS audit messages (payments, decisions, trades) from the mirror node. The paid `GET /intel` lives on the Signal Desk (`npm run signal-desk`), see [../docs/hedera.md](../docs/hedera.md). |
 
 Sim-only (not used by the firmware): `GET /sim`, `GET /state`, `GET /events`, `POST /voice/text`, `POST /news/inject`,

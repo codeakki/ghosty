@@ -67,6 +67,26 @@ export interface Decider {
   decide(input: DecideInput): Promise<Decision>;
 }
 
+/** A decision the wearer can act on: a real signal with at least one executable leg. Only these become pending. */
+export function isActionable(decision: Pick<Decision, 'signal' | 'suggestedActions'>): boolean {
+  return decision.signal !== 'none' && decision.suggestedActions.length > 0;
+}
+
+const PRESS_TO_CONFIRM = /\s*(?:please\s+)?press(?:\s+the\s+button)?\s+to\s+confirm[.!]?/gi;
+
+/** Spoken when a non-actionable decision had nothing left after removing the confirm prompt. */
+export const NOTHING_TO_ACT_ON = 'Nothing to act on right now. I will keep watching.';
+
+/**
+ * What Ghosty says for a decision. A decision with signal "none" or no executable legs never asks the wearer to
+ * press confirm (the model may still write "Press to confirm." after its legs were dropped): there is nothing to confirm.
+ */
+export function spokenRationale(decision: Pick<Decision, 'signal' | 'suggestedActions' | 'rationale'>): string {
+  if (isActionable(decision)) return decision.rationale;
+  const text = decision.rationale.replace(PRESS_TO_CONFIRM, '').trim();
+  return text || NOTHING_TO_ACT_ON;
+}
+
 const GEOPOLITICAL = /\b(war|strike|missile|invasion)\b/i;
 const REGULATORY = /\b(sec|ban|crackdown|lawsuit|sanction(s|ed)?)\b/i;
 

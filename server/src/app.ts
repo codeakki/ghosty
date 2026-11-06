@@ -26,7 +26,7 @@ import { createNewsAggregator, createNewsProviders } from './news/factory.js';
 import { shockDetector, type ShockResult } from './news/shock.js';
 import type { NewsItem } from './news/types.js';
 import { createPayments, type Payments } from './payments/index.js';
-import { Pipeline, SafeStopEngagedError, type BoughtIntel, type PipelineDeps } from './pipeline.js';
+import { NothingPendingError, Pipeline, SafeStopEngagedError, type BoughtIntel, type PipelineDeps } from './pipeline.js';
 import { BrainSwitch, isBrainOnline } from './safety/safeStop.js';
 import { createCandleLoader, type CandleLoader } from './sim/candles.js';
 import { SimEngine } from './sim/engine.js';
@@ -241,6 +241,7 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
   const pipeline = new Pipeline({
     buyIntel,
     intelWaitMs: config.X402_AUTOPAY_WAIT_MS,
+    pendingTtlMs: config.PENDING_DECISION_TTL_SEC * 1000,
     audit,
     ...deps,
     news: [...deps.news, injected],
@@ -263,6 +264,11 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
         requestId: err.requestId ?? null,
         ...(err.reason === 'not_configured' ? { provider: '0g-router', missingEnv: ['OG_API_KEY'] } : {}),
       });
+    }
+    if (err instanceof NothingPendingError) {
+      // A press with no alert the wearer has heard (or an expired one): nothing was decided or executed.
+      req.log.warn({ code: err.code, requestId: err.requestId }, 'button press with nothing pending: no trade');
+      return reply.code(409).send(err.body());
     }
     if (err instanceof SafeStopEngagedError) {
       req.log.warn('trade request while safe-stop is engaged');
@@ -329,7 +335,9 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
       within(market.snapshot().then((m) => m as typeof m | null), 3_000, null),
     ]);
     const simStatus = sim.status().status;
-    const pendingAlert = snap.alerts.find((a) => a.status !== 'acked') ?? null;
+    // Only what a press would actually act on: the live pending decision (not expired) and its alert.
+    const pending = pipeline.pendingDecision();
+    const pendingAlert = (pending && snap.alerts.find((a) => a.status !== 'acked' && a.requestId === pending.decision.requestId)) || null;
     return {
       mode: config.GHOSTY_MODE,
       simRunActive: simStatus === 'running' || simStatus === 'paused',
@@ -354,7 +362,7 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
       pendingAlert: pendingAlert
         ? { text: pendingAlert.text, signal: pendingAlert.signal, createdAt: pendingAlert.createdAt, ...(pendingAlert.headline ? { headline: pendingAlert.headline } : {}) }
         : null,
-      pendingTrade: snap.plannedActions,
+      pendingTrade: pending ? pending.decision.suggestedActions : [],
       recentOrders: snap.orders.slice(0, 5).map((o) => ({ coin: o.coin, isBuy: o.isBuy, sizeUsd: o.sizeUsd, status: o.status, at: o.at })),
     };
   };
@@ -479,6 +487,8 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
     // Live mode without Hyperliquid keys: refuse before the pending decision is consumed.
     const venue = notConfiguredInfo(deps.venue);
     if (parsed.data.action === 'confirm' && venue) return reply.code(503).send(new ProviderNotConfiguredError(venue).body());
+    // Only a decision the wearer has heard can trade: nothing pending (or an expired alert) throws
+    // NothingPendingError → 409, without a new 0G decision and without touching any venue.
     return pipeline.handleButton(parsed.data.action);
   });
 
