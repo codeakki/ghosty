@@ -134,8 +134,19 @@ Body: WAV, 16-bit, mono, 16 kHz expected (other rates are accepted with a server
 |---|---|
 | `Content-Type` | `application/octet-stream` |
 | `x-sample-rate` | `16000` |
-| `x-request-id` | 0G Compute request ID for this decision (evidence for judges) |
-| `x-signal` | signal class of the decision, e.g. `geopolitical_shock` or `none` |
+| `x-request-id` | 0G Compute request ID for this decision (evidence for judges); the Claude message id (`msg_…`) for a Claude answer |
+| `x-signal` | signal class of the decision, e.g. `geopolitical_shock` or `none` (always `none` for a Claude answer) |
+| `x-answered-by` | `claude` (question or chit-chat, answered by Claude) or `0g` (trade request, 0G decision path) |
+
+**Intent routing** (when `ANTHROPIC_API_KEY` is set and `CLAUDE_VOICE_ENABLED` is not `false`). After STT the transcript is routed by keywords (`server/src/claude/intent.ts`):
+
+| Intent | Examples | Answered by | What happens |
+|---|---|---|---|
+| `question` | "what's moving gold?", "how is BTC doing?", "are you online?", "what did you just do?" | `claude` | Claude answers in at most ~45 spoken words from live context: watchlist mids + 24 h %, last ~10 headlines with credibility, last decision, pending alert and trade, recent orders, mode. No decision, no trade, the pending trade is untouched. Works during safe-stop. |
+| `trade` | "should I buy gold?", "go long oil", "hedge my bitcoin" | `0g` | The existing 0G decision loop. `503 brain_offline` during safe-stop. |
+| `confirm` | "yes", "confirm", "cancel" | `0g` | No decision and no execution: Ghosty says the button confirms or cancels the pending trade. |
+
+Claude has a 20 s timeout. On any Claude error the pod says "I couldn't reach my research assistant. Please try again in a moment." (`answeredBy: "claude"`), never a made-up answer. Claude never decides trades and is never a fallback for 0G. Without the key every turn is a 0G decision (`answeredBy: "0g"`), as before.
 
 Body: raw PCM s16le, 16 kHz, mono. The device reads `http.getStreamPtr()` in 1–2 KB chunks and writes each chunk to I2S. The scaffold's fake TTS returns 0.5 s of a 440 Hz tone (16 000 bytes).
 
@@ -241,7 +252,7 @@ curl -s -X POST http://localhost:3000/button \
 
 "Device token" below means the same `X-Device-Token` check as `/voice`: enforced only when `DEVICE_TOKEN` is set.
 The read-only routes (`/sim`, `/state`, `/events`) are open because `EventSource` cannot send headers.
-Routes that run the decision loop (`/voice/text`, `/news/inject`) return `503 {"error":"brain_offline"}` during safe-stop, like `/voice`.
+Routes that run the decision loop (`/voice/text`, `/news/inject`) return `503 {"error":"brain_offline"}` during safe-stop, like `/voice`. With Claude on, questions on `/voice` and `/voice/text` are still answered (only trade requests get the 503).
 
 ### GET /sim
 
@@ -286,6 +297,7 @@ The virtual pod page, `text/html`. Open `http://localhost:3000/sim`. The microph
 | `providers` | Full `/providers/status` body, sent when any provider changes state (polled every 30 s by the running server) |
 | `market` | `{"ts", "mids": {"BTC": 75680.5, "xyz:GOLD": 4068.65, ...}}` for the watchlist, at most once per second |
 | `sim` | Simulation run status, same shape as `GET /sim/run`, on change, at most 2/s (an auto-pause is sent at once) |
+| `voice` | One conversation turn from `/voice` or `/voice/text`: `{"transcript", "reply", "answeredBy": "claude"\|"0g", "intent": "question"\|"trade"\|"confirm", "requestId"?, "trigger": "voice"\|"text", "at"}`. Not part of the `state` snapshot |
 
 Every event a simulation run produces (`sim`, and its `market`, `news`, `decision`, `alert`, `order`, `episode`) carries `"sim": true, "runId", "scenarioId"`. Sim `market` events carry historical mids with `ts` = sim time; never mix them into the live ticker. Sim events never change the `state` snapshot.
 
@@ -297,14 +309,17 @@ curl -N http://localhost:3000/events
 
 ### POST /voice/text
 
-Body `{"text": "<1–2000 chars>"}`. Runs the voice loop without STT. **200**:
+Body `{"text": "<1–2000 chars>"}`. Runs the voice loop without STT, with the same intent routing as `/voice` (header `x-answered-by` too). **200**:
 
 ```json
-{ "transcript": "is anything moving gold?", "requestId": "fake-…", "signal": "geopolitical_shock", "confidence": 0.95,
-  "rationale": "...", "actions": [ ... ], "sampleRate": 16000, "audioBytes": 16000, "audioBase64": "<PCM s16le>", "tts": null }
+{ "transcript": "Should I go long oil?", "answeredBy": "0g", "intent": "trade", "reply": "...",
+  "requestId": "f337b8c5-…", "signal": "none", "confidence": 0.1, "rationale": "...", "actions": [ ... ],
+  "assistantError": null, "sampleRate": 16000, "audioBytes": 301674, "audioBase64": "<PCM s16le>", "tts": null }
 ```
 
-Errors: `400 bad_request`, `401`, `503 brain_offline`, `503 not_configured`. `tts` is `null` normally, or `{"error":"not_configured", ...}` with empty audio when no TTS key is set in live mode.
+A Claude answer has `answeredBy: "claude"`, `intent: "question"`, `requestId: "msg_…"`, `signal: "none"`, `confidence: 0`, `actions: []`; `rationale` repeats `reply`. When Claude failed, `reply` is the fallback line and `assistantError` names the error class.
+
+Errors: `400 bad_request`, `401`, `503 brain_offline` (trade path only when Claude is on), `503 not_configured`. `tts` is `null` normally, `{"error":"not_configured", ...}` with empty audio when no TTS key is set in live mode, or `{"error":"tts_failed","message"}` with empty audio when TTS failed or timed out (the reply text is still real).
 
 ### POST /news/inject
 
