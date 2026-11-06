@@ -280,8 +280,8 @@ const hederaPayer: ProviderProbe = {
     const id = ctx.config.HEDERA_ACCOUNT_ID as string;
     const acct = await hederaAccount(ctx, id);
     if (!acct.ok) return { state: 'offline', detail: acct.detail, nextAction: next };
-    if (acct.tinybar < ctx.config.X402_SIGNAL_PRICE_TINYBAR) {
-      return { state: 'degraded', detail: `${id} balance ${hbar(acct.tinybar)} is below one /signal payment`, nextAction: ctx.config.HEDERA_NETWORK === 'mainnet' ? `Send HBAR to ${id}` : 'Fund it at https://portal.hedera.com/faucet' };
+    if (acct.tinybar < ctx.config.X402_INTEL_PRICE_TINYBAR) {
+      return { state: 'degraded', detail: `${id} balance ${hbar(acct.tinybar)} is below one intel payment`, nextAction: ctx.config.HEDERA_NETWORK === 'mainnet' ? `Send HBAR to ${id}` : 'Fund it at https://portal.hedera.com/faucet' };
     }
     return { state: 'live', detail: `${id} balance ${hbar(acct.tinybar)}` };
   },
@@ -289,12 +289,12 @@ const hederaPayer: ProviderProbe = {
 
 const hederaMerchant: ProviderProbe = {
   id: 'hedera-merchant',
-  label: 'Hedera merchant (receives GET /signal payments)',
+  label: 'Hedera merchant (Signal Desk, receives intel payments)',
   track: 'hedera',
   async run(ctx) {
     const payTo = ctx.config.X402_PAY_TO;
     const next = hederaAccountHint(ctx.config, 'X402_PAY_TO (a second account)');
-    if (!payTo) return notConfigured(['X402_PAY_TO'], 'GET /signal answers 503 payments_not_configured', next);
+    if (!payTo) return notConfigured(['X402_PAY_TO'], 'Signal Desk answers 503 payments_not_configured', next);
     if (payTo === ctx.config.HEDERA_ACCOUNT_ID) {
       return { state: 'degraded', detail: 'X402_PAY_TO equals the payer: the agent refuses a self-transfer', missingEnv: [], nextAction: next };
     }
