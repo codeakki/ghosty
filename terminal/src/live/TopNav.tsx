@@ -7,6 +7,7 @@ const TABS: Array<{ route: Exclude<Route, 'pro'>; label: string }> = [
   { route: 'live', label: 'Live' },
   { route: 'device', label: 'Device' },
   { route: 'feed', label: 'Feed' },
+  { route: 'simulate', label: 'Simulate' },
 ];
 
 type Status = { tone: 'ok' | 'warn' | 'bad' | 'muted'; icon: string; text: string; title: string };

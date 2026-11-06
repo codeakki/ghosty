@@ -223,7 +223,7 @@ function AlertCard({ alert, labels }: { alert: Alert; labels: Record<string, str
   return (
     <div className="lv-alert" role="alert">
       <p className="lv-alert-kicker">
-        <span aria-hidden="true">●</span> Pending trade · confidence {formatConfidencePct(alert.confidence)}
+        <span aria-hidden="true">●</span> {alert.sim ? 'Paper trade (simulation)' : 'Pending trade'} · confidence {formatConfidencePct(alert.confidence)}
       </p>
       <p className="lv-alert-leg">{leg ? legText(leg, labels) : 'No trade attached'}</p>
       {alert.actions.length > 1 ? (

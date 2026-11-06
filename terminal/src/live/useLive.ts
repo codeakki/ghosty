@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import type { ClientSettings } from '../api/client';
 import type { ApiResult, InjectResult, TextTurnResult, VoiceReply } from '../api/types';
@@ -6,6 +6,8 @@ import { useTerminal } from '../state/useTerminal';
 import { createBatcher, type Batcher } from './feed/batcher';
 import { applyBatch, initialFeed, type FeedAction, type FeedCard, type FeedFilter, type FeedState } from './feed/feedReducer';
 import { DEFAULT_MOVE_OPTIONS, thresholdFromSearch } from './feed/moveDetector';
+import { initialSim, simReducer } from './sim/simState';
+import { useSim } from './sim/useSim';
 
 /**
  * One connection to the Ghosty server for the whole Live view: the terminal's SSE + polls, with the feed reducer
@@ -41,7 +43,26 @@ export function useLive(settings: ClientSettings) {
   }, []);
   const feedDispatch = useCallback((action: FeedAction) => getBatcher().push(action), [getBatcher]);
   useEffect(() => () => batcherRef.current?.cancel(), []);
-  const { state, client, actions } = useTerminal(settings, feedDispatch);
+  // Simulation state folds the same stream (SSE `sim` events); it never feeds the live ticker.
+  const [sim, simDispatch] = useReducer(simReducer, initialSim);
+  const tap = useCallback(
+    (action: FeedAction) => {
+      feedDispatch(action);
+      if (action.type === 'sse' && action.event === 'sim') simDispatch(action);
+    },
+    [feedDispatch],
+  );
+  const { state, client, actions, dispatch } = useTerminal(settings, tap);
+  const simControls = useSim({
+    client,
+    sim,
+    simDispatch,
+    dispatch,
+    feedDispatch,
+    banner: state.banner,
+    dismissAlert: actions.dismissAlert,
+    latestRoot: state.zeroG?.lastEpisodeRoot ?? null,
+  });
   const seq = useRef(0);
 
   /** Run a request that asks the 0G brain, with a "thinking" card in the feed until it answers. */
@@ -90,7 +111,7 @@ export function useLive(settings: ClientSettings) {
   );
 
   const live = useMemo(() => ({ injectNews, voiceText, voice }), [injectNews, voiceText, voice]);
-  return { state, feed, client, actions, live, moveOptions, feedViewRef };
+  return { state, feed, client, actions, live, moveOptions, feedViewRef, sim, simControls };
 }
 
 export interface FeedView {
