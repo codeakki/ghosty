@@ -150,6 +150,35 @@ Status endpoints show which mode each integration is in: `GET /zerog/status`, `G
 
 No pod yet? Open http://localhost:3000/sim for the virtual pod (hold-to-talk, inject headlines, confirm trades, live state), or use `npm run pod -- help`. See [docs/simulator.md](docs/simulator.md).
 
+## Terminal
+
+The market intelligence terminal is the web UI for driving and explaining the whole system, with or without the pod.
+
+![Ghosty terminal: pipeline strip, alert, signal card, provider health and proof log](docs/assets/terminal.png)
+
+```bash
+# terminal 1: the server (port 3000)
+cd server && npm run dev
+# terminal 2: the terminal UI (http://localhost:5173, proxies API calls to the server)
+cd terminal && npm i && npm run dev
+```
+
+Point it at another server with `VITE_GHOSTY_URL=http://192.168.1.50:3000 npm run dev`, or set the server URL and device token under **Settings** (kept in the browser). `npm run build` writes `terminal/dist/` for the server to serve at `/`.
+
+| Panel | What it shows |
+|---|---|
+| Top bar | Network (testnet / mainnet), brain status (0G live, stub, or safe-stop), x402 spend today against the cap, UTC and IST clocks, the safe-stop switch, settings |
+| Pipeline strip | News → Credibility → 0G Brain → Alert → Confirm → Execute → Log → Pay. Each stage lights up as its event arrives and shows the latest value or id. Hover or click a stage for a one-line explanation and the sponsor it maps to. `STUB` marks a stage that ran on a stand-in because its keys are not set |
+| News tape | Headlines with source, age, Ethos or source-table credibility and a shock tag (WAR, STRIKE, SANCTION, HACK, DEPEG). The "manual test headline" box runs the real pipeline on your own headline |
+| Signal | The latest decision: signal, confidence, rationale, the order ticket (venue, market, side, size) and Confirm / Cancel buttons that mirror the pod's one button |
+| Market watch | Hyperliquid mids, 24 h change, funding, open interest and a 24 h sparkline for BTC, ETH, gold, oil, stocks (from `/market/snapshot`, `/market/history` and the SSE `market` event) |
+| Provider health | Every integration grouped by track (0G, Hedera, Uniswap, Hyperliquid, Data, Audio) with a state and the env vars still missing |
+| Proof log | Evidence for judges, newest first: 0G request ids, 0G Storage roots, Hedera x402 transactions (HashScan), Hyperliquid orders, Uniswap swaps. Simulated ids are labelled and never linked |
+| Virtual pod | Hold to talk (button or space bar): records 16 kHz mono WAV, posts it to `/voice`, plays the PCM reply and shows transcript, signal, request id and latency. You can also type a question |
+| Event console | Every SSE event and terminal action, filterable by type |
+
+No placeholder data: when a provider is missing the panel says so (for example "Not configured: set GROQ_API_KEY" or "Brain offline: trading blocked (safe-stop)").
+
 ## Sketch roadmap
 
 | # | Sketch | What it proves | Status |
@@ -202,6 +231,7 @@ ghosty/
 │  ├─ sketches/01_…06_…        bring-up sketches, in test order
 │  └─ scripts/link-lib.sh      symlink the library into ~/Documents/Arduino/libraries
 ├─ server/             Node + TypeScript service (voice, news, agent, payments, execution)
+├─ terminal/           Vite + React web terminal: pipeline, signal, market, providers, proofs, virtual pod
 ├─ docs/               architecture, API, setup, troubleshooting, demo script, tracks, research
 └─ .github/            CI workflows, issue and PR templates
 ```
