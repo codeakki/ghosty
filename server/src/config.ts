@@ -88,22 +88,54 @@ const ConfigSchema = z.object({
   /** Local cache dir for root-hash pointers (default: server/.ghosty). */
   OG_DATA_DIR: optional,
 
+  // ---------- Hedera (accounts and keys: docs/hedera.md) ----------
+  /** AGENT hot wallet: pays for intel via x402. Holds a small balance only (~20 HBAR + ~5 USDC). */
   HEDERA_ACCOUNT_ID: optional,
   HEDERA_PRIVATE_KEY: optional,
-  /** Only used when HEDERA_PRIVATE_KEY is raw hex; DER keys carry their own type. */
+  /** Only used when a private key is raw hex; DER keys carry their own type. */
   HEDERA_KEY_TYPE: z.enum(['ecdsa', 'ed25519']).default('ecdsa').catch('ecdsa'),
   HEDERA_NETWORK: z.enum(['testnet', 'mainnet']).default('testnet').catch('testnet'),
-  /** Pin an existing HCS audit topic instead of creating one (cached in server/.ghosty/hcs.json). */
+  /** TREASURY: tops up the agent and is the HCS topic admin. Read only by `npm run hedera:setup`, never by the server. */
+  HEDERA_TREASURY_ACCOUNT_ID: optional,
+  HEDERA_TREASURY_PRIVATE_KEY: optional,
+  /** Signal Desk merchant key (account X402_PAY_TO). Read only by `npm run hedera:setup`, to associate it with USDC. */
+  HEDERA_MERCHANT_PRIVATE_KEY: optional,
+  /** HCS audit topic, created by `npm run hedera:setup`. Unset = no audit messages (the server never creates topics). */
   HEDERA_HCS_TOPIC_ID: optional,
-  X402_FACILITATOR_URL: z.string().default('https://x402.org/facilitator'),
-  /** Merchant account that receives /signal payments. Defaults to HEDERA_ACCOUNT_ID; must differ from the payer. */
+  /** The topic's submit key: the only key that can write audit messages. Holds no funds. */
+  HEDERA_HCS_SUBMIT_KEY: optional,
+  /** Safety cap on audit messages per UTC day (each submit costs ~0.0008 HBAR, paid by the agent account). */
+  HEDERA_HCS_MAX_MESSAGES_PER_DAY: posInt(500),
+  /** Mirror node REST base. Default: the public Hedera mirror node for HEDERA_NETWORK. */
+  HEDERA_MIRROR_URL: optional,
+  /** HTS USDC token id. Default: Circle's USDC, 0.0.429274 on testnet (0.0.456858 on mainnet). */
+  HEDERA_USDC_TOKEN_ID: optional,
+
+  // ---------- x402 ----------
+  /** Facilitator that verifies and settles payments. Default: Blocky402 for HEDERA_NETWORK (see defaultFacilitatorUrl). */
+  X402_FACILITATOR_URL: optional,
+  /** Before deciding on a shock headline, the agent buys the Signal Desk intel bundle itself, with no human approval. */
+  X402_AUTOPAY: bool(true),
+  /** Max time a decision waits for the intel purchase (402, sign, facilitator settle) before deciding without it. */
+  X402_AUTOPAY_WAIT_MS: posInt(8000),
+  /** Signal Desk merchant account that receives intel payments. Must differ from the agent account. */
   X402_PAY_TO: optional,
-  /** Price of one GET /signal in tinybars (1 HBAR = 100,000,000). Default 0.01 HBAR. */
-  X402_SIGNAL_PRICE_TINYBAR: z.coerce.number().int().positive().default(1_000_000).catch(1_000_000),
-  /** Agent-side cap on a single payment, in tinybars. Default 0.1 HBAR. */
-  X402_MAX_PER_CALL_TINYBAR: z.coerce.number().int().positive().default(10_000_000).catch(10_000_000),
-  /** Agent-side cap on total spend per UTC day, in tinybars. Default 1 HBAR. */
-  X402_MAX_SPEND_TINYBAR: z.coerce.number().int().positive().default(100_000_000).catch(100_000_000),
+  /** Signal Desk runs as its own process on its own port (`npm run signal-desk`). */
+  SIGNAL_DESK_PORT: z.coerce.number().int().min(1).max(65535).default(3101).catch(3101),
+  /** Where the agent buys intel. Default http://127.0.0.1:$SIGNAL_DESK_PORT; in production, another host. */
+  SIGNAL_DESK_URL: optional,
+  /** Price of one intel bundle in tinybars (1 HBAR = 100,000,000). Default 0.01 HBAR. */
+  X402_INTEL_PRICE_TINYBAR: posInt(1_000_000),
+  /** Price of one intel bundle in USDC micro-units (6 decimals). Default 0.01 USDC. */
+  X402_INTEL_PRICE_USDC_MICROS: posInt(10_000),
+  /** Which asset the agent pays with when the desk accepts both. */
+  X402_PREFERRED_ASSET: z.enum(['usdc', 'hbar']).default('usdc').catch('usdc'),
+  /** Agent-side cap on a single payment. Default 0.1 HBAR / 0.1 USDC. */
+  X402_MAX_PER_CALL_TINYBAR: posInt(10_000_000),
+  X402_MAX_PER_CALL_USDC_MICROS: posInt(100_000),
+  /** Agent-side cap on total spend per UTC day. Default 5 HBAR (500 buys) / 2 USDC (200 buys). */
+  X402_MAX_SPEND_TINYBAR: posInt(500_000_000),
+  X402_MAX_SPEND_USDC_MICROS: posInt(2_000_000),
   /** Comma-separated hosts (optionally host:port) the agent may pay. */
   X402_ALLOWED_HOSTS: z
     .string()
@@ -187,8 +219,23 @@ const ConfigSchema = z.object({
 
 type ParsedConfig = z.infer<typeof ConfigSchema>;
 
-export type Config = Omit<ParsedConfig, 'GHOSTY_MODE' | 'NEWS_LIVE' | 'ETHOS_ENABLED' | 'CLAUDE_VOICE_ENABLED' | 'CLAUDE_SCOUT_ENABLED'> & {
+export type Config = Omit<
+  ParsedConfig,
+  | 'GHOSTY_MODE'
+  | 'NEWS_LIVE'
+  | 'ETHOS_ENABLED'
+  | 'X402_FACILITATOR_URL'
+  | 'HEDERA_MIRROR_URL'
+  | 'HEDERA_USDC_TOKEN_ID'
+  | 'SIGNAL_DESK_URL'
+  | 'CLAUDE_VOICE_ENABLED'
+  | 'CLAUDE_SCOUT_ENABLED'
+> & {
   GHOSTY_MODE: 'live' | 'test';
+  X402_FACILITATOR_URL: string;
+  HEDERA_MIRROR_URL: string;
+  HEDERA_USDC_TOKEN_ID: string;
+  SIGNAL_DESK_URL: string;
   NEWS_LIVE: boolean;
   ETHOS_ENABLED: boolean;
   CLAUDE_VOICE_ENABLED: boolean;
@@ -213,7 +260,24 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     GHOSTY_MODE: mode,
     NEWS_LIVE: parsed.NEWS_LIVE ?? live,
     ETHOS_ENABLED: parsed.ETHOS_ENABLED ?? live,
+    X402_FACILITATOR_URL: parsed.X402_FACILITATOR_URL ?? defaultFacilitatorUrl(parsed.HEDERA_NETWORK),
+    HEDERA_MIRROR_URL: (parsed.HEDERA_MIRROR_URL ?? defaultMirrorUrl(parsed.HEDERA_NETWORK)).replace(/\/+$/, ''),
+    HEDERA_USDC_TOKEN_ID: parsed.HEDERA_USDC_TOKEN_ID ?? (parsed.HEDERA_NETWORK === 'mainnet' ? '0.0.456858' : '0.0.429274'),
+    SIGNAL_DESK_URL: (parsed.SIGNAL_DESK_URL ?? `http://127.0.0.1:${parsed.SIGNAL_DESK_PORT}`).replace(/\/+$/, ''),
     CLAUDE_VOICE_ENABLED: Boolean(parsed.ANTHROPIC_API_KEY) && (parsed.CLAUDE_VOICE_ENABLED ?? true),
     CLAUDE_SCOUT_ENABLED: Boolean(parsed.ANTHROPIC_API_KEY) && (parsed.CLAUDE_SCOUT_ENABLED ?? true),
   };
+}
+
+/** Public Hedera mirror node (REST): verifies settled payments and reads the HCS audit topic. */
+export function defaultMirrorUrl(network: 'testnet' | 'mainnet'): string {
+  return network === 'mainnet' ? 'https://mainnet.mirrornode.hedera.com' : 'https://testnet.mirrornode.hedera.com';
+}
+
+/**
+ * Blocky402: open (no API key) and lists hedera:testnet / hedera:mainnet in /supported (checked 2026-11-06).
+ * https://x402.org/facilitator, the old default, reset connections on the bare host; only www.x402.org answered.
+ */
+export function defaultFacilitatorUrl(network: 'testnet' | 'mainnet'): string {
+  return network === 'mainnet' ? 'https://api.blocky402.com' : 'https://api.testnet.blocky402.com';
 }

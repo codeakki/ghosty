@@ -25,8 +25,8 @@ import type { NewsAggregator } from './news/aggregator.js';
 import { createNewsAggregator, createNewsProviders } from './news/factory.js';
 import { shockDetector, type ShockResult } from './news/shock.js';
 import type { NewsItem } from './news/types.js';
-import { createPayments, decisionToSignal, registerPaidRoutes, type PaidRoutesOptions, type Payments, type SignalPayload } from './payments/index.js';
-import { Pipeline, SafeStopEngagedError, type PipelineDeps } from './pipeline.js';
+import { createPayments, type Payments } from './payments/index.js';
+import { Pipeline, SafeStopEngagedError, type BoughtIntel, type PipelineDeps } from './pipeline.js';
 import { BrainSwitch, isBrainOnline } from './safety/safeStop.js';
 import { createCandleLoader, type CandleLoader } from './sim/candles.js';
 import { SimEngine } from './sim/engine.js';
@@ -64,10 +64,8 @@ export interface BuildAppOptions {
   agent?: Agent;
   /** Hyperliquid venue + Uniswap spot leg. Default: createExecutor(config). */
   executor?: Executor;
-  /** x402 payer + HCS audit log. Default: createPayments(config). */
+  /** x402 payer + intel buyer + HCS audit log. Default: createPayments(config). */
   payments?: Payments;
-  /** Paywall overrides, e.g. an in-process facilitator in tests. */
-  x402?: Pick<PaidRoutesOptions, 'facilitator' | 'onSettled'>;
   /** GET /providers/status. Default: real probes over the config (tests pass one with a mocked fetch). */
   providerRegistry?: ProviderRegistry;
   /** GET /market/*. Default: Hyperliquid info API on MARKET_DATA_NETWORK (tests pass one with a mocked fetch). */
@@ -170,7 +168,6 @@ export function defaultDeps(config: Config): PipelineDeps {
   return createProviders(config).deps;
 }
 
-const NO_SIGNAL: SignalPayload = { signal: 'none', confidence: 0, actions: [], requestId: 'no-decision-yet' };
 
 /** `fallback` if `p` has not settled within `ms` (or rejects). Keeps the voice context from stalling a turn. */
 async function within<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -198,7 +195,7 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
   const brain = new BrainSwitch(config.SIMULATE_BRAIN_OFFLINE);
   const brainOnline = () => isBrainOnline(config, { sim: brain });
   const providers = createProviders(config, { scorer: opts.scorer, agent: opts.agent, executor: opts.executor, logger: app.log });
-  const payments = opts.payments ?? createPayments(config);
+  const payments = opts.payments ?? createPayments(config, { log: (msg, data) => app.log.info(data ?? {}, msg) });
   // Virtual pod state: the pipeline reports every step into it; /state and /events read it.
   const state = new PodState(providers.scorer, {
     safeStop: config.SAFE_STOP_ENABLED && config.SIMULATE_BRAIN_OFFLINE,
@@ -206,6 +203,33 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
   // Headlines posted to /news/inject join whatever news providers are configured.
   const injected = new InjectedNewsProvider();
   const deps = { ...providers.deps, ...opts.deps };
+  // One buyer for the decision loop and POST /sim/pay-signal: same daily caps, same lastPayment.
+  const { buyer } = payments;
+  // X402_AUTOPAY: before deciding on a shock headline, the agent buys the Signal Desk intel itself, no human
+  // approval. It pays only when the decision will actually run: not while safe-stop is on or 0G is unreachable,
+  // not for non-shock headlines, and not when Hedera keys are missing.
+  const buyIntel =
+    config.X402_AUTOPAY && payments.mode !== 'not_configured'
+      ? async (headline: NewsItem): Promise<BoughtIntel | undefined> => {
+          if (shockDetector([headline]).candidate === 'none') return undefined;
+          if (!(await brainOnline())) {
+            app.log.info({ headline: headline.title }, 'not buying intel: brain offline / safe-stop, no decision will run');
+            return undefined;
+          }
+          try {
+            return await buyer.buy(headline, 'decision');
+          } catch (err) {
+            app.log.warn({ err: (err as Error).message }, 'intel purchase failed; deciding without it');
+            throw err;
+          }
+        }
+      : undefined;
+  // HCS audit for decisions and trades: fire-and-forget, a slow or failed write never touches the decision.
+  const audit = payments.audit.enabled
+    ? (entry: Parameters<NonNullable<PipelineDeps['audit']>>[0]) => {
+        payments.audit.record(entry).catch((err: unknown) => app.log.warn({ err: String(err) }, 'HCS audit write failed'));
+      }
+    : undefined;
   // Claude answers questions (never trades); `voiceContext` is defined below and only called per request.
   const assistant: VoiceAssistant | undefined =
     opts.assistant !== undefined
@@ -213,7 +237,17 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
       : config.CLAUDE_VOICE_ENABLED && config.ANTHROPIC_API_KEY
         ? new ClaudeVoiceAssistant({ apiKey: config.ANTHROPIC_API_KEY, model: config.ANTHROPIC_MODEL, context: () => voiceContext() })
         : undefined;
-  const pipeline = new Pipeline({ ...deps, news: [...deps.news, injected], observer: state, assistant, brainOnline });
+  // Only the live decision loop pays. The SimEngine below gets the bare decider, never buyIntel: sim decisions are paper-only.
+  const pipeline = new Pipeline({
+    buyIntel,
+    intelWaitMs: config.X402_AUTOPAY_WAIT_MS,
+    audit,
+    ...deps,
+    news: [...deps.news, injected],
+    observer: state,
+    assistant,
+    brainOnline,
+  });
 
   // 0G failures never become a fake decision: map them to 503 so the pod says "brain offline".
   app.setErrorHandler(async (err, req, reply) => {
@@ -488,16 +522,7 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
     requireDevice,
   });
 
-  // Paid GET /signal (x402 on Hedera): serves the latest decision from the pod state.
-  registerPaidRoutes(app, {
-    config,
-    getSignal: () => {
-      const latest = state.latestDecision();
-      return latest ? decisionToSignal(latest) : NO_SIGNAL;
-    },
-    ...opts.x402,
-  });
-
+  // The paid resource lives on the Signal Desk (its own process, `npm run signal-desk`), not on this server.
   registerIntegrationRoutes(app, {
     config,
     state,

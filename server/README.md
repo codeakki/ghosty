@@ -82,7 +82,7 @@ See [`.env.example`](.env.example) for every variable with a comment. All keys a
 | `CLAUDE_SCOUT_MINUTES` | `5` | Scout cycle interval |
 | `CLAUDE_SCOUT_MAX_PER_DAY` | `200` | Scout cost guard: cycles per UTC day (overlapping cycles are skipped) |
 | `CLAUDE_SCOUT_QUERY` | breaking geopolitical, regulatory, exchange-hack and macro news that could move BTC, ETH, gold, oil or US stocks in the last hour | What the scout searches for |
-| `HEDERA_ACCOUNT_ID`, `HEDERA_PRIVATE_KEY`, `X402_FACILITATOR_URL` | x402.org facilitator | `payments/` |
+| `HEDERA_ACCOUNT_ID`, `HEDERA_PRIVATE_KEY`, `X402_FACILITATOR_URL` | Blocky402 facilitator (default; override with `X402_FACILITATOR_URL`) | `payments/` |
 | `HL_MASTER_ADDRESS`, `HL_AGENT_PRIVATE_KEY`, `HL_TESTNET` | `HL_TESTNET=true` | `execution/` |
 | `UNISWAP_API_KEY`, `EVM_PRIVATE_KEY`, `EVM_ADDRESS`, `EVM_RPC_URL` | unset | `wallet/` |
 | `CRYPTOPANIC_TOKEN`, `ETHOS_CLIENT`, `XAI_API_KEY` | `ETHOS_CLIENT=ghosty@0.1.0` | `news/`, `credibility/` |
@@ -96,7 +96,7 @@ See [`.env.example`](.env.example) for every variable with a comment. All keys a
 | `GET` | `/health` | none | `{"ok":true,"version":"0.1.0","safeStop":false}`. `safeStop: true` means 0G is unreachable and trading is blocked. |
 | `POST` | `/voice` | Body: WAV, 16-bit mono (16 kHz expected). `Content-Type: audio/wav` or `application/octet-stream`. Header `X-Device-Token` when `DEVICE_TOKEN` is set. | `200 application/octet-stream`: raw PCM s16le, mono, 16 kHz, no header. Headers `x-sample-rate`, `x-request-id` (0G inference id, or Claude `msg_…` id), `x-signal`, `x-answered-by` (`claude` or `0g`). `400 bad_wav` for stereo or non-16-bit input, `401 unauthorized`, `503 {"error":"brain_offline"}`. |
 | `POST` | `/button` | JSON `{"action":"confirm"}` or `{"action":"cancel"}`, same token header | `200 {action, requestId, signal, executed, actions[], orders[], swaps[]}`. Acts on the last spoken decision; with none pending it decides from the news alone. Confirm runs the Uniswap spot leg (if `UNISWAP_SPOT_LEG=true`) then the perp legs. `400` on a bad body, `503 brain_offline` or `503 memory_unavailable`. |
-| `GET` | `/signal` | x402 payment header | `402` with Hedera payment requirements, then `200` with the latest decision once paid. |
+| `GET` | `/hedera/audit` | none | Decoded HCS audit messages (payments, decisions, trades) from the mirror node. The paid `GET /intel` lives on the Signal Desk (`npm run signal-desk`), see [../docs/hedera.md](../docs/hedera.md). |
 
 Sim-only (not used by the firmware): `GET /sim`, `GET /state`, `GET /events`, `POST /voice/text`, `POST /news/inject`,
 `GET /alerts/next`, `POST /alerts/:id/ack`, `POST /sim/safe-stop`, `POST /sim/pay-signal`. Shapes in [docs/api.md](../docs/api.md#virtual-pod-sim-only).
@@ -137,7 +137,7 @@ server/
 | Track | Folder / file | What to replace |
 |---|---|---|
 | 0G: Physical AI, Agents with a Body | [`src/agent/`](src/agent), [`src/safety/safeStop.ts`](src/safety/safeStop.ts) | `FakeDecider` → 0G Compute Router (OpenAI-compatible, request id per decision). `InMemoryMemoryStore` and `InMemoryEpisodeLog` → encrypted blobs on 0G Storage (`@0gfoundation/0g-storage-ts-sdk`). `isBrainOnline` → real router ping. |
-| Hedera: AI Agents That Pay (x402) | [`src/payments/`](src/payments) | `payForSignal` → `@x402/fetch` + `@x402/hedera` client; `protectRoute` → paywall on a `/signal` route settling on `hedera:testnet`. |
+| Hedera: AI Agents That Pay (x402) | [`src/payments/`](src/payments) | Agent buys Signal Desk intel before a shock decision (`intelBuyer.ts` → `x402Client.ts`, `@x402/fetch` + `@x402/hedera`), desk paywall in `signalDesk.ts` + `x402Server.ts` (USDC or HBAR on `hedera:testnet`), mirror-node verification (`mirror.ts`), HCS audit (`hcsAudit.ts`). Walkthrough: [../docs/hedera.md](../docs/hedera.md). |
 | Uniswap: Build with Uniswap | [`src/wallet/uniswap.ts`](src/wallet/uniswap.ts) | `quoteAndSwap` → Trading API `check_approval` → `quote` → `swap`, signed with viem. FEEDBACK.md points at this file. |
 | Hyperliquid (execution venue, not a sponsor) | [`src/execution/`](src/execution) | `FakeHyperliquid` → `@nktkas/hyperliquid` with an approved API wallet. `hip3AssetId` and `planActions` are already real and tested. |
 | Signal credibility (optional) | [`src/news/`](src/news), [`src/credibility/`](src/credibility) | Fake providers → RSS, CryptoPanic, Polymarket Gamma, Grok `x_search`; `FakeEthosScorer` → Ethos API v2. |

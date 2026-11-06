@@ -256,6 +256,8 @@ export interface LastPayment {
   hashscanUrl: string;
   amountTinybar?: number;
   requestId?: string;
+  /** `decision`: paid by the decision loop on its own (X402_AUTOPAY). `sim`: the "Pay for signal" button. */
+  trigger?: 'decision' | 'sim';
   at: string;
 }
 
@@ -271,6 +273,8 @@ export interface X402Status {
   remainingToday: number;
   allowedHosts: string[];
   hcsTopicUrl: string | null;
+  /** X402_AUTOPAY: every decision pays for /signal with no human approval. */
+  autopay?: boolean;
   lastPayment: LastPayment | null;
 }
 

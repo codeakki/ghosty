@@ -20,7 +20,7 @@ Contract between the pod (ESP32) and the server. Base URL during development is 
 | GET | `/health` | none | Liveness + safe-stop state |
 | POST | `/voice` | device token | Push-to-talk: WAV in, spoken answer out |
 | POST | `/button` | device token | Confirm or cancel the last suggested trade |
-| GET | `/signal` | x402 payment | Premium signal, paid per call in HBAR on Hedera testnet |
+| GET | `/hedera/audit` | none | HCS audit topic messages (payments, decisions, trades), decoded from the mirror node |
 
 Sim-only routes for the [virtual pod](simulator.md). The firmware does not call them; they do not change the device contract above.
 
@@ -34,7 +34,7 @@ Sim-only routes for the [virtual pod](simulator.md). The firmware does not call 
 | GET | `/alerts/next` | device token | Pop the oldest pending alert, or `204` (meant for a later firmware poll) |
 | POST | `/alerts/:id/ack` | device token | Acknowledge an alert |
 | POST | `/sim/safe-stop` | device token | Simulate 0G offline at runtime |
-| POST | `/sim/pay-signal` | device token | The agent pays our own `GET /signal` through x402 (fake payer without Hedera keys) |
+| POST | `/sim/pay-signal` | device token | The agent buys a Signal Desk intel bundle through x402 (fake payer in test mode without Hedera keys). The paid `GET /intel` itself is on the Signal Desk process, see [below](#signal-desk-get-intel-x402-on-hedera) |
 
 Simulation runs (historical scenario replay, paper trades only, see [simulation.md](simulation.md) and [below](#simulation-runs)):
 
@@ -391,32 +391,46 @@ Read-only snapshots for the dashboard. No device token. Each one works with an e
 {
   "mode": "real",
   "network": "hedera:testnet",
-  "payer": "0.0.1001",
-  "payTo": "0.0.5005",
-  "priceTinybar": 1000000,
-  "maxPerCallTinybar": 10000000,
-  "spentToday": 1000000,
-  "cap": 100000000,
-  "remainingToday": 99000000,
+  "payer": "0.0.11342726",
+  "payTo": "0.0.11342424",
+  "signalDesk": "http://127.0.0.1:3101",
+  "preferredAsset": "usdc",
+  "budgets": {
+    "HBAR": { "asset": "0.0.0", "price": "1000000", "maxPerCall": "10000000", "spentToday": "0", "cap": "500000000", "remainingToday": "500000000" },
+    "USDC": { "asset": "0.0.429274", "price": "10000", "maxPerCall": "100000", "spentToday": "10000", "cap": "2000000", "remainingToday": "1990000" }
+  },
+  "priceTinybar": 1000000, "maxPerCallTinybar": 10000000, "spentToday": 0, "cap": 500000000, "remainingToday": 500000000,
   "allowedHosts": ["localhost", "127.0.0.1"],
-  "hcsTopicUrl": "https://hashscan.io/testnet/topic/0.0.…",
-  "lastPayment": { "mode": "real", "txId": "0.0.1001@…", "hashscanUrl": "https://hashscan.io/testnet/transaction/…", "amountTinybar": 1000000, "requestId": "…", "at": "…" }
+  "hcsTopicUrl": "https://hashscan.io/testnet/topic/0.0.11342727",
+  "autopay": true,
+  "lastPayment": {
+    "mode": "real", "txId": "0.0.9185802@1793984888.876950864", "hashscanUrl": "https://hashscan.io/testnet/transaction/…",
+    "asset": "0.0.429274", "amount": "10000", "amountLabel": "0.01 USDC", "payTo": "0.0.11342424", "provider": "ghosty-signal-desk",
+    "headline": "…", "verified": true, "trigger": "decision", "at": "…", "requestId": "desk-…",
+    "audit": { "topicId": "0.0.11342727", "sequenceNumber": "2", "txId": "0.0.11342726@…" }
+  }
 }
 ```
 
-`mode` is `not_configured` in live mode without `HEDERA_ACCOUNT_ID` + `HEDERA_PRIVATE_KEY` (`fake` in test mode, where the fake payer is charged against an in-memory cap so the numbers still move). The real cap is persisted in `server/.ghosty/spend.json` (UTC day). `hcsTopicUrl` is `null` until the first audit message creates the topic (or `HEDERA_HCS_TOPIC_ID` is set).
+Amounts are atomic-unit strings (tinybars, USDC micro-units). The top-level `priceTinybar` … `remainingToday` numbers are the HBAR budget, kept for the terminal. `mode` is `not_configured` in live mode without `HEDERA_ACCOUNT_ID` + `HEDERA_PRIVATE_KEY` (`fake` in test mode: in-memory cap, payments never `verified`). Real caps persist in `server/.ghosty/spend.json` (UTC day). `hcsTopicUrl` is `null` without `HEDERA_HCS_TOPIC_ID` + `HEDERA_HCS_SUBMIT_KEY`.
+
+`lastPayment.verified` is `null` while the mirror-node check runs, then `true` (result SUCCESS and the exact transfer agent → payTo of that asset and amount) or `false` with `verifyReason`. A payment is never shown as verified on the facilitator's word alone.
+
+`autopay` is `X402_AUTOPAY` (default `true`): before the 0G decision on a shock headline (live news or `/news/inject`), the agent buys the Signal Desk bundle itself, with no human approval, and the bundle goes into the prompt; the episode cites it as `decision.paidIntel {txId, provider, verified}` and its tx id is in `receipts`. The decision waits at most `X402_AUTOPAY_WAIT_MS` (default 8000) for the purchase. Nothing is paid while safe-stop is engaged or 0G is unreachable, for non-shock headlines, for voice turns (Claude answers or 0G trade turns), for simulation runs (`/sim/run`, paper only) or without Hedera keys. A failed or refused payment never blocks the decision. Full flow: [hedera.md](hedera.md#2-one-decision-step-by-step).
+
+### GET /hedera/audit
+
+`?limit=20` (1–100). Reads the HCS audit topic back from the mirror node, newest first, and decodes each message. **200** `{"topicId","topicUrl","count","messages":[{"sequenceNumber","consensusTimestamp","message":{"v":1,"kind":"payment"|"decision"|"trade","ts","txId"?,"asset"?,"amount"?,"payTo"?,"requestId"?,"signal"?,"verified"?}}]}`; a message that is not v1 JSON comes back as `{"raw": "…"}`. `503 not_configured` without the topic; `502 mirror_unavailable`.
 
 ### POST /sim/pay-signal
 
-Device token. No body. The agent pays `http://127.0.0.1:$PORT/signal` with no human approval (`payForSignal` → x402 → facilitator → Hedera), then `/x402/status.lastPayment` shows the HashScan link.
-
-**200** `{"mode","txId","hashscanUrl","amountTinybar","requestId","at","status","body","audit"}` where `body` is the paid `/signal` payload.
+Device token. Body `{"headline"?: string}`, default the newest headline the pod has seen. The agent buys the Signal Desk bundle for it (x402, no human approval). **200** = `lastPayment` (with `trigger: "sim"`) plus `bundle`.
 
 | Status | When | Body |
 |---|---|---|
-| 409 | Refused before signing: daily or per-call cap, host not allowlisted, payTo equals the payer | `{"error":"payment_refused","message":"..."}` |
-| 502 | `/signal` did not settle (402 after retry, facilitator down, verify/settle failure) | `{"error":"payment_failed","message":"...","status":402,"reason":"..."}` |
-| 503 | Live mode without the Hedera payer keys | `{"error":"not_configured","provider":"hedera-payer","missingEnv":[...]}` |
+| 409 | Refused before signing: daily or per-call cap, host not allowlisted, payTo equals the payer, 2 payments already in flight; or no headline yet | `{"error":"payment_refused" \| "no_headline","message":"..."}` |
+| 502 | Did not settle (402 after retry, facilitator down, verify/settle failure) | `{"error":"payment_failed","message":"...","status":402,"reason":"..."}` |
+| 503 | Live mode without the Hedera agent keys | `{"error":"not_configured","provider":"hedera-payer","missingEnv":[...]}` |
 
 ### GET /execution/markets
 
@@ -519,137 +533,42 @@ When `terminal/dist/index.html` exists (or `TERMINAL_DIST` points at a built dis
 
 ---
 
-## GET /signal (x402 on Hedera)
+## Signal Desk: GET /intel (x402 on Hedera)
 
-A premium signal endpoint behind an x402 paywall. The agent's own Hedera account pays for it on every call with no human approval; this is the Hedera track requirement. Code: `server/src/payments/x402Server.ts` (`registerPaidRoutes`), client `server/src/payments/x402Client.ts`. Notes: [research/hedera-x402.md](research/hedera-x402.md).
+The paid resource lives on the **Signal Desk**, a separate process (`npm run signal-desk`, port `SIGNAL_DESK_PORT`, default 3101) with its own Hedera account (`X402_PAY_TO`). The Ghosty server no longer has a paid route: the old `GET /signal` returned the agent's own last decision, so paying for it was circular. Walkthrough with the full flow, code locations, accounts and live links: [hedera.md](hedera.md). Code: `server/src/payments/signalDesk.ts`, `x402Server.ts` (`registerPaidRoute`), client `x402Client.ts`.
 
-Protocol: x402 **v2** as spoken by `@x402/core` / `@x402/fetch` 2.30. Scheme `exact`, network `hedera:testnet`, asset HBAR `0.0.0`, amount in tinybars.
+Protocol: x402 **v2** (`@x402/core` / `@x402/fetch` 2.30), scheme `exact`, network `hedera:testnet`. `GET /intel?headline=…&handle=…&domain=…` (`headline` required, else `400` before any 402).
 
-**Flow**
-
-```
-Agent (X402Payer)                        Server GET /signal                Facilitator (x402.org, hedera:testnet)
-   | GET /signal                            |  (first call: GET /supported → feePayer, cached)
-   |--------------------------------------->|                                 |
-   |<-- 402 + PAYMENT-REQUIRED header ------|                                 |
-   |    body: { x402Version: 2, accepts:[{scheme:"exact", network:"hedera:testnet",
-   |            amount:"1000000", asset:"0.0.0", payTo, extra:{feePayer}}] }
-   | policy checks (host allowlist, HBAR only, per-call + daily cap)
-   | sign TransferTransaction (payer −amount, payTo +amount, tx id paid by feePayer)
-   | GET /signal + PAYMENT-SIGNATURE         |                                 |
-   |--------------------------------------->|-- POST /verify ---------------->|
-   |                                        |<-- { isValid: true } -----------|
-   |                                        |   getSignal()                   |
-   |                                        |-- POST /settle ---------------->|  submits to Hedera
-   |                                        |<-- { success, transaction } ----|
-   |<-- 200 + PAYMENT-RESPONSE, x-payment-tx-id, signal JSON                  |
-```
-
-### Request headers
-
-| Header | When | Value |
-|---|---|---|
-| `PAYMENT-SIGNATURE` | paid retry (x402 v2, what `@x402/fetch` sends) | base64 JSON `PaymentPayload` |
-| `X-PAYMENT` | accepted as an alias (x402 v1 header name) | same base64 JSON `PaymentPayload` |
-
-`PaymentPayload` (decoded):
-
-```json
-{
-  "x402Version": 2,
-  "resource": { "url": "http://localhost:3000/signal", "description": "...", "mimeType": "application/json" },
-  "accepted": { "scheme": "exact", "network": "hedera:testnet", "amount": "1000000", "asset": "0.0.0", "payTo": "0.0.5005", "maxTimeoutSeconds": 180, "extra": { "feePayer": "0.0.9185802" } },
-  "payload": { "transaction": "<base64 partially signed Hedera TransferTransaction>" }
-}
-```
-
-### 402 Payment Required
-
-Sent when there is no payment header, or when the payment is malformed, does not match the current requirements, fails `/verify`, or fails `/settle`. The body is the `PaymentRequired` object; the same object is base64-encoded in the `PAYMENT-REQUIRED` header (that is what `@x402/fetch` reads). `error` says why.
-
-| Header | Value |
-|---|---|
-| `PAYMENT-REQUIRED` | base64 JSON of the body below |
-| `Cache-Control` | `no-store` |
+**402** (no or bad payment): `PAYMENT-REQUIRED` header + the same JSON body. The desk offers two options, USDC first:
 
 ```json
 {
   "x402Version": 2,
   "error": "payment required",
-  "resource": {
-    "url": "http://localhost:3000/signal",
-    "description": "Ghosty premium market signal (credibility-weighted, decided on 0G Compute)",
-    "mimeType": "application/json"
-  },
+  "resource": { "url": "http://127.0.0.1:3101/intel?headline=…", "description": "Headline intelligence: …", "mimeType": "application/json" },
   "accepts": [
-    {
-      "scheme": "exact",
-      "network": "hedera:testnet",
-      "amount": "1000000",
-      "asset": "0.0.0",
-      "payTo": "0.0.5005",
-      "maxTimeoutSeconds": 180,
-      "extra": { "feePayer": "0.0.9185802" }
-    }
+    { "scheme": "exact", "network": "hedera:testnet", "amount": "10000",   "asset": "0.0.429274", "payTo": "0.0.11342424", "maxTimeoutSeconds": 180, "extra": { "feePayer": "0.0.9185802" } },
+    { "scheme": "exact", "network": "hedera:testnet", "amount": "1000000", "asset": "0.0.0",      "payTo": "0.0.11342424", "maxTimeoutSeconds": 180, "extra": { "feePayer": "0.0.9185802" } }
   ]
 }
 ```
 
-| Field | Source |
-|---|---|
-| `amount` | `X402_SIGNAL_PRICE_TINYBAR` (default `1000000` = 0.01 HBAR) |
-| `asset` | `0.0.0` = HBAR. (A `"$0.01"` price would mean testnet USDC `0.0.429274`, not HBAR.) |
-| `payTo` | `X402_PAY_TO`, falling back to `HEDERA_ACCOUNT_ID`. Must not be the payer's account. |
-| `extra.feePayer` | Facilitator's fee-payer account from its `GET /supported` (x402.org: `0.0.9185802`) |
+Prices: `X402_INTEL_PRICE_USDC_MICROS` (default `10000` = 0.01 USDC, 6 decimals) and `X402_INTEL_PRICE_TINYBAR` (default `1000000` = 0.01 HBAR). The merchant must be associated with the USDC token (`npm run hedera:setup` does it).
 
-`error` values: `payment required` (no header), `invalid_payment_header`, `no_matching_payment_requirements`, any facilitator `invalidReason` (e.g. `invalid_exact_hedera_payload_signature_invalid`, `invalid_exact_hedera_payload_preflight_failed`), or a settle `errorReason` (e.g. `transaction_failed`).
-
-### 200 OK
-
-| Header | Value |
-|---|---|
-| `PAYMENT-RESPONSE` | base64 JSON `SettleResponse` (x402 v2) |
-| `X-PAYMENT-RESPONSE` | same value (v1 name) |
-| `x-payment-tx-id` | settled Hedera transaction id, e.g. `0.0.9185802@1762400000.123456789` |
-
-Decoded `SettleResponse`: `{ "success": true, "transaction": "0.0.9185802@1762400000.123456789", "network": "hedera:testnet", "payer": "0.0.1001" }`.
-
-Body:
+**200** after facilitator verify → bundle built → facilitator settle: headers `PAYMENT-RESPONSE`, `X-PAYMENT-RESPONSE`, `x-payment-tx-id`; body:
 
 ```json
 {
-  "signal": "geopolitical_shock",
-  "confidence": 0.72,
-  "actions": [{ "venue": "hyperliquid", "coin": "xyz:GOLD", "side": "long", "sizeUsd": 5, "reason": "..." }],
-  "requestId": "og-req-…",
-  "paidTxId": "0.0.9185802@1762400000.123456789",
-  "hashscanUrl": "https://hashscan.io/testnet/transaction/0.0.9185802-1762400000-123456789"
+  "provider": "ghosty-signal-desk", "requestId": "desk-…", "generatedAt": "…",
+  "headline": "Missile strikes reported near Strait of Hormuz",
+  "source": { "handle": "reuters", "domain": null, "ethos": { "score": 1427, "level": "neutral" } },
+  "corroboration": { "count": 2, "sources": ["bloomberg.com", "ft.com"], "windowMinutes": 120, "examples": [ … ] },
+  "shock": { "category": "geopolitical_shock", "keywords": ["missile", "strikes"], "severity": "medium" },
+  "paidTxId": "0.0.9185802@…", "hashscanUrl": "https://hashscan.io/testnet/transaction/…"
 }
 ```
 
-`signal`, `confidence`, `actions`, `requestId` come from the latest decision in the pod state (`buildApp` passes `getSignal: () => decisionToSignal(state.latestDecision())`). Before the first decision the route returns `{"signal":"none","confidence":0,"actions":[],"requestId":"no-decision-yet"}` behind the same paywall. The handler runs after `/verify` and before `/settle`, so a broken handler never charges the payer.
-
-### Other errors
-
-| Status | When | Body |
-|---|---|---|
-| 503 | No `X402_PAY_TO` / `HEDERA_ACCOUNT_ID` configured | `{"error":"payments_not_configured"}` |
-| 503 | Facilitator `/supported` unreachable (retried on the next request) | `{"error":"facilitator_unavailable","facilitator":"https://x402.org/facilitator"}` |
-
-### Try it
-
-```bash
-# Unpaid request: 402 + requirements (body and PAYMENT-REQUIRED header)
-curl -s -i http://localhost:3000/signal
-
-# Decode the header
-curl -s -D - -o /dev/null http://localhost:3000/signal | awk -F': ' 'tolower($1)=="payment-required"{print $2}' | tr -d '\r' | base64 -d | jq
-
-# Paid request: made by the agent (@x402/fetch + Hedera signer), not curl
-cd server && npm run x402:demo        # prints tx id + HashScan link, appends docs/evidence.md
-```
-
-**Spend controls (agent side, before signing):** host allowlist `X402_ALLOWED_HOSTS`; HBAR on the configured network only; never pays its own account; per-payment cap `X402_MAX_PER_CALL_TINYBAR`; daily cap `X402_MAX_SPEND_TINYBAR` persisted in `server/.ghosty/spend.json`. Each payment is also written to an HCS audit topic (`server/src/payments/hcsAudit.ts`).
+Other errors: `503 payments_not_configured` (no `X402_PAY_TO`), `503 facilitator_unavailable`. `GET /health` on the desk is free and lists `payTo`, facilitator and prices.
 
 ---
 

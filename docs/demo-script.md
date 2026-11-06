@@ -41,7 +41,7 @@ One presenter talks, one drives the laptop. The pod is worn (clip or lanyard) an
 | Track | Evidence | Where |
 |---|---|---|
 | 0G Physical AI | 0G Compute **request IDs** per decision; **storage root hashes** of the episode log; the safe-stop beat; live hardware | Server log, storage explorer, README "Evidence" table |
-| Hedera x402 | Settled **tx ID** for an autonomous `/signal` payment with **HashScan link**; architecture + payment flow diagram; video ≤5 min | README, [api.md](api.md#future-get-signal-x402-on-hedera) |
+| Hedera x402 | Settled **tx ID** for an autonomous Signal Desk intel payment with **HashScan link**, the HCS audit topic, `GET /x402/status` showing `verified: true`; architecture + payment flow diagram; video ≤5 min | README, [hedera.md](hedera.md) |
 | Uniswap | Swap **tx hash** from the Trading API spot leg; README pointer to the exact lines in `server/src/wallet/uniswap.ts`; **FEEDBACK.md**; feedback form submitted | Chain explorer, GitHub |
 | Hyperliquid (venue, not a track) | Order ID / fill on the positions tab | Hyperliquid UI |
 

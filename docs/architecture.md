@@ -12,7 +12,7 @@ Ghosty is a wearable ESP32 voice pod that hosts a private, user-owned trading co
    speaker, LiPo→TP4056→5V boost         ├─ credibility: Ethos score per handle/address (optional)
                                          ├─ decision loop: 0G Compute chat completion (request ID logged)
 <--raw PCM s16le 16k over HTTP--         ├─ memory: encrypted (AES-256) blobs on 0G Storage; episode log per decision
-                                         ├─ payments: x402 client on Hedera testnet pays /signal per call
+                                         ├─ payments: agent buys intel from the Signal Desk via x402 (USDC/HBAR, Hedera testnet)
                                          ├─ execution: Hyperliquid API wallet (@nktkas/hyperliquid) opens perp
                                          │    (xyz:GOLD / xyz:WTI long, BTC short) — main venue
                                          ├─ spot leg: viem + Uniswap Trading API (Arbitrum/Base) swap → USDC
@@ -25,14 +25,15 @@ Ghosty is a wearable ESP32 voice pod that hosts a private, user-owned trading co
 | Component | Where | Tech | Job | Server module |
 |---|---|---|---|---|
 | Device | ESP32-S3 N16R8 | Arduino core 3.3.x, `ESP_I2S` full duplex, `HTTPClient` | Push-to-talk record (16 kHz, 16-bit mono), play PCM, read button | `firmware/sketches/06_CloudVoice` |
-| Server | Laptop / small VM | Node 22, TypeScript, Fastify/Express | HTTP API (`/health`, `/voice`, `/button`, later `/signal`), orchestration | `server/src/index.ts` |
+| Server | Laptop / small VM | Node 22, TypeScript, Fastify | HTTP API (`/health`, `/voice`, `/button`, `/x402/status`, `/hedera/audit`), orchestration | `server/src/index.ts` |
 | STT | Cloud | Groq `whisper-large-v3-turbo`; 0G Whisper Large v3 if the Router exposes audio (UNVERIFIED) | WAV → text | `server/src/audio/stt.ts` |
 | TTS | Cloud | ElevenLabs `eleven_flash_v2_5`, `output_format=pcm_16000` | Text → raw s16le 16 kHz PCM, no resampling | `server/src/audio/tts.ts` |
 | News ingest | Server | RSS, CryptoPanic, Polymarket Gamma, Grok `x_search` (optional) | Pull headlines and market odds, normalise into events | `server/src/news/*` |
 | Credibility | Server | Ethos API v2 (optional) | Weight a source by Ethos score of its X handle or wallet | `server/src/credibility/ethos.ts` |
 | Decision loop | 0G Compute | 0G Router (OpenAI-compatible) or direct broker SDK | Event + memory → decision (`alert`, `trade`, `ignore`) with a request ID | `server/src/agent/decide.ts` |
 | Memory + episode log | 0G Storage | `@0gfoundation/0g-storage-ts-sdk`, AES-256 built-in encryption | User prefs and history (encrypted); one episode record per decision with request ID and root hash | `server/src/agent/{memory,episode}.ts` |
-| Payments | Hedera testnet | x402 (`@x402/fetch`, `@x402/hedera`, `@x402/express`) | Agent wallet pays per `/signal` call, no human approval | `server/src/payments/x402.ts` |
+| Payments | Hedera testnet | x402 (`@x402/core`, `@x402/fetch`, `@x402/hedera`), Hiero SDK, mirror node REST | Agent hot wallet buys a Signal Desk intel bundle (USDC or HBAR) before a shock decision, no human approval; mirror-node verification; HCS audit topic | `server/src/payments/` (map in `index.ts`); walkthrough [hedera.md](hedera.md) |
+| Signal Desk | Separate process (`npm run signal-desk`), own Hedera account | Fastify + `@x402/core` resource server, Blocky402 facilitator | Sells headline intel (Ethos credibility, corroboration, shock severity) behind x402 | `server/src/payments/signalDesk.ts` |
 | Execution | Hyperliquid | `@nktkas/hyperliquid`, API (agent) wallet | Open perps: HIP-3 `xyz:` markets (gold, oil, stocks) and BTC | `server/src/execution/hyperliquid.ts` |
 | Playbook | Server | Plain TS map | Signal type → action (e.g. war/geopolitical → long GOLD/WTI + short BTC) | `server/src/execution/playbook.ts` |
 | Spot leg | Arbitrum / Base | viem + Uniswap Trading API | Wallet tokens → USDC before funding perps, or USDC → PAXG safe haven | `server/src/wallet/uniswap.ts` |
@@ -74,11 +75,11 @@ If 0G is unreachable, the server answers `503 {"error":"brain_offline"}` with no
 ## Sequence B: news-driven alert → button → trade
 
 ```
-News sources      Server                  Hedera x402     0G Compute    0G Storage    Pod          Hyperliquid   Uniswap
-    |  poll         |                         |               |             |           |               |           |
+News sources      Server                  Signal Desk     0G Compute    0G Storage    Pod          Hyperliquid   Uniswap
+    |  poll         |                         | (x402,Hedera) |             |           |               |           |
     |-- headline -->| normalise + Ethos score |               |             |           |               |           |
-    |               |-- GET /signal (pays) -->|               |             |           |               |           |
-    |               |<-- 402 → pay → 200 -----|               |             |           |               |           |
+    |               |-- GET /intel (pays) --->|               |             |           |               |           |
+    |               |<-- 402 → pay → 200 -----|  then: mirror-node verify, HCS audit message                         |
     |               |-- decide(event, memory) --------------->|             |           |               |           |
     |               |<-- {action: alert, plan, reqId} --------|             |           |               |           |
     |               |-- episode log ------------------------------------->  |           |               |           |
@@ -93,8 +94,8 @@ News sources      Server                  Hedera x402     0G Compute    0G Stora
 ```
 
 1. Ingest pulls RSS, CryptoPanic, Polymarket and (optionally) Grok `x_search`. Each item gets an Ethos weight where a handle or address is known.
-2. The server buys a premium signal from its own x402-paywalled `/signal` endpoint using the agent's Hedera wallet. This is the autonomous payment for the Hedera track.
-3. 0G Compute decides. The playbook maps the signal class to a concrete plan (for "war": long `xyz:GOLD` / `xyz:WTI`, short BTC).
+2. For a shock headline, and only while the brain is online, the agent buys a headline-intelligence bundle from the Signal Desk (a separate x402 merchant with its own Hedera account) with its hot wallet, then re-checks the payment on the mirror node and logs it to HCS. This is the autonomous payment for the Hedera track ([hedera.md](hedera.md)).
+3. 0G Compute decides, with the bundle in its prompt. The playbook maps the signal class to a concrete plan (for "war": long `xyz:GOLD` / `xyz:WTI`, short BTC).
 4. The episode (event, request ID, plan) is written to 0G Storage before anything is spoken.
 5. The pod plays the alert. The pod polls or long-polls for pending alerts; delivery mechanism is a build-time decision.
 6. User presses the button. The pod sends `POST /button {"action":"confirm"}` (or `"cancel"`).

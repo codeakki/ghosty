@@ -37,6 +37,25 @@ export interface PipelineObserver {
   onEpisode?(record: EpisodeRecord): void;
 }
 
+/** Intel the agent bought for a headline (x402 on Hedera), as the pipeline needs it. See payments/intelBuyer.ts. */
+export interface BoughtIntel {
+  bundle: object;
+  txId: string;
+  provider: string;
+  hashscanUrl: string;
+  asset: string;
+  amount: string;
+  verification: Promise<{ verified: boolean }>;
+}
+
+/** One HCS audit line (payments/hcsAudit.ts). Fire-and-forget: the pipeline never waits on it. */
+export interface PipelineAuditEntry {
+  kind: 'decision' | 'trade';
+  requestId: string;
+  signal: string;
+  txId?: string;
+}
+
 export interface PipelineDeps {
   stt: SpeechToText;
   tts: TextToSpeech;
@@ -53,6 +72,18 @@ export interface PipelineDeps {
   /** Single-user device for now. */
   userId?: string;
   observer?: PipelineObserver;
+  /**
+   * Buy the Signal Desk intel bundle for a headline (x402 on Hedera), with no human approval, BEFORE the 0G
+   * decision. Resolves undefined when it chose not to pay (brain offline, not a shock, ...). A failed payment
+   * never blocks or fakes a decision. Undefined = no autonomous payments.
+   */
+  buyIntel?: (headline: NewsItem) => Promise<BoughtIntel | undefined>;
+  /** Max wait for the purchase before deciding without it (default 8000 ms). A late purchase is still recorded. */
+  intelWaitMs?: number;
+  /** Max wait, after the decision, for the mirror-node verification so the episode can say verified (default 3000 ms). */
+  verifyWaitMs?: number;
+  /** HCS audit hook for decisions and trades. */
+  audit?: (entry: PipelineAuditEntry) => void;
   /**
    * Claude voice answers (CLAUDE_VOICE_ENABLED). When set, questions go to Claude and only trade requests reach the
    * 0G decider; without it every turn is a 0G decision, as before.
@@ -185,6 +216,10 @@ export class Pipeline {
       ],
     });
 
+    if (action === 'confirm' && orders.length + swaps.length > 0) {
+      const receipt = swaps.find((s) => s.result)?.result?.txHash ?? orders.find((o) => o.orderId)?.orderId;
+      this.deps.audit?.({ kind: 'trade', requestId: decision.requestId, signal: decision.signal, ...(receipt ? { txId: String(receipt) } : {}) });
+    }
     memory.history.push({ at: new Date().toISOString(), requestId: decision.requestId, signal: decision.signal, outcome });
     await this.deps.memory.save(this.userId, memory);
 
@@ -264,19 +299,49 @@ export class Pipeline {
     return { transcript, answeredBy: '0g', intent, reply, requestId: pending?.requestId ?? `no-pending-${randomUUID()}` };
   }
 
+  /**
+   * One decision. For a headline, step 1 is buying the Signal Desk intel (x402) so 0G decides WITH it:
+   *   buy intel (bounded wait) → 0G decide (intel in the prompt) → wait briefly for mirror verification →
+   *   episode (with paidIntel) → HCS "decision" message.
+   */
   private async decide(transcript: string, trigger: DecisionTrigger, headline?: NewsItem): Promise<Decision> {
-    const [fetched, memory] = await Promise.all([fetchAll(this.deps.news), this.deps.memory.load(this.userId)]);
+    const purchase = headline && this.deps.buyIntel ? this.deps.buyIntel(headline).catch(() => undefined) : undefined;
+    const [fetched, memory, intel] = await Promise.all([
+      fetchAll(this.deps.news),
+      this.deps.memory.load(this.userId),
+      withTimeout(purchase, this.deps.intelWaitMs ?? 8000),
+    ]);
     await this.deps.observer?.onNews?.(fetched);
     // Put the headline being asked about first so the rationale quotes it.
     const news = headline ? [headline, ...fetched.filter((n) => n.id !== headline.id)] : fetched;
-    const decision = await this.deps.decider.decide({ transcript, news, memory, maxTradeUsd: this.deps.maxTradeUsd });
+    const decision = await this.deps.decider.decide({
+      transcript,
+      news,
+      memory,
+      maxTradeUsd: this.deps.maxTradeUsd,
+      ...(intel ? { paidIntel: { provider: intel.provider, txId: intel.txId, bundle: intel.bundle } } : {}),
+    });
+    if (intel) {
+      const check = await withTimeout(intel.verification, this.deps.verifyWaitMs ?? 3000);
+      decision.paidIntel = {
+        txId: intel.txId,
+        provider: intel.provider,
+        hashscanUrl: intel.hashscanUrl,
+        asset: intel.asset,
+        amount: intel.amount,
+        // null = the mirror-node check had not finished yet; GET /x402/status shows the final answer.
+        verified: check ? check.verified : null,
+      };
+    }
     this.deps.observer?.onDecision?.(decision, { trigger, transcript, headline });
     await this.logEpisode({
       decision,
       requestId: decision.requestId,
       actions: decision.suggestedActions,
       outcome: 'proposed',
+      ...(intel ? { receipts: [intel.txId] } : {}),
     });
+    this.deps.audit?.({ kind: 'decision', requestId: decision.requestId, signal: decision.signal, txId: intel?.txId });
     this.pending = decision.signal === 'none' ? undefined : decision;
     return decision;
   }
@@ -284,5 +349,19 @@ export class Pipeline {
   private async logEpisode(entry: EpisodeInput): Promise<void> {
     const record = await this.deps.episodes.append(entry);
     this.deps.observer?.onEpisode?.(record);
+  }
+}
+
+/** Resolve with the promise's value, or undefined after `ms` (the promise keeps running in the background). */
+async function withTimeout<T>(promise: Promise<T> | undefined, ms: number): Promise<T | undefined> {
+  if (!promise) return undefined;
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => resolve(undefined), ms);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timer);
   }
 }
