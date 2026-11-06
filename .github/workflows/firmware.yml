@@ -15,7 +15,7 @@ jobs:
         run: cp firmware/libraries/GhostyBoard/src/secrets.h.example firmware/libraries/GhostyBoard/src/secrets.h
       - uses: arduino/compile-sketches@v1
         with:
-          fqbn: esp32:esp32:esp32cam
+          fqbn: esp32:esp32:esp32s3:FlashSize=16M,PSRAM=opi,PartitionScheme=app3M_fat9M_16MB
           platforms: |
             - name: esp32:esp32
               source-url: https://espressif.github.io/arduino-esp32/package_esp32_index.json

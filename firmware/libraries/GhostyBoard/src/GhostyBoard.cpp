@@ -18,13 +18,18 @@ void ghostyBoardInit(bool powerDownCamera) {
   Serial.begin(115200);
   delay(200);
 
-  pinMode(PIN_LED_RED, OUTPUT);
-  digitalWrite(PIN_LED_RED, HIGH);  // active LOW -> off
-  pinMode(PIN_FLASH_LED, OUTPUT);
-  digitalWrite(PIN_FLASH_LED, LOW);
+  // Pins set to -1 in pins.h do not exist on this board: skip them.
+  if (PIN_LED_RED >= 0) {
+    pinMode(PIN_LED_RED, OUTPUT);
+    digitalWrite(PIN_LED_RED, HIGH);  // active LOW -> off
+  }
+  if (PIN_FLASH_LED >= 0) {
+    pinMode(PIN_FLASH_LED, OUTPUT);
+    digitalWrite(PIN_FLASH_LED, LOW);
+  }
   pinMode(PIN_BUTTON, INPUT_PULLUP);
 
-  if (powerDownCamera) {
+  if (powerDownCamera && PIN_CAM_PWDN >= 0) {
     pinMode(PIN_CAM_PWDN, OUTPUT);
     digitalWrite(PIN_CAM_PWDN, HIGH);
   }
@@ -78,6 +83,7 @@ bool buttonPressed() {
 }
 
 void setRedLed(bool on) {
+  if (PIN_LED_RED < 0) return;
   digitalWrite(PIN_LED_RED, on ? LOW : HIGH);
 }
 

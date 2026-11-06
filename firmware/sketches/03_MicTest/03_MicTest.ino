@@ -11,7 +11,7 @@
  *   (quiet room: short bar; talking or clapping: long bar)
  *
  * What to check:
- *   - The bar reacts to your voice. Constant 0 = no data: check SD on GPIO13,
+ *   - The bar reacts to your voice. Constant 0 = no data: check SD on GPIO6,
  *     L/R to GND, VDD on 3V3, then try I2S_STD_SLOT_RIGHT in GhostyBoard.cpp.
  *   - Peak pinned at 32767 while quiet = wiring noise or wrong slot.
  */

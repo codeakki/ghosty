@@ -7,11 +7,11 @@ Symptom → cause → fix. Hardware first, then network, then chains.
 | Symptom | Jump to |
 |---|---|
 | Resets when WiFi or audio starts, `Brownout detector was triggered` | [Brownout](#brownout--reset-under-wifi) |
-| Endless `flash read err, 1000` on boot | [GPIO12 boot loop](#flash-read-err-boot-loop-gpio12) |
-| Upload stuck at `Connecting...` | [Download mode](#cant-enter-download-mode-gpio2--gpio0) |
+| Amp silent, VIN reads about 0 V | [Dead 5V pin](#dead-5v-pin-on-usb-power) |
+| Upload stuck at `Connecting...` | [Download mode](#cant-enter-download-mode) |
 | Mic RMS is zero or constant | [Silent mic](#silent-mic) |
 | Speaker hiss, buzz, click or pop | [Speaker noise](#speaker-buzz-or-pop) |
-| Mic/speaker die after some library call | [SD_MMC conflict](#sd_mmc-conflict) |
+| Mic/speaker die after wiring something new | [Pins to avoid](#pins-to-avoid) |
 | No serial port | [No COM port](#no-com-port) |
 | `ps_malloc` returns NULL | [PSRAM](#psram-allocation-fails) |
 | WiFi never connects | [WiFi](#wifi-wont-connect) |
@@ -28,35 +28,33 @@ Symptom → cause → fix. Hardware first, then network, then chains.
 **Cause:** the 5V pin feeds an AMS1117 regulator that needs about 1.1 V of headroom. A LiPo (3.0–4.2 V) wired straight to 5V sags under WiFi TX bursts plus the amp.
 
 **Fix:**
-- Power path: LiPo → TP4056 (charger/protection) → **5V boost converter** → ESP32-CAM 5V pin.
+- Power path: LiPo → TP4056 (charger/protection) → **5V boost converter** → ESP32-S3 5V pin.
 - Feed the MAX98357A VIN from the boost output too, not from 3V3.
 - Add a **470–1000 µF** electrolytic across 5V/GND close to the board, plus a 100 nF ceramic if you have one.
 - Short, thick power wires. Dupont jumpers on a breadboard drop voltage.
 - On USB power, use a port or hub that can deliver 500 mA+.
 - Do not disable the brownout detector as a fix. It hides the problem and corrupts flash writes.
 
-## `flash read err` boot loop (GPIO12)
+## Dead 5V pin on USB power
 
-**Symptom:** after reset the serial log repeats `flash read err, 1000` and never reaches `setup()`.
+**Symptom:** the speaker is silent although the sketch runs; amp VIN to GND reads about 0 V (a small negative value is normal noise).
 
-**Cause:** GPIO12 is a strapping pin that selects flash voltage. If it is HIGH at reset the chip picks 1.8 V flash and cannot read the 3.3 V flash.
+**Cause:** many ESP32-S3 N16R8 clones put a diode between USB power and the 5V pin. Current can flow into the board through the 5V pin, but not out of it, so on USB power the pin is dead.
 
 **Fix:**
-- Make sure nothing drives GPIO12 HIGH at reset. In our wiring only the amp DIN (an input) is on GPIO12, which is safe.
-- Never put the mic SD output on GPIO12.
-- Disconnect the GPIO12 wire, reset, confirm it boots, then reconnect and find what pulls it up.
-- Last resort, irreversible: `espefuse set-flash-voltage 3.3V` burns an eFuse so the strap is ignored. Do this only on a board you are sure about.
+- Measure the board's own 5V pin to GND. About 0 V confirms it.
+- Move the amp VIN to a **3V3** pin (works, a little quieter), or bridge the **IN-OUT** solder pad near the USB ports to get 5 V on that pin.
+- After bridging IN-OUT, never connect an external 5 V supply to the 5V pin while USB is plugged in.
 
-## Can't enter download mode (GPIO2 / GPIO0)
+## Can't enter download mode
 
 **Symptom:** upload hangs at `Connecting.....` or fails with "Wrong boot mode".
 
 **Fix:**
-- GPIO0 must be LOW at reset: jumper GPIO0 → GND (USB-TTL) or hold IO0 and tap RST (ESP32-CAM-MB).
-- **GPIO2** must be LOW or floating at reset. Our button goes GPIO2 ↔ GND with `INPUT_PULLUP`; never wire GPIO2 to 3V3. If you added an external pull-up, remove it.
-- Do not hold the push-to-talk button while resetting.
+- Use the **COM** USB-C port. Its USB-serial bridge resets the board into download mode by itself.
+- On the native **USB** port, a running sketch can block the automatic reset: hold **BOOT**, tap **RST**, release BOOT, upload, then tap RST.
+- Do not wire anything to GPIO0, GPIO3, GPIO45 or GPIO46 (strapping pins).
 - Lower upload speed (Tools → Upload Speed → 115200) on long or flaky cables.
-- After flashing via USB-TTL, remove the GPIO0 jumper and press RST, or the board stays in the bootloader.
 
 ## Silent mic
 
@@ -67,7 +65,7 @@ Symptom → cause → fix. Hardware first, then network, then chains.
 2. **Try the right slot.** On the original ESP32 the INMP441 sometimes appears in the other slot. Change `I2S_STD_SLOT_LEFT` to `I2S_STD_SLOT_RIGHT` in `i2s.begin(...)`.
 3. **32-bit slots.** INMP441 needs 64 SCK per frame and outputs 24-bit data. Run I2S at 16 kHz with `I2S_DATA_BIT_WIDTH_32BIT`, then shift `raw >> 14` to get int16. 16-bit slots read garbage or zeros.
 4. **One driver only.** Use `ESP_I2S.h`. The legacy `driver/i2s.h` is deprecated and cannot coexist with the new driver.
-5. **Wiring:** VDD 3V3, GND, SCK→GPIO14, WS→GPIO15, SD→GPIO13. Mic SD must not be on GPIO12.
+5. **Wiring:** VDD 3V3, GND, SCK→GPIO4, WS→GPIO5, SD→GPIO6. A solid 0 with good code is almost always an unsoldered header pin or a loose jumper.
 6. Speak close to the port hole; the INMP441 is bottom-ported on most breakouts.
 
 ## Speaker buzz or pop
@@ -78,12 +76,15 @@ Symptom → cause → fix. Hardware first, then network, then chains.
 - **Buzz:** amp VIN from the 5V boost with the bulk cap; share a solid ground between ESP32, amp and mic; keep speaker wires away from the antenna.
 - **Click at start/stop:** the TX channel uses `auto_clear=true` so it sends silence when idle. Ramp volume in and out over a few ms instead of starting at full scale.
 - **Too loud / clipping:** GAIN floating is 9 dB. Scale samples down in software before `<<16`.
-- **Pop at boot:** GPIO14 (BCLK) may emit a PWM burst at boot (UNVERIFIED). If it bothers you, hold the amp SD/shutdown pin low until `setup()` has started I2S.
-- **No sound at all:** speaker on the amp's + and − terminals, not to GND. DIN on GPIO12, BCLK on GPIO14, LRC on GPIO15.
+- **Pop at boot:** BCLK (GPIO4) may toggle at boot (UNVERIFIED). If it bothers you, hold the amp SD/shutdown pin low until `setup()` has started I2S.
+- **No sound at all:** speaker on the amp's + and − terminals, not to GND. DIN on GPIO7, BCLK on GPIO4, LRC on GPIO5. Check amp VIN (see [Dead 5V pin](#dead-5v-pin-on-usb-power)).
 
-## SD_MMC conflict
+## Pins to avoid
 
-GPIO2, 4, 12, 13, 14 and 15 are the SD card pins. **Never call `SD_MMC.begin()`.** It reconfigures our I2S, button and LED pins. If an example sketch or library pulls in SD_MMC, remove it. GPIO16/17 are PSRAM pins; do not use them either.
+- **GPIO0, GPIO3, GPIO45, GPIO46:** strapping pins. Anything wired there can stop the board from booting or flashing.
+- **GPIO19 / GPIO20:** the native USB port.
+- **GPIO26–37:** the 16 MB flash and the octal PSRAM. Using them crashes the board.
+- **GPIO17 / GPIO18:** kept free for the Dabao UART link.
 
 ## No COM port
 
@@ -92,13 +93,13 @@ GPIO2, 4, 12, 13, 14 and 15 are the SD card pins. **Never call `SD_MMC.begin()`.
 - macOS: look for `/dev/cu.usbserial-*` or `/dev/cu.wchusbserial*`; install the WCH driver if neither appears.
 - Linux: `ls /dev/ttyUSB*`; add yourself to `dialout`.
 - Close any other serial monitor (only one program can hold the port).
-- ESP32-CAM-MB boards occasionally ship bad; try another board or a USB-TTL adapter.
+- Try the other USB-C port (COM or USB) on the board.
 
 ## PSRAM allocation fails
 
 **Symptom:** `ps_malloc()` returns `NULL`, or recording crashes.
 
-- Board must be **AI Thinker ESP32-CAM**; PSRAM is on by default for it. Check **Tools → PSRAM: Enabled**.
+- Board must be **ESP32S3 Dev Module** with **Tools → PSRAM: OPI PSRAM**. The wrong PSRAM type can also make the board reboot in a loop.
 - Print `ESP.getPsramSize()` and `ESP.getFreePsram()` in `setup()`. Zero means PSRAM is not detected (wrong board selected or a board without PSRAM).
 - 5 s at 16 kHz 16-bit mono is 160 KB. Allocate once in `setup()`, reuse it; do not allocate per recording.
 - Brownouts can also make PSRAM flaky. Fix power first.
@@ -108,7 +109,7 @@ GPIO2, 4, 12, 13, 14 and 15 are the SD card pins. **Never call `SD_MMC.begin()`.
 - ESP32 supports **2.4 GHz only**. 5 GHz-only networks and many "band steering" mesh networks will not work. Use a phone hotspot set to 2.4 GHz (on iPhone enable "Maximise Compatibility").
 - Captive-portal WiFi (venue WiFi with a login page) will not work. Use a hotspot.
 - SSID and password are case-sensitive; check `secrets.h`.
-- Print `WiFi.status()` codes while connecting. Weak signal: the ESP32-CAM PCB antenna is poor; move closer or use the IPEX connector with an external antenna (requires moving the 0 Ω resistor).
+- Print `WiFi.status()` codes while connecting. Weak signal: keep the board's PCB antenna clear of metal and the speaker magnet; move closer to the hotspot.
 - Server unreachable while WiFi is up: phone and laptop must be on the same network; check the laptop firewall allows inbound on port 3000.
 
 ## HTTPS certificate errors

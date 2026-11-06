@@ -2,21 +2,20 @@
  * 01_Blink - first sign of life.
  *
  * Purpose: prove the toolchain, upload path and GhostyBoard library work.
- *   Blinks the small red LED on GPIO33 (active LOW; the board has no
- *   LED_BUILTIN) once per second and prints a heartbeat.
+ *   Prints a heartbeat once per second. The ESP32-S3 board has no plain red
+ *   LED (PIN_LED_RED is -1), so the LED calls do nothing.
  *
  * Expected serial output (115200 baud):
- *   [ghosty] board up, PSRAM 4xxxxxx bytes free
+ *   [ghosty] board up, PSRAM 8xxxxxx bytes free
  *   [01_Blink] hello from Ghosty
  *   heartbeat 1
  *   heartbeat 2
  *   ...
  *
  * What to check:
- *   - Red LED blinks at 1 Hz. The big white flash LED (GPIO4) stays OFF.
- *   - PSRAM is non-zero (Tools > PSRAM: Enabled). If it is 0, later sketches fail.
- *   - If nothing prints: press RESET after upload, and make sure GPIO0 is
- *     no longer tied to GND (or use the ESP32-CAM-MB base board).
+ *   - PSRAM is about 8 MB (Tools > PSRAM: OPI PSRAM). If it is 0, later sketches fail.
+ *   - If nothing prints: use the COM USB-C port with USB CDC On Boot: Disabled,
+ *     and press RST after upload.
  */
 #include <GhostyBoard.h>
 

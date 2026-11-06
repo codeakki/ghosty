@@ -15,7 +15,7 @@ One presenter talks, one drives the laptop. The pod is worn (clip or lanyard) an
 
 | Time | Say | Do | Judges see |
 |---|---|---|---|
-| 0:00–0:10 | "Ghosty is a wearable trading copilot. Private memory, its own wallet, one button. It is not a chatbot with a body: it decides, and it acts." | Hold up the pod. | Hardware: ESP32-CAM, mic, speaker, button. |
+| 0:00–0:10 | "Ghosty is a wearable trading copilot. Private memory, its own wallet, one button. It is not a chatbot with a body: it decides, and it acts." | Hold up the pod. | Hardware: ESP32-S3, mic, speaker, button. |
 | 0:10–0:25 | "Ask it anything." | Hold button: "Ghosty, what's my exposure right now?" Release. | Pod answers out loud. Terminal shows transcript and the **0G Compute request ID**. |
 | 0:25–0:40 | "It's always reading the news and checking who said it." | Trigger the war alert via `POST /button` (the fake news already contains a geopolitical headline). | Terminal: headline, Ethos weight, **x402 payment** for `/signal` settled on Hedera, then a 0G decision with request ID. |
 | 0:40–0:55 | "Now it calls me." | Nothing; wait for the pod. | Pod speaks: "Conflict headline, credible sources. Long gold, short BTC. Press to confirm." Terminal shows the episode written to **0G Storage** with root hash. |

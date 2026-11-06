@@ -11,11 +11,11 @@
  *   (repeats every 3 s)
  *
  * What to check:
- *   - A clean "A" tone, red LED on while it plays, silence in between.
- *   - Silence: check DIN on GPIO12, BCLK 14, LRC 15, amp VIN on 5V, GND.
+ *   - A clean "A" tone, silence in between.
+ *   - Silence: check DIN on GPIO7, BCLK 4, LRC 5, GND, and amp VIN. Measure
+ *     VIN to GND: about 0 V means the 5V pin is dead on USB power; use 3V3.
  *   - Board resets when the tone starts: power brownout. Feed the amp from the
  *     5V boost and add a 470-1000 uF cap (hardware/wiring.md).
- *   - Board boot-loops after wiring the amp: GPIO12 is held HIGH at reset.
  */
 #include <GhostyBoard.h>
 #include <math.h>
