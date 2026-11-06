@@ -1,13 +1,13 @@
 # HTTP API
 
-Contract between the pod (ESP32) and the server. Base URL during development is the laptop's LAN IP, e.g. `http://192.168.1.50:3000`. The scaffold server returns stubbed data; the shapes below match `server/src/app.ts` and are what the real implementation must keep.
+Contract between the pod (ESP32) and the server. Base URL during development is the laptop's LAN IP, e.g. `http://192.168.1.50:3000`. The shapes below match `server/src/app.ts`. In live mode (the default) every answer is real or a `503 not_configured`; fakes exist only under `npm test`.
 
 ## Conventions
 
 | Item | Value |
 |---|---|
 | Auth | `X-Device-Token: <shared secret>` on `/voice` and `/button`, checked only when `DEVICE_TOKEN` is set in `server/.env` (unset = local dev, no check). Must match the token in `firmware/libraries/GhostyBoard/src/secrets.h`. |
-| Errors | JSON `{ "error": "<code>" }`, sometimes with a `"message"` |
+| Errors | JSON `{ "error": "<code>" }`, sometimes with a `"message"`. A provider without keys in live mode answers `503 {"error":"not_configured","provider","missingEnv":[...],"message"}` (see [Run modes](#run-modes-and-not_configured)). |
 | Audio in | `audio/wav` (also `audio/x-wav`, `audio/wave`, `application/octet-stream`): PCM WAV, 16-bit signed little-endian, mono, 16 000 Hz expected. Body limit 4 MB. |
 | Audio out | `application/octet-stream`, raw s16le, 16 000 Hz, mono, no header |
 | Safe-stop | When the brain (0G Compute) is unreachable, `/voice` and `/button` return `503 {"error":"brain_offline"}` and nothing is executed. A 0G call that fails mid-request (`BrainOfflineError`) gives the same 503, with `reason` and the router `requestId`. If the encrypted memory on 0G Storage cannot be loaded or decrypted (`MemoryUnavailableError`), the answer is `503 {"error":"memory_unavailable"}`. The server never falls back to a fake decision. |
@@ -44,6 +44,41 @@ Integration status routes (read-only, no auth). Used by the dashboard; the firmw
 | GET | `/x402/status` | none | x402 spend today vs daily cap, allowlist, HCS topic link, last payment |
 | GET | `/execution/markets` | none | Hyperliquid markets, playbook aliases resolved to real tickers, Uniswap spot-leg config |
 
+Terminal routes (read-only, no auth). Used by the trading terminal; the firmware does not call them.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/providers/status` | none | Health of every provider (live / degraded / offline / not_configured), cached 30 s |
+| GET | `/market/snapshot` | none | Watchlist prices, 24 h change, funding, open interest, volume (Hyperliquid, no keys) |
+| GET | `/market/history` | none | Candles for one coin (main chart) |
+| GET | `/` | none | The built terminal (`terminal/dist`) when it exists, with an SPA fallback |
+
+## Run modes and not_configured
+
+`GHOSTY_MODE` picks how missing keys behave:
+
+| Mode | Set by | Missing keys |
+|---|---|---|
+| `live` (default) | `npm run dev`, `npm start`, `npm run start:live` | The slot is a NotConfigured stand-in: any call answers `503 not_configured`. No fake data, ever. |
+| `test` | `npm test` (sets `GHOSTY_MODE=test`) | Deterministic offline fakes (tone TTS, keyword decider, fake venue, canned headlines). |
+
+```json
+{ "error": "not_configured", "provider": "groq", "missingEnv": ["GROQ_API_KEY"], "message": "groq is not configured: set GROQ_API_KEY" }
+```
+
+| Route (live, no keys) | Answer |
+|---|---|
+| `POST /voice` | `503 not_configured` (`groq`, then `elevenlabs`) before anything else; the terminal shows it |
+| `POST /voice/text`, `/button`, `/news/inject` | `503 brain_offline` (safe-stop: no `OG_API_KEY` means no brain). With `SAFE_STOP_ENABLED=false` the decider itself refuses: `503 {"error":"brain_offline","reason":"not_configured","provider":"0g-router","missingEnv":["OG_API_KEY"]}`; without `OG_PRIVATE_KEY` the 0G Storage memory answers `503 not_configured` (`0g-storage`) |
+| `POST /button` `confirm` | `503 not_configured` (`hyperliquid`) before the pending decision is consumed |
+| `POST /sim/pay-signal` | `503 not_configured` (`hedera-payer`) |
+| `GET /execution/markets` | Real tickers from the keyless Hyperliquid info API; `perpMode: "not_configured"` |
+| `/voice/text` with a brain but no TTS key | `200` with the decision, `audioBytes: 0` and `tts: {"error":"not_configured","provider":"elevenlabs","missingEnv":[...]}` |
+
+News in live mode: RSS and Polymarket are on (`NEWS_LIVE` defaults to `true`), Ethos weights are on (`ETHOS_ENABLED` defaults to `true`), CryptoPanic and Grok join when their keys are set. Headlines from `POST /news/inject` are labelled `source: "manual"`. In test mode both flags default to `false`.
+
+CORS: in live mode the server answers CORS for `CORS_ORIGINS` (default `http://localhost:5173,http://127.0.0.1:5173`, the Vite dev server), including preflight `OPTIONS`.
+
 ---
 
 ## GET /health
@@ -60,7 +95,7 @@ No auth. Used by the device on boot and by the demo dashboard.
 }
 ```
 
-`safeStop: true` means the brain (0G Compute) is unreachable and trading is blocked. The scaffold sets it from `SIMULATE_BRAIN_OFFLINE` (and skips the check when `SAFE_STOP_ENABLED=false`); a real router ping is a TODO in `server/src/safety/safeStop.ts`.
+`safeStop: true` means the brain (0G Compute) is unreachable and trading is blocked. It comes from `server/src/safety/safeStop.ts`: `SIMULATE_BRAIN_OFFLINE` (or `POST /sim/safe-stop`) forces it, `SAFE_STOP_ENABLED=false` skips the check, and otherwise the 0G router is pinged (`GET /models`, cached 10 s). In live mode without `OG_API_KEY` it is always `true`: there is no brain, so nothing trades.
 
 ```bash
 curl -s http://localhost:3000/health
@@ -235,8 +270,10 @@ The virtual pod page, `text/html`. Open `http://localhost:3000/sim`. The microph
 | `alert` | A new alert |
 | `order` | One order entry |
 | `episode` | One episode record |
+| `providers` | Full `/providers/status` body, sent when any provider changes state (polled every 30 s by the running server) |
+| `market` | `{"ts", "mids": {"BTC": 75680.5, "xyz:GOLD": 4068.65, ...}}` for the watchlist, at most once per second |
 
-A `: ping` comment every 15 s keeps the connection open.
+A `: ping` comment every 15 s keeps the connection open. `providers` and `market` come from the running server (`npm run dev` / `npm start`), not from `buildApp`, so tests never see them.
 
 ```bash
 curl -N http://localhost:3000/events
@@ -248,17 +285,17 @@ Body `{"text": "<1–2000 chars>"}`. Runs the voice loop without STT. **200**:
 
 ```json
 { "transcript": "is anything moving gold?", "requestId": "fake-…", "signal": "geopolitical_shock", "confidence": 0.95,
-  "rationale": "...", "actions": [ ... ], "sampleRate": 16000, "audioBytes": 16000, "audioBase64": "<PCM s16le>" }
+  "rationale": "...", "actions": [ ... ], "sampleRate": 16000, "audioBytes": 16000, "audioBase64": "<PCM s16le>", "tts": null }
 ```
 
-Errors: `400 bad_request`, `401`, `503 brain_offline`.
+Errors: `400 bad_request`, `401`, `503 brain_offline`, `503 not_configured`. `tts` is `null` normally, or `{"error":"not_configured", ...}` with empty audio when no TTS key is set in live mode.
 
 ### POST /news/inject
 
 Body `{"title": string, "source"?: string, "url"?: string}`. `source` is the outlet or X handle (e.g. `Reuters`) and is used for credibility scoring. The headline joins the news feed and the decision loop runs with it first. An actionable decision (`signal` not `none`) is queued as an alert and becomes the pending trade for `/button`. **200**:
 
 ```json
-{ "item": { "id": "inject:1", "source": "inject", "title": "...", "url": "", "publishedAt": "...", "handle": "Reuters" },
+{ "item": { "id": "manual:1", "source": "manual", "title": "...", "url": "", "publishedAt": "...", "handle": "Reuters" },
   "decision": { "requestId": "fake-…", "signal": "geopolitical_shock", "confidence": 0.95, "rationale": "...", "actions": [ ... ] },
   "alert": { "id": "alert-1", "status": "pending", ... } }
 ```
@@ -286,7 +323,7 @@ Body `{"enabled": boolean}`. `true` simulates 0G being unreachable (the runtime 
 
 ## Integration status
 
-Read-only snapshots for the dashboard. No device token. Each one works with an empty `.env` and reports `fake` modes.
+Read-only snapshots for the dashboard. No device token. Each one works with an empty `.env`: modes read `not_configured` in live mode and `fake` in test mode.
 
 ### GET /zerog/status
 
@@ -315,7 +352,7 @@ Read-only snapshots for the dashboard. No device token. Each one works with an e
 }
 ```
 
-`computeOnline` follows the same probe as `/health` (router `GET /models`, cached 10 s) and the `/sim/safe-stop` switch. `computeMode` is `fake` without `OG_API_KEY`; `storageMode` is `memory` without `OG_PRIVATE_KEY`. Explorer links point at Galileo unless `OG_RPC_URL` is a mainnet RPC.
+`computeOnline` follows the same probe as `/health` (router `GET /models`, cached 10 s) and the `/sim/safe-stop` switch. Without `OG_API_KEY`, `computeMode` is `not_configured` in live mode (`fake` in test mode); without `OG_PRIVATE_KEY`, `storageMode` is `not_configured` (`memory` in test mode). Explorer links point at Galileo unless `OG_RPC_URL` is a mainnet RPC.
 
 ### GET /x402/status
 
@@ -336,7 +373,7 @@ Read-only snapshots for the dashboard. No device token. Each one works with an e
 }
 ```
 
-`mode` is `fake` without `HEDERA_ACCOUNT_ID` + `HEDERA_PRIVATE_KEY`; the fake payer is charged against an in-memory cap so the numbers still move. The real cap is persisted in `server/.ghosty/spend.json` (UTC day). `hcsTopicUrl` is `null` until the first audit message creates the topic (or `HEDERA_HCS_TOPIC_ID` is set).
+`mode` is `not_configured` in live mode without `HEDERA_ACCOUNT_ID` + `HEDERA_PRIVATE_KEY` (`fake` in test mode, where the fake payer is charged against an in-memory cap so the numbers still move). The real cap is persisted in `server/.ghosty/spend.json` (UTC day). `hcsTopicUrl` is `null` until the first audit message creates the topic (or `HEDERA_HCS_TOPIC_ID` is set).
 
 ### POST /sim/pay-signal
 
@@ -348,6 +385,7 @@ Device token. No body. The agent pays `http://127.0.0.1:$PORT/signal` with no hu
 |---|---|---|
 | 409 | Refused before signing: daily or per-call cap, host not allowlisted, payTo equals the payer | `{"error":"payment_refused","message":"..."}` |
 | 502 | `/signal` did not settle (402 after retry, facilitator down, verify/settle failure) | `{"error":"payment_failed","message":"...","status":402,"reason":"..."}` |
+| 503 | Live mode without the Hedera payer keys | `{"error":"not_configured","provider":"hedera-payer","missingEnv":[...]}` |
 
 ### GET /execution/markets
 
@@ -370,7 +408,83 @@ Query: `dex` (`""` = main dex, `xyz`), `q` (substring of the coin), `limit` (def
 }
 ```
 
-`perpMode` is `fake` without `HL_AGENT_PRIVATE_KEY` + `HL_MASTER_ADDRESS`, `spotMode` is `fake` without `UNISWAP_API_KEY` + `EVM_PRIVATE_KEY`. `spotLeg` is the configured demo pair when `UNISWAP_SPOT_LEG=true`. **502** `{"error":"venue_unavailable"}` when the Hyperliquid info API fails. Asset ids above are illustrative.
+Without `HL_AGENT_PRIVATE_KEY` + `HL_MASTER_ADDRESS`, `perpMode` is `not_configured` in live mode (markets still come from the keyless info API) and `fake` in test mode; `spotMode` likewise without `UNISWAP_API_KEY` + `EVM_PRIVATE_KEY`. `spotLeg` is the configured demo pair when `UNISWAP_SPOT_LEG=true`. **502** `{"error":"venue_unavailable"}` when the Hyperliquid info API fails. Asset ids above are illustrative.
+
+---
+
+## Terminal: providers and market data
+
+### GET /providers/status
+
+Real probes, run in parallel with a 5 s budget each and cached 30 s. Details never contain keys. Same data as `npm run doctor`.
+
+```json
+{
+  "checkedAt": "2026-11-06T08:23:40.030Z",
+  "mode": "live",
+  "providers": [
+    { "id": "x402-facilitator", "label": "x402 facilitator", "track": "hedera", "state": "live",
+      "detail": "hedera:testnet supported (11 kinds)", "missingEnv": [], "lastOkAt": "2026-11-06T08:23:40.030Z", "latencyMs": 1812 },
+    { "id": "hyperliquid", "label": "Hyperliquid perps (execution)", "track": "hyperliquid", "state": "not_configured",
+      "detail": "testnet info API reachable; orders answer 503 not_configured", "missingEnv": ["HL_MASTER_ADDRESS", "HL_AGENT_PRIVATE_KEY"],
+      "latencyMs": 2397, "nextAction": "Approve an API wallet at https://app.hyperliquid-testnet.xyz/API, then set HL_MASTER_ADDRESS + HL_AGENT_PRIVATE_KEY" }
+  ]
+}
+```
+
+`state`: `live` (works), `degraded` (works with a problem, e.g. the `xyz` dex margin is 0 or the wallet has no gas), `offline` (key rejected or endpoint unreachable), `not_configured` (keys missing; `missingEnv` lists them). `track`: `0g`, `hedera`, `uniswap`, `hyperliquid`, `data`, `audio`.
+
+| id | track | Probe |
+|---|---|---|
+| `0g-router` | 0g | `GET <OG_ROUTER_URL>/models` (no auth) + whether `OG_API_KEY` is set and `OG_MODEL` is listed |
+| `0g-storage` | 0g | 0G balance of the `OG_PRIVATE_KEY` address via `OG_RPC_URL` (`eth_getBalance`) |
+| `hedera-payer` | hedera | Mirror node `GET /api/v1/accounts/{HEDERA_ACCOUNT_ID}` balance |
+| `hedera-merchant` | hedera | Mirror node account for `X402_PAY_TO` (must differ from the payer) |
+| `x402-facilitator` | hedera | `GET <X402_FACILITATOR_URL>/supported` lists `hedera:<network>` |
+| `hcs-audit` | hedera | Topic from `HEDERA_HCS_TOPIC_ID` or `.ghosty/hcs.json`, checked on the mirror node |
+| `hyperliquid` | hyperliquid | `clearinghouseState` for `HL_MASTER_ADDRESS` on the main dex and each `HL_DEXES` dex (USDC margin per dex, degraded when `xyz` is 0) + `extraAgents` contains the agent address |
+| `uniswap` | uniswap | `UNISWAP_API_KEY` present + native balance of the EVM wallet on `EVM_CHAIN_ID` |
+| `rss` | data | Each feed fetched; `n/m feeds reachable` |
+| `polymarket` | data | Gamma `/events` reachable (offline on many Indian ISPs; the hint says so) |
+| `cryptopanic`, `ethos`, `xai` | data | One authenticated read each |
+| `groq`, `elevenlabs`, `openai-tts` | audio | `GET models` / `GET /v1/user` (falls back to `/v1/voices` for restricted keys) |
+
+### GET /market/snapshot
+
+Hyperliquid info API, no keys. Prices come from `MARKET_DATA_NETWORK` (default `mainnet`, read-only); orders follow `HL_TESTNET`. Both are labelled. Watchlist: `MARKET_WATCHLIST` (default `BTC,ETH,SOL,xyz:GOLD,xyz:CL,xyz:TSLA,xyz:NVDA,xyz:SPX`). Coins that do not exist (or are delisted) on the network are listed in `missing`, never invented; the S&P 500 perp on trade.xyz is `xyz:SP500`, so the default `xyz:SPX` shows up there.
+
+```json
+{
+  "network": "mainnet",
+  "executionNetwork": "testnet",
+  "ts": "2026-11-06T08:23:47.895Z",
+  "source": "ws",
+  "assets": [
+    { "coin": "BTC", "dex": "", "label": "Bitcoin", "mid": 75680.5, "prevDayPx": 80567, "change24hPct": -6.07,
+      "funding": 0.0000125, "openInterest": 41538.6, "openInterestUsd": 3143700000, "volume24h": 4958598322 },
+    { "coin": "xyz:GOLD", "dex": "xyz", "label": "Gold", "mid": 4068.65, "prevDayPx": 4123.6, "change24hPct": -1.33,
+      "funding": 0.00000625, "openInterest": 74861.43, "openInterestUsd": 304586000, "volume24h": 117141360 }
+  ],
+  "missing": ["xyz:SPX"]
+}
+```
+
+`mid` comes from the `allMids` websocket (one subscription per dex, reconnect with backoff; `allMids` polled every 2 s while the socket is down). `prevDayPx`, `funding` (hourly rate), `openInterest` (coin units) and `volume24h` (`dayNtlVlm`, USD) come from `metaAndAssetCtxs`, refreshed every 30 s. `change24hPct = (mid − prevDayPx) / prevDayPx × 100`. `source` is `ws`, `poll`, or `rest` (fetched on demand before the stream starts). **502** `{"error":"market_unavailable"}` when the info API fails.
+
+### GET /market/history
+
+Query: `coin` (required, e.g. `BTC`, `xyz:GOLD`), `interval` (`1m 3m 5m 15m 30m 1h 2h 4h 8h 12h 1d 3d 1w 1M`, default `1h`), `hours` (default 24, max 2160). From `candleSnapshot`.
+
+```json
+{ "network": "mainnet", "coin": "BTC", "interval": "1h",
+  "candles": [{ "t": 1793865600000, "o": 80359, "h": 80636, "l": 80346, "c": 80492, "v": 671.36, "n": 7444 }] }
+```
+
+`t` is the open time in ms, `v` base-asset volume, `n` trade count. **400** bad query, **404** `{"error":"unknown_coin"}`, **502** `market_unavailable`.
+
+### GET / (terminal)
+
+When `terminal/dist/index.html` exists (or `TERMINAL_DIST` points at a built dist), the server serves it at `/`. API routes keep their paths and win over static files. Other `GET`s that accept `text/html` get `index.html` (client-side routing); anything else keeps the JSON 404. `/sim` still serves the virtual pod.
 
 ---
 
