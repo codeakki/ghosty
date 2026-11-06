@@ -112,8 +112,9 @@ export class ProviderRegistry {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
-        controller.abort();
+        // Reject first so the race reports the timeout, then abort the probe's requests.
         reject(Object.assign(new Error('timed out'), { name: 'TimeoutError' }));
+        controller.abort();
       }, this.timeoutMs);
     });
     let result: ProbeResult;

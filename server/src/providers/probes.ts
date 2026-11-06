@@ -58,8 +58,23 @@ interface HttpResult {
   body: unknown;
 }
 
+/** One request attempt may use this much of the probe's 5 s budget, so the probe sees its own timeout. */
+export const ATTEMPT_TIMEOUT_MS = 4_500;
+
+const isTimeout = (err: unknown) => err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError');
+
+/** fetch with a per-attempt timeout; a fast connection error (reset, refused) is retried once. */
 async function http(ctx: ProbeContext, url: string, init: RequestInit = {}): Promise<HttpResult> {
-  const res = await ctx.fetch(url, { ...init, signal: ctx.signal });
+  try {
+    return await attempt(ctx, url, init);
+  } catch (err) {
+    if (isTimeout(err) || ctx.signal.aborted) throw err;
+    return attempt(ctx, url, init);
+  }
+}
+
+async function attempt(ctx: ProbeContext, url: string, init: RequestInit): Promise<HttpResult> {
+  const res = await ctx.fetch(url, { ...init, signal: AbortSignal.any([ctx.signal, AbortSignal.timeout(ATTEMPT_TIMEOUT_MS)]) });
   const text = await res.text().catch(() => '');
   let body: unknown = text;
   try {
@@ -189,16 +204,17 @@ const zeroGRouter: ProviderProbe = {
     try {
       res = await http(ctx, `${base}/models`);
     } catch (err) {
-      return {
-        state: 'offline',
-        detail: `router unreachable: ${describeError(err)}`,
-        missingEnv: ctx.config.OG_API_KEY ? [] : ['OG_API_KEY'],
-        nextAction: testnet
-          ? 'Testnet router TLS is flaky: try OG_ROUTER_URL=https://router-api.0g.ai/v1 with a key from https://pc.0g.ai'
-          : `Check OG_ROUTER_URL; keys at ${keyUrl}`,
-      };
+      const detail = `router unreachable: ${describeError(err)}`;
+      const nextAction = testnet
+        ? 'Testnet router TLS is flaky: try OG_ROUTER_URL=https://router-api.0g.ai/v1 with a key from https://pc.0g.ai'
+        : `Check OG_ROUTER_URL; keys at ${keyUrl}`;
+      if (!ctx.config.OG_API_KEY) return notConfigured(['OG_API_KEY'], `${detail}; decisions safe-stop until OG_API_KEY is set`, nextAction);
+      return { state: 'offline', detail, nextAction };
     }
-    if (!res.ok) return { ...httpFailure('0G Router', res), missingEnv: ctx.config.OG_API_KEY ? [] : ['OG_API_KEY'] };
+    if (!res.ok) {
+      if (!ctx.config.OG_API_KEY) return notConfigured(['OG_API_KEY'], `router answered ${res.status}; decisions safe-stop`, `Keys at ${keyUrl}`);
+      return httpFailure('0G Router', res);
+    }
     const ids = ((res.body as { data?: Array<{ id?: string }> })?.data ?? []).map((m) => m.id);
     const hasModel = ids.includes(ctx.config.OG_MODEL);
     const models = `${ids.length} models${hasModel ? `, ${ctx.config.OG_MODEL} listed` : `, ${ctx.config.OG_MODEL} NOT listed`}`;
@@ -329,8 +345,10 @@ const hyperliquid: ProviderProbe = {
     const miss = [...(master ? [] : ['HL_MASTER_ADDRESS']), ...(agentKey ? [] : ['HL_AGENT_PRIVATE_KEY'])];
     if (!master) {
       // Reachability still tells the user the venue itself is fine.
-      const res = await postJson(ctx, url, { type: 'perpDexs' });
-      const reach = res.ok ? `${net} info API reachable` : `${net} info API answered ${res.status}`;
+      const reach = await postJson(ctx, url, { type: 'perpDexs' }).then(
+        (res) => (res.ok ? `${net} info API reachable` : `${net} info API answered ${res.status}`),
+        (err: unknown) => `${net} info API unreachable (${describeError(err)})`,
+      );
       return notConfigured(miss, `${reach}; orders answer 503 not_configured`, `Approve an API wallet at ${app}/API, then set HL_MASTER_ADDRESS + HL_AGENT_PRIVATE_KEY`);
     }
     const dexes = ['', ...config.HL_DEXES.split(',').map((d) => d.trim()).filter(Boolean)];
