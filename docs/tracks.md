@@ -73,23 +73,52 @@ Source: https://ethglobal.com/events/mumbai/prizes, fetched 2026-11-05. Requirem
 - [ ] Not on the "not wanted" list: not a chatbot with a body, not 0G only for logs
 - [ ] Submission: public repo, README, video **< 3 min**, live link, contract addresses (if any), team Telegram / X
 
+#### 0G evidence: where it lives
+
+Code is on `feat/server-0g`. Items stay unchecked until they run with real keys and the demo route is wired.
+
+| Requirement | Code | Runtime evidence |
+|---|---|---|
+| 0G Compute in the decision loop | `server/src/agent/decide.ts` → `ZeroGDecider` (picked by `createAgent()` in `server/src/agent/index.ts` when `OG_API_KEY` is set) | Log line `0G compute response` with `requestId`, `completionId`, `traceRequestId`, `headerRequestId`, `provider` |
+| Request ID per decision | `Decision.requestId` (= `x_0g_trace.request_id`), `Decision.zeroG` | `x-request-id` header on `/voice`; `requestId` in each episode blob and in `server/.ghosty/episodes.jsonl` |
+| Episode per decision on 0G Storage | `server/src/agent/episode.ts` → `ZeroGEpisodeLog` | `server/.ghosty/episodes.jsonl` lines `{ts, requestId, rootHash, txHash, sha256}`; open the `txHash` on chainscan-galileo, the `rootHash` on storagescan-galileo; `verify(rootHash)` re-downloads and checks |
+| Encrypted memory on 0G Storage | `server/src/agent/memory.ts` → `ZeroGMemory`, `server/src/agent/crypto.ts` (AES-256-GCM) | `server/.ghosty/memory.json` `{rootHash, txHash}`; the blob on storagescan is ciphertext |
+| Safe-stop | `server/src/safety/safeStop.ts` (`GET /models` probe, 10 s cache, `reportBrainFailure`), `BrainOfflineError` | `/health.safeStop`; `SIMULATE_BRAIN_OFFLINE=true` or a bad router URL → 503 `brain_offline` |
+| Status for the demo | `zeroGStatus()` in `server/src/agent/index.ts` | To be exposed as `GET /zerog/status` by the app/simulator branch |
+| Tests | `server/test/0g-*.test.ts` | `npm test` (offline, no keys) |
+
+Details, endpoints and gas numbers: [research/0g.md → Implementation notes](research/0g.md#implementation-notes).
+
 ### 2. Hedera x402
 
-- [ ] x402 endpoint (`GET /signal`) settling on `hedera:testnet` through a listed facilitator
-- [ ] Agent wallet pays at least once with **no human approval**
-- [ ] Settled **tx ID** in README with HashScan link
-- [ ] Architecture + payment-flow diagram in README
+- [x] x402 endpoint (`GET /signal`) settling on `hedera:testnet` through a listed facilitator. Evidence: `server/src/payments/x402Server.ts` (`registerPaidRoutes`; `@x402/core` resource server + `@x402/hedera` exact scheme, facilitator `https://x402.org/facilitator`); 402 payload in [api.md](api.md#get-signal-x402-on-hedera); tests in `server/test/x402.test.ts`. Live settlement needs a funded account (see next item).
+- [ ] Agent wallet pays at least once with **no human approval**. Code done: `server/src/payments/x402Client.ts` (`@x402/fetch` + Hedera signer). To finish: fund two testnet accounts, run `npm run x402:demo`, and a row lands in [evidence.md](evidence.md).
+- [ ] Settled **tx ID** in README with HashScan link (copy the first row of [evidence.md](evidence.md))
+- [ ] Architecture + payment-flow diagram in README (flow diagram ready in [api.md](api.md#get-signal-x402-on-hedera))
 - [ ] Video **≤ 5 min** showing the HashScan link
-- [ ] Extra credit (pick what is cheap): spend cap / `payTo` allowlist, HCS audit topic for payments, USDC via HTS, Agent Kit
+- [x] Extra credit: spend controls, done in `server/src/payments/spendControls.ts` + `x402Client.ts`. Covers the host allowlist `X402_ALLOWED_HOSTS`, the per-call cap `X402_MAX_PER_CALL_TINYBAR` and the daily cap `X402_MAX_SPEND_TINYBAR`, persisted in `server/.ghosty/spend.json`. The agent also refuses to pay its own account.
+- [x] Extra credit: HCS audit topic, done in `server/src/payments/hcsAudit.ts`. Each payment and each trade decision becomes one message; the topic link is printed by `x402:demo`. Not yet run on testnet.
+- [ ] Extra credit, not done: USDC via HTS, Agent Kit
 
 ### 3. Uniswap
 
-- [ ] At least one real call path through the Uniswap stack (Trading API: `check_approval` → `quote` → `swap`, signed with viem)
+- [x] At least one real call path through the Uniswap stack (Trading API: `check_approval` → `quote` → `swap`, signed with viem). Code + mocked tests done; live run pending an API key.
 - [ ] A real swap tx hash from the demo
 - [ ] Public repo
-- [ ] `FEEDBACK.md` filled with real friction we hit
+- [ ] `FEEDBACK.md` filled with real friction we hit (docs-based notes in; live-testing items marked TODO)
 - [ ] Feedback form submitted: https://developers.uniswap.org/hackathon-feedback
-- [ ] README points at the exact Uniswap code lines (file + line range)
+- [ ] README points at the exact Uniswap code lines (file + line range). Line ranges are in `FEEDBACK.md`; copy them to the README.
+
+#### Uniswap evidence
+
+| Item | Where | Status |
+|---|---|---|
+| Trading API flow (`check_approval` → approve → `quote` → Permit2 sign → `swap` → send) | [`server/src/wallet/uniswap.ts` L176–L239](../server/src/wallet/uniswap.ts#L176-L239) | Implemented, unit-tested with mocked API + wallet |
+| viem account / chain (derived address, `EVM_CHAIN_ID` default 84532) | [`server/src/wallet/account.ts`](../server/src/wallet/account.ts) | Implemented |
+| Spot leg runs before the perp legs | [`server/src/execution/executor.ts`](../server/src/execution/executor.ts), `planSteps` in [`playbook.ts`](../server/src/execution/playbook.ts) | Implemented; pipeline wiring is a follow-up |
+| Tests | [`server/test/uniswap.test.ts`](../server/test/uniswap.test.ts) | Approval and no-approval paths, errors |
+| Swap tx hash (Base Sepolia) | _TODO: BaseScan link_ | Needs `UNISWAP_API_KEY` + funded `EVM_PRIVATE_KEY` |
+| Feedback | [`FEEDBACK.md`](../FEEDBACK.md) | Draft; live-testing TODOs |
 
 ### Stretch: Arkiv from scratch + Swarm bonus
 

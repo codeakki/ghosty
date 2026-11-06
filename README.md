@@ -115,11 +115,40 @@ Requires Node 22+ and npm.
 cd server
 cp .env.example .env   # fill in keys as you need each provider
 npm ci
-npm run dev
+npm run doctor         # which providers are live, and the exact URL for each missing key
+npm run dev            # or: npm run start:live (build + start)
 curl localhost:3000/health
 ```
 
-Every provider ships as a deterministic stub, so the server runs with an empty `.env`.
+### Live mode vs test mode
+
+The server runs on **real data only**. `GHOSTY_MODE=live` is the default: each provider is the real implementation when its keys are in `server/.env` (template: [`server/.env.example`](server/.env.example)), and otherwise answers `503 {"error":"not_configured","provider","missingEnv"}`. Nothing is faked: without `OG_API_KEY` there is no brain, so safe-stop is engaged and no decision is made. Keyless sources are on by default in live mode: RSS + Polymarket news (`NEWS_LIVE=true`), Ethos credibility (`ETHOS_ENABLED=true`) and Hyperliquid market data.
+
+`GHOSTY_MODE=test` is set by `npm test` only. It swaps in deterministic offline fakes (tone TTS, keyword decider, fake venue, canned headlines) so the suite never touches the network.
+
+| Provider | Keys that enable it | Where to get them | Live mode without them |
+|---|---|---|---|
+| Speech-to-text (Groq Whisper) | `GROQ_API_KEY` | https://console.groq.com/keys | `/voice` answers `503 not_configured` |
+| Text-to-speech (ElevenLabs) | `ELEVENLABS_API_KEY` (optional `ELEVENLABS_VOICE_ID`) | https://elevenlabs.io/app/settings/api-keys | OpenAI TTS if `OPENAI_API_KEY` is set, else `503 not_configured` |
+| Text-to-speech fallback (OpenAI) | `OPENAI_API_KEY` | https://platform.openai.com/api-keys | Optional |
+| Live news (RSS + Polymarket) | none (`NEWS_LIVE=true` by default) | n/a | Polymarket is blocked on many Indian ISPs: it shows `offline` |
+| CryptoPanic | `CRYPTOPANIC_TOKEN` | https://cryptopanic.com/developers/api/ | Left out of the feed |
+| Grok x_search (X posts) | `XAI_API_KEY` | https://console.x.ai | Left out of the feed |
+| Ethos credibility | none (`ETHOS_ENABLED=true` by default) | n/a | Weights unknown if disabled |
+| 0G Compute decider | `OG_API_KEY` (+ `OG_ROUTER_URL`, `OG_MODEL`) | https://pc.0g.ai (mainnet) or https://pc.testnet.0g.ai | Safe-stop: `503 brain_offline`, no decision |
+| 0G Storage memory + episode log | `OG_PRIVATE_KEY` (optional `OG_MEMORY_KEY`) | Any EVM key, funded at https://faucet.0g.ai | `503 not_configured` |
+| Hedera x402 payer + HCS audit | `HEDERA_ACCOUNT_ID`, `HEDERA_PRIVATE_KEY` | https://portal.hedera.com (testnet faucet) | `/sim/pay-signal` answers `503 not_configured` |
+| Paid `GET /signal` (merchant) | `X402_PAY_TO` (a **second** testnet account) | https://portal.hedera.com | `503 payments_not_configured` |
+| Hyperliquid perps | `HL_MASTER_ADDRESS`, `HL_AGENT_PRIVATE_KEY` (+ `HL_TESTNET`, `HL_DEXES`, `HL_FALLBACK_COINS`) | API wallet approved at https://app.hyperliquid-testnet.xyz/API | Confirm answers `503 not_configured`; market listing stays real |
+| Uniswap spot leg | `UNISWAP_API_KEY`, `EVM_PRIVATE_KEY`, `UNISWAP_SPOT_LEG=true` (+ `EVM_RPC_URL`, `EVM_CHAIN_ID`) | https://developers.uniswap.org/dashboard | Spot step fails with `not_configured` |
+
+**Doctor.** `npm run doctor` loads `server/.env`, runs the same probes as `GET /providers/status`, and prints a table per track (state, detail, missing env, next action with the URL to get the key). It never prints secrets and always exits 0.
+
+**Terminal.** `GET /providers/status` (provider health), `GET /market/snapshot` and `GET /market/history` (Hyperliquid prices with no keys; `MARKET_DATA_NETWORK=mainnet` by default for display, orders follow `HL_TESTNET`), plus SSE `providers` and `market` events on `/events`. When `terminal/dist/index.html` exists the server serves the terminal at `/` (`TERMINAL_DIST` overrides the path); CORS allows the Vite dev server at `http://localhost:5173` in live mode. See [docs/api.md](docs/api.md#terminal-providers-and-market-data).
+
+Status endpoints show which mode each integration is in: `GET /zerog/status`, `GET /x402/status`, `GET /execution/markets` (see [docs/api.md](docs/api.md#integration-status)). Pre-flight checks: `npm run doctor`, `npm run hl:check` (Hyperliquid markets and margin, read-only) and `npm run x402:demo` (one real paid `/signal`, appended to [docs/evidence.md](docs/evidence.md)).
+
+No pod yet? Open http://localhost:3000/sim for the virtual pod (hold-to-talk, inject headlines, confirm trades, live state), or use `npm run pod -- help`. See [docs/simulator.md](docs/simulator.md).
 
 ## Sketch roadmap
 

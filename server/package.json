@@ -10,16 +10,31 @@
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "pod": "tsx src/cli/pod.ts",
     "start": "node dist/index.js",
     "build": "tsc -p tsconfig.build.json",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "node --test --import tsx test/*.test.ts"
+    "test": "GHOSTY_MODE=test node --test --import tsx test/*.test.ts",
+    "x402:demo": "tsx src/scripts/x402Demo.ts",
+    "hl:check": "tsx src/scripts/hlCheck.ts",
+    "doctor": "tsx src/scripts/doctor.ts",
+    "start:live": "npm run build && GHOSTY_MODE=live node dist/index.js"
   },
   "dependencies": {
+    "@0gfoundation/0g-storage-ts-sdk": "^1.2.13",
+    "@fastify/static": "^10.1.10",
+    "@hiero-ledger/sdk": "2.90.1",
+    "@nktkas/hyperliquid": "^0.33.3",
+    "@x402/core": "~2.30.0",
+    "@x402/fetch": "~2.30.0",
+    "@x402/hedera": "~2.30.0",
     "dotenv": "^17.4.2",
+    "ethers": "^6.13.1",
     "fastify": "^5.12.8",
+    "openai": "^7.52.0",
     "pino-pretty": "^13.2.0",
+    "viem": "^2.57.16",
     "zod": "^4.6.7"
   },
   "devDependencies": {

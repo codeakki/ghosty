@@ -1,5 +1,13 @@
+import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { z } from 'zod';
+import { decryptJson, encryptJson } from './crypto.js';
+import { errorMessage, noopLogger, type Logger } from './log.js';
+import { updateZeroGState } from './status.js';
+import { DEFAULT_DATA_DIR, ensureDataDir, SerialQueue, type BlobStore, type StoredBlob } from './storage.js';
+
 /**
- * Private, user-owned memory. Target: an AES-256 encrypted blob on 0G Storage (0G Physical AI track).
+ * Private, user-owned memory: an AES-256-GCM encrypted blob on 0G Storage (0G Physical AI track).
  */
 
 export type RiskProfile = 'conservative' | 'balanced' | 'aggressive';
@@ -48,11 +56,148 @@ export class InMemoryMemoryStore implements MemoryStore {
   }
 }
 
-// TODO(0g): ZeroGMemoryStore backed by 0G Storage with built-in encryption.
-// Package: @0gfoundation/0g-storage-ts-sdk (peer: ethers). NOT @0glabs/0g-ts-sdk. Not installed yet.
-// Indexer: OG_INDEXER_URL (https://indexer-storage-testnet-turbo.0g.ai), RPC https://evmrpc-testnet.0g.ai (chain 16602).
-// Signer: new ethers.Wallet(OG_PRIVATE_KEY, new ethers.JsonRpcProvider(RPC)).
-// save(): serialize JSON → ZgFile → file.merkleTree() → indexer.upload(file, RPC, signer, { encryption: { type: 'aes256', key } })
-//         keep the returned rootHash as the pointer (locally, or later in the agent's iNFT / ERC-7857 metadata).
-// load(): indexer.downloadToBlob(rootHash, { decryption key }) → JSON. Wrong key silently returns ciphertext,
-//         so validate the JSON shape and fall back to defaultMemory() on failure.
+// ---------------------------------------------------------------------------
+// 0G Storage memory
+// ---------------------------------------------------------------------------
+
+export const UserMemorySchema = z.object({
+  preferences: z.record(z.string(), z.union([z.string(), z.array(z.string())])),
+  riskProfile: z.enum(['conservative', 'balanced', 'aggressive']),
+  history: z.array(z.object({ at: z.string(), requestId: z.string(), signal: z.string(), outcome: z.string() })),
+});
+
+/** Plaintext inside the encrypted blob. */
+const MemoryEnvelopeSchema = z.object({
+  v: z.literal(1),
+  kind: z.literal('ghosty.memory'),
+  userId: z.string(),
+  savedAt: z.string(),
+  memory: UserMemorySchema,
+});
+
+export interface MemoryPointer extends StoredBlob {
+  savedAt: string;
+}
+
+interface MemoryCacheFile {
+  v: 1;
+  users: Record<string, MemoryPointer>;
+}
+
+export class MemoryUnavailableError extends Error {
+  override readonly name = 'MemoryUnavailableError';
+}
+
+export interface ZeroGMemoryOptions {
+  store: BlobStore;
+  /** 32-byte AES-256-GCM key (see deriveMemoryKey). */
+  key: Uint8Array;
+  /** Holds memory.json with the latest root hash per user. Default server/.ghosty */
+  dataDir?: string;
+  logger?: Logger;
+  /** Await the 0G upload inside save(). Default false: upload runs in the background, flush() waits for it. */
+  waitForUpload?: boolean;
+}
+
+/**
+ * User memory on 0G Storage. Every save() encrypts the JSON with AES-256-GCM and uploads it; the newest
+ * {rootHash, txHash} per user is kept in <dataDir>/memory.json. load() downloads by root hash and decrypts.
+ * Saves are coalesced: if several land while an upload is queued, only the latest state is uploaded.
+ */
+export class ZeroGMemory implements MemoryStore {
+  private readonly cachePath: string;
+  private readonly pointers: Record<string, MemoryPointer>;
+  /** Latest known plaintext per user in this process; avoids a download per decision. */
+  private readonly live = new Map<string, UserMemory>();
+  private readonly scheduled = new Set<string>();
+  private readonly queue = new SerialQueue();
+  private readonly logger: Logger;
+
+  constructor(private readonly opts: ZeroGMemoryOptions) {
+    const dir = ensureDataDir(opts.dataDir ?? DEFAULT_DATA_DIR);
+    this.cachePath = join(dir, 'memory.json');
+    this.pointers = readCache(this.cachePath).users;
+    this.logger = opts.logger ?? noopLogger;
+    const latest = Object.values(this.pointers).sort((a, b) => b.savedAt.localeCompare(a.savedAt))[0];
+    if (latest) updateZeroGState({ memoryRootHash: latest.rootHash, memoryTxHash: latest.txHash });
+  }
+
+  pointer(userId: string): MemoryPointer | undefined {
+    return this.pointers[userId];
+  }
+
+  async load(userId: string): Promise<UserMemory> {
+    const cached = this.live.get(userId);
+    if (cached) return structuredClone(cached);
+
+    const ptr = this.pointers[userId];
+    if (!ptr) return defaultMemory();
+
+    let memory: UserMemory;
+    try {
+      const blob = await this.opts.store.download(ptr.rootHash);
+      const envelope = MemoryEnvelopeSchema.parse(decryptJson(this.opts.key, blob));
+      if (envelope.userId !== userId) throw new Error(`blob belongs to ${envelope.userId}`);
+      memory = envelope.memory;
+    } catch (err) {
+      // Loud on purpose: silently resetting to defaults would change the user's risk profile.
+      this.logger.error({ userId, rootHash: ptr.rootHash, err: errorMessage(err) }, '0G memory load failed');
+      throw new MemoryUnavailableError(`memory ${ptr.rootHash} could not be loaded: ${errorMessage(err)}`, { cause: err });
+    }
+    this.live.set(userId, memory);
+    this.logger.info({ userId, rootHash: ptr.rootHash }, '0G memory loaded');
+    return structuredClone(memory);
+  }
+
+  async save(userId: string, memory: UserMemory): Promise<void> {
+    const trimmed: UserMemory = structuredClone({ ...memory, history: memory.history.slice(-MAX_HISTORY) });
+    this.live.set(userId, trimmed);
+    const job = this.scheduleUpload(userId);
+    if (this.opts.waitForUpload) await job;
+  }
+
+  /** Wait for queued uploads (shutdown, tests, demo script). */
+  async flush(): Promise<void> {
+    await this.queue.idle();
+  }
+
+  private scheduleUpload(userId: string): Promise<void> {
+    if (this.scheduled.has(userId)) return this.queue.idle();
+    this.scheduled.add(userId);
+    return this.queue
+      .run(async () => {
+        this.scheduled.delete(userId);
+        const memory = this.live.get(userId);
+        if (!memory) return;
+        const savedAt = new Date().toISOString();
+        const blob = encryptJson(this.opts.key, { v: 1, kind: 'ghosty.memory', userId, savedAt, memory });
+        const stored = await this.opts.store.upload(blob, `memory-${userId}`);
+        this.pointers[userId] = { ...stored, savedAt };
+        writeCache(this.cachePath, { v: 1, users: this.pointers });
+        updateZeroGState({ memoryRootHash: stored.rootHash, memoryTxHash: stored.txHash, lastStorageError: null });
+        this.logger.info({ userId, ...stored }, '0G memory saved');
+      })
+      .catch((err: unknown) => {
+        updateZeroGState({ lastStorageError: `memory: ${errorMessage(err)}` });
+        this.logger.error({ userId, err: errorMessage(err) }, '0G memory upload failed; will retry on next save');
+        if (this.opts.waitForUpload) throw err;
+      });
+  }
+}
+
+function readCache(path: string): MemoryCacheFile {
+  if (!existsSync(path)) return { v: 1, users: {} };
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<MemoryCacheFile>;
+    return { v: 1, users: parsed.users ?? {} };
+  } catch {
+    return { v: 1, users: {} };
+  }
+}
+
+function writeCache(path: string, data: MemoryCacheFile): void {
+  const tmp = `${path}.tmp`;
+  writeFileSync(tmp, JSON.stringify(data, null, 2));
+  renameSync(tmp, path);
+}
+
