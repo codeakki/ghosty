@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent } from 'react';
 import type { Alert } from '../../api/types';
 import type { LiveApi } from '../useLive';
-import { coinName, formatConfidencePct, legText } from '../words';
+import { coinName, formatConfidencePct, formatUsdAmount, legText } from '../words';
 import { modeLabel, type DeviceState } from './machine';
 import { Orb } from './Orb';
 import { useDevice, voiceReadiness } from './useDevice';
@@ -116,7 +116,7 @@ export function DevicePage({ api, full = false }: { api: LiveApi; full?: boolean
       {/* One fixed-height slot for the trade card or the caption: nothing below it moves when an alert arrives. */}
       <div className="lv-device-info">
         {alert && device.mode === 'alert' ? (
-          <AlertCard alert={alert} labels={labels} />
+          <AlertCard alert={alert} labels={labels} realUsd={alert.sim && api.sim.run?.execution.liveOrders ? api.sim.run.execution.orderUsd : null} />
         ) : (
           <figure className="lv-caption" aria-live="polite">
             {device.caption ? (
@@ -218,14 +218,21 @@ export function DevicePage({ api, full = false }: { api: LiveApi; full?: boolean
   );
 }
 
-function AlertCard({ alert, labels }: { alert: Alert; labels: Record<string, string> }) {
+/** `realUsd`: the sim run also places real Hyperliquid mainnet orders of this size per leg. */
+function AlertCard({ alert, labels, realUsd }: { alert: Alert; labels: Record<string, string>; realUsd: number | null }) {
   const leg = alert.actions[0];
+  const kicker = !alert.sim ? 'Pending trade' : realUsd !== null ? 'Simulation · paper + REAL mainnet order' : 'Paper trade (simulation)';
+  const legLine = !leg
+    ? 'No trade attached'
+    : alert.sim
+      ? `${leg.side === 'long' ? 'Long' : 'Short'} ${coinName(leg.coin, labels)} · ${formatUsdAmount(leg.sizeUsd)} paper${realUsd !== null ? ` + ${formatUsdAmount(realUsd)} real` : ''}`
+      : legText(leg, labels);
   return (
-    <div className="lv-alert" role="alert">
+    <div className="lv-alert" role="alert" data-real={realUsd !== null ? 'true' : undefined}>
       <p className="lv-alert-kicker">
-        <span aria-hidden="true">●</span> {alert.sim ? 'Paper trade (simulation)' : 'Pending trade'} · confidence {formatConfidencePct(alert.confidence)}
+        <span aria-hidden="true">●</span> {kicker} · confidence {formatConfidencePct(alert.confidence)}
       </p>
-      <p className="lv-alert-leg">{leg ? legText(leg, labels) : 'No trade attached'}</p>
+      <p className="lv-alert-leg">{legLine}</p>
       {alert.actions.length > 1 ? (
         <p className="lv-alert-more">+ {alert.actions.slice(1).map((a) => `${a.side} ${coinName(a.coin, labels)}`).join(', ')}</p>
       ) : null}

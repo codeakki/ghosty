@@ -95,6 +95,9 @@ export interface OrderEntry {
   requestId: string;
   at: string;
   sim?: SimTag;
+  /** A REAL order placed from a simulation run (Hyperliquid mainnet), as opposed to its paper fill. */
+  live?: boolean;
+  network?: 'mainnet' | 'testnet';
 }
 
 export interface SwapResult {
@@ -423,9 +426,14 @@ export interface SimScenario {
   id: string;
   title: string;
   description: string;
+  /** "geopolitical shock", "hack", "regulatory"… */
+  category: string | null;
   start: string;
   end: string;
+  /** Hyperliquid coin names ("BTC", "xyz:GOLD"). */
   markets: string[];
+  /** coin → what stands in for its history ("PAXG (gold-backed token) as the gold price"). */
+  proxies: Record<string, string>;
   headlines: SimHeadline[];
 }
 
@@ -440,20 +448,77 @@ export interface SimPosition {
   pnlUsd: number;
 }
 
+/** One headline the run has played and what the brain did with it. */
+export interface SimDecisionRow {
+  simTime: string;
+  headline: string;
+  requestId: string | null;
+  signal: Signal | null;
+  confidence: number | null;
+  /** Why no decision was made. */
+  skipped: 'no_shock' | 'brain_offline' | 'error' | null;
+  /** Server's reason when skipped for brain_offline / error. */
+  error: string | null;
+  actions: number;
+}
+
+/** A real Hyperliquid mainnet order placed from a sim run. */
+export interface SimLiveOrder {
+  orderId: string;
+  coin: string;
+  isBuy: boolean;
+  sizeUsd: number;
+  status: OrderStatus;
+  avgPx?: number;
+  url?: string;
+  error?: string;
+  requestId: string;
+  placedAt: string;
+}
+
+/** Paper always; plus real orders on Hyperliquid mainnet when the run opted in. */
+export interface SimExecution {
+  /** This run also sends confirmed legs to Hyperliquid mainnet. */
+  liveOrders: boolean;
+  /** The server allows real orders (SIM_LIVE_ORDERS on, mainnet keys set). */
+  available: boolean;
+  /** Why real orders are unavailable. */
+  unavailable: string | null;
+  orderUsd: number;
+  maxRunUsd: number;
+  spentUsd: number;
+  orders: SimLiveOrder[];
+}
+
 /** GET /sim/run and SSE `sim`. */
 export interface SimRun {
   runId: string;
   scenarioId: string;
   status: SimStatus;
+  pauseReason: 'user' | 'awaiting_press' | null;
   /** Historical clock of the run (ISO). */
   simTime: string;
+  start: string;
+  end: string;
   /** 0..1. */
   progress: number;
+  /** Market seconds per real second. */
+  speed: number;
+  /** Capital base for the percentages (MAX_TRADE_USD). 0 when the server does not say. */
+  notionalUsd: number;
   pnlUsd: number;
   baselinePnlUsd: number;
+  /** null when the server does not send it. */
+  pnlPct: number | null;
+  baselinePct: number | null;
   positions: SimPosition[];
   decisions: number;
+  decisionList: SimDecisionRow[];
   episodes: number;
+  headlines: { total: number; delivered: number };
+  pending: { requestId: string; headline: string; actions: PlannedAction[] } | null;
+  execution: SimExecution;
+  error: string | null;
 }
 
 export type SimAction = 'pause' | 'resume' | 'stop';

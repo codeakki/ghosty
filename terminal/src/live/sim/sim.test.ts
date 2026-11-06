@@ -16,6 +16,7 @@ import {
   summaryLine,
   vsHold,
 } from './simState';
+import { emptySimRun } from './simState';
 
 const NOW = Date.parse('2026-11-06T12:00:00Z');
 const sse = (event: Extract<Action, { type: 'sse' }>['event'], data: unknown, at = NOW): Extract<Action, { type: 'sse' }> => ({
@@ -27,7 +28,7 @@ const sse = (event: Extract<Action, { type: 'sse' }>['event'], data: unknown, at
 const SIM = { sim: true, runId: 'run-1' };
 
 function run(over: Partial<SimRun> = {}): SimRun {
-  return {
+  return emptySimRun({
     runId: 'run-1',
     scenarioId: 'mideast',
     status: 'running',
@@ -39,7 +40,7 @@ function run(over: Partial<SimRun> = {}): SimRun {
     decisions: 3,
     episodes: 3,
     ...over,
-  };
+  });
 }
 
 function fold(state: FeedState, ...actions: FeedAction[]): FeedState {
@@ -187,7 +188,7 @@ describe('P&L and words', () => {
   it('shows the historical clock and the scenario in the banner', () => {
     expect(formatSimClock('2026-06-14T03:12:59Z')).toBe('03:12 UTC');
     expect(formatSimClock('nope')).toBe('—');
-    const scenario = { id: 'mideast', title: 'Middle East weekend', description: '', start: '2026-06-13T00:00:00Z', end: '2026-06-15T00:00:00Z', markets: [], headlines: [] };
+    const scenario = { id: 'mideast', title: 'Middle East weekend', description: '', start: '2026-06-13T00:00:00Z', end: '2026-06-15T00:00:00Z', markets: [], headlines: [], category: null, proxies: {} };
     expect(bannerText(run(), scenario)).toBe('Simulation · Middle East weekend, Jun 2026 · sim time 03:12 UTC · paper trades only');
     expect(bannerText(run({ status: 'paused' }), scenario)).toContain('· paused ·');
     expect(formatDateRange(scenario.start, scenario.end)).toBe('Jun 13 – 15, 2026');
@@ -238,5 +239,55 @@ describe('replay', () => {
     feed = applyBatch(feed, [{ type: 'feed/replay', replayId: 'r', episode: ep('b', '2026-06-13T02:00:00Z'), index: 2, total: 2, at: NOW + 1200 }]);
     expect(feed.cards.map((c) => (c.kind === 'replay' ? c.episode.requestId : c.kind))).toEqual(['b', 'a']);
     expect(fold(feed, { type: 'feed/replay-clear' }).cards).toHaveLength(0);
+  });
+});
+
+describe('server shapes (GET /sim/scenarios, GET /sim/run)', () => {
+  it('reads scenario markets sent as objects, keeping proxies', () => {
+    const [s] = parseSimScenarios({
+      scenarios: [
+        {
+          id: 'israel',
+          title: 'Israel strikes Iran',
+          description: 'd',
+          category: 'geopolitical shock',
+          start: '2025-06-12T18:00:00Z',
+          end: '2025-06-13T12:00:00Z',
+          markets: [
+            { coin: 'BTC', source: 'binance', symbol: 'BTCUSDT' },
+            { coin: 'xyz:GOLD', source: 'binance', symbol: 'PAXGUSDT', proxy: 'PAXG as gold' },
+          ],
+          headlines: [],
+        },
+      ],
+    })!;
+    expect(s!.markets).toEqual(['BTC', 'xyz:GOLD']);
+    expect(s!.proxies).toEqual({ 'xyz:GOLD': 'PAXG as gold' });
+    expect(s!.category).toBe('geopolitical shock');
+  });
+
+  it('turns server positions (signed coin units) into side + USD size, and reads execution', () => {
+    const r = parseSimRun({
+      status: 'paused',
+      pauseReason: 'awaiting_press',
+      runId: 'sim-1',
+      scenarioId: 'israel',
+      simTime: '2025-06-13T00:15:00Z',
+      positions: [
+        { coin: 'BTC', size: -0.0002, entryPx: 100_000, markPx: 99_000, unrealizedPnlUsd: 0.2, realizedPnlUsd: 0.05 },
+        { coin: 'ETH', size: 0, entryPx: 2_000, markPx: 2_000, unrealizedPnlUsd: 0, realizedPnlUsd: 1 },
+      ],
+      decisionList: [{ simTime: '2025-06-13T00:15:00Z', headline: 'h', requestId: null, signal: null, confidence: null, actions: [], skipped: 'brain_offline', error: 'router down' }],
+      headlines: { total: 3, delivered: 1 },
+      pending: { requestId: 'rq', headline: 'h', signal: 'geopolitical_shock', actions: [{ venue: 'hyperliquid', kind: 'perp', coin: 'BTC', side: 'short', sizeUsd: 12.5, reason: '' }] },
+      execution: { liveOrders: true, available: true, unavailable: null, network: 'mainnet', orderUsd: 11, maxRunUsd: 50, spentUsd: 11, orders: [{ orderId: '9', coin: 'BTC', isBuy: false, sizeUsd: 11, status: 'filled', requestId: 'rq', placedAt: 'x' }] },
+    })!;
+    expect(r.positions).toEqual([{ market: 'BTC', side: 'short', sizeUsd: 20, entryPx: 100_000, markPx: 99_000, pnlUsd: 0.25 }]);
+    expect(r.decisionList[0]).toMatchObject({ skipped: 'brain_offline', error: 'router down', actions: 0 });
+    expect(r.headlines).toEqual({ total: 3, delivered: 1 });
+    expect(r.pending?.actions[0]?.coin).toBe('BTC');
+    expect(r.execution.liveOrders).toBe(true);
+    expect(r.execution.orders[0]).toMatchObject({ coin: 'BTC', status: 'filled', sizeUsd: 11 });
+    expect(bannerText(r, undefined)).toContain('REAL Hyperliquid mainnet orders');
   });
 });
