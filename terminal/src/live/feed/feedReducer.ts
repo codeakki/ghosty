@@ -323,6 +323,8 @@ function foldProviders(state: FeedState, providers: ProviderStatus[], at: number
   for (const p of providers) {
     const before = state.providers[p.id];
     if (before === undefined || before === p.state) continue;
+    // A provider that is not set up belongs to the Setup notice, not to a System card.
+    if (p.state === 'not_configured') continue;
     changes.push({ id: p.id, label: p.label, state: p.state, before, detail: p.detail, missingEnv: p.missingEnv });
   }
   const next = { ...state, providers: map };

@@ -24,7 +24,7 @@ const NAMES: Record<string, string> = {
   'hcs-audit': 'Hedera audit log',
   hyperliquid: 'Hyperliquid trading',
   uniswap: 'Uniswap swaps',
-  rss: 'RSS feeds',
+  rss: 'News wires',
   polymarket: 'Polymarket',
   cryptopanic: 'CryptoPanic',
   ethos: 'Ethos credibility',
@@ -47,7 +47,7 @@ function countOf(detail: string): string | null {
   return m ? `${m[1]}/${m[2]}` : null;
 }
 
-/** One provider, one short phrase: "0G brain unreachable — trading paused", "RSS feeds online (4/4)". */
+/** One provider, one short phrase: "0G brain unreachable, trading paused", "News wires online (4/4)". */
 export function providerPhrase(e: ProviderEntry): string {
   const name = providerName(e.id, e.label);
   const count = countOf(e.detail);
@@ -57,7 +57,7 @@ export function providerPhrase(e: ProviderEntry): string {
     case 'degraded':
       return `${name} partly down${count ? ` (${count})` : ''}`;
     case 'offline':
-      return e.id === '0g-router' ? `${name} unreachable — trading paused` : `${name} unreachable`;
+      return e.id === '0g-router' ? `${name} unreachable, trading paused` : `${name} unreachable`;
     case 'not_configured':
       return `${name} not set up`;
   }
@@ -98,7 +98,7 @@ export function describeProviders(entries: readonly ProviderEntry[], flips: numb
 
 export function describeSafeStop(on: boolean, flips: number): SystemText {
   return {
-    title: on ? 'Safe-stop on — trading paused' : 'Safe-stop off — trading allowed',
+    title: on ? 'Safe-stop on, trading paused' : 'Safe-stop off, trading allowed',
     detail:
       (on ? 'The 0G brain is unreachable, so Ghosty will not place trades.' : 'The 0G brain is back; Ghosty can propose trades again.') +
       (flips > 1 ? ` Changed ${flips} times in the last minute.` : ''),

@@ -97,7 +97,7 @@ function MarketRow({ card, ctx }: { card: MarketCard; ctx: CardContext }) {
         ? `previous close ${formatAssetPx(move.coin, move.from)}`
         : `1h ${move.reason === 'high' ? 'high' : 'low'} was ${formatAssetPx(move.coin, move.from)}`;
   return (
-    <div className="lv-row-body" title={`Hyperliquid mid, ${ref}`}>
+    <div className="lv-row-body" title={ref.charAt(0).toUpperCase() + ref.slice(1)}>
       <span className="lv-row-name">{name}</span>
       <span className="lv-row-px lv-num">{formatAssetPx(move.coin, move.price)}</span>
       <span className={`lv-delta lv-delta-${dir} lv-num`}>
@@ -118,46 +118,43 @@ const CRED_WORD: Record<string, string> = {
   exemplary: 'Exemplary',
 };
 
-function NewsView({ card }: { card: NewsCard }) {
+/** Low credibility is worth a word; "reputable" on every row is noise. */
+const CRED_WARN = new Set(['untrusted', 'questionable']);
+
+/**
+ * Headlines are context until the agent acts on one (the brain card then quotes it): one compact row with the
+ * headline, at most a couple of tags, and source · age.
+ */
+function NewsRow({ card }: { card: NewsCard }) {
   const { item } = card;
   const shock = shockTag(`${item.title} ${item.summary ?? ''}`);
   const source = item.handle ?? item.domain ?? item.source;
   const published = Date.parse(item.publishedAt);
   const injected = item.source === 'inject' || item.source === 'terminal-test';
   const cred = item.credibility;
+  const credTitle = cred ? `Source credibility from Ethos: ${CRED_WORD[cred.level] ?? cred.level}${cred.score !== null ? ` (${cred.score} / 2800)` : ''}` : undefined;
   return (
-    <>
-      <Head
-        kind="news"
-        label="Headline"
-        at={Number.isFinite(published) ? published : card.at}
-       
-        extra={<span className="lv-card-source">{source}</span>}
-      />
-      <h3 className="lv-card-title lv-news-title">
-        {item.url ? <Ext href={item.url}>{item.title}</Ext> : item.title}
-      </h3>
-      <p className="lv-badges">
+    <div className="lv-news-row">
+      <p className="lv-news-title">{item.url ? <Ext href={item.url}>{item.title}</Ext> : item.title}</p>
+      <p className="lv-news-meta">
         {shock ? <span className={`lv-tag lv-tag-shock lv-tag-${shock.kind}`}>{shock.tag}</span> : null}
-        {injected ? <span className="lv-tag">Test headline</span> : null}
-        {cred ? (
-          <span
-            className={`lv-tag lv-tag-cred lv-cred-${cred.level}`}
-            title={`Source credibility from Ethos${cred.score !== null ? `: ${cred.score} / 2800` : ''}`}
-          >
-            {CRED_WORD[cred.level] ?? cred.level} source
+        {injected ? <span className="lv-tag">Test</span> : null}
+        {cred && CRED_WARN.has(cred.level) ? (
+          <span className={`lv-tag lv-tag-cred lv-cred-${cred.level}`} title={credTitle}>
+            {CRED_WORD[cred.level]} source
           </span>
         ) : null}
         {item.probability !== undefined && !/polymarket/i.test(item.title) ? (
-          <span className="lv-tag lv-tag-poly lv-num">
-            Polymarket {formatConfidencePct(item.probability)} yes
-            {item.probabilityChange24h !== undefined && Math.abs(item.probabilityChange24h) >= 0.01
-              ? ` (${item.probabilityChange24h > 0 ? '+' : '−'}${Math.round(Math.abs(item.probabilityChange24h) * 100)} pts 24h)`
-              : ''}
+          <span className="lv-tag lv-tag-poly">
+            Polymarket <span className="lv-num">{formatConfidencePct(item.probability)}</span> yes
           </span>
         ) : null}
+        <span className="lv-card-source" title={credTitle}>
+          {source}
+        </span>
+        <RelTime at={Number.isFinite(published) ? published : card.at} className="lv-card-time" />
       </p>
-    </>
+    </div>
   );
 }
 
@@ -181,7 +178,10 @@ function BrainView({ card, ctx }: { card: BrainCard; ctx: CardContext }) {
       ) : (
         <h3 className="lv-card-title">
           {card.signal === 'none' ? 'No trade: nothing actionable' : formatSignal(card.signal ?? 'none')}
-          <span className="lv-conf lv-num"> · {formatConfidencePct(card.confidence)} confident</span>
+          <span className="lv-conf">
+            {' '}
+            · <span className="lv-num">{formatConfidencePct(card.confidence)}</span> confident
+          </span>
         </h3>
       )}
       {card.prompt ? (
@@ -219,7 +219,7 @@ function AlertView({ card, ctx }: { card: AlertCard; ctx: CardContext }) {
       <blockquote className="lv-card-quote">“{alert.text}”</blockquote>
       {leg ? (
         <p className="lv-card-meta">
-          Waiting for your tap: <strong>{legText(leg, ctx.labels)}</strong> · {formatConfidencePct(alert.confidence)} confident
+          Waiting for your tap: <strong>{legText(leg, ctx.labels)}</strong> · <span className="lv-num">{formatConfidencePct(alert.confidence)}</span> confident
         </p>
       ) : null}
     </>
@@ -243,8 +243,14 @@ function TxView({ card, ctx }: { card: TxCard; ctx: CardContext }) {
               {o.status}
             </span>
           </h3>
-          <p className="lv-card-meta lv-num">
-            Hyperliquid perp order{o.avgPx ? ` · avg ${formatPx(o.avgPx)}` : ''}
+          <p className="lv-card-meta">
+            Hyperliquid perp order
+            {o.avgPx ? (
+              <>
+                {' '}
+                · avg <span className="lv-num">{formatPx(o.avgPx)}</span>
+              </>
+            ) : null}
             {o.error ? ` · ${o.error}` : ''}
             {simulated ? ' · simulated, not on chain' : ''}
           </p>
@@ -314,7 +320,7 @@ function TxView({ card, ctx }: { card: TxCard; ctx: CardContext }) {
               ) : null}
             </p>
           ) : (
-            <p className="lv-card-meta">Not on 0G Storage yet (needs OG_PRIVATE_KEY on the server).</p>
+            <p className="lv-card-meta">Not saved to 0G Storage yet.</p>
           )}
         </>
       );
@@ -380,7 +386,7 @@ export const FeedCardView = memo(function FeedCardView({
   const vt = card.kind === 'brain' ? ({ viewTransitionName: vtName(dataKey) } as CSSProperties) : undefined;
   return (
     <li
-      className={`${card.kind === 'market' ? 'lv-row' : 'lv-card'} lv-card-in lv-card-${card.kind}${glow ? ' lv-card-glow' : ''}`}
+      className={`${card.kind === 'market' || card.kind === 'news' ? 'lv-row' : 'lv-card'} lv-card-in lv-card-${card.kind}${glow ? ' lv-card-glow' : ''}`}
       data-key={dataKey}
       data-track={track}
       data-dir={dir}
@@ -389,7 +395,7 @@ export const FeedCardView = memo(function FeedCardView({
     >
       <article>
         {card.kind === 'market' ? <MarketRow card={card} ctx={ctx} /> : null}
-        {card.kind === 'news' ? <NewsView card={card} /> : null}
+        {card.kind === 'news' ? <NewsRow card={card} /> : null}
         {card.kind === 'brain' ? <BrainView card={card} ctx={ctx} /> : null}
         {card.kind === 'alert' ? <AlertView card={card} ctx={ctx} /> : null}
         {card.kind === 'tx' ? <TxView card={card} ctx={ctx} /> : null}

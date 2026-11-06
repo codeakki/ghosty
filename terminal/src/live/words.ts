@@ -37,12 +37,18 @@ export function formatSignedPct(v: number): string {
   return `${signedPct.format(v).replace('-', '−')}%`;
 }
 
-/** Display precision per watched asset, so a price never changes width as it ticks. */
-const ASSET_DP: Record<string, number> = { BTC: 0, ETH: 2, SOL: 2, GOLD: 1, CL: 2, SP500: 1, TSLA: 2, NVDA: 2 };
+/** Display precision per watched asset, so a price never changes width as it ticks. Anything else: 2 dp. */
+export const ASSET_DP: Readonly<Record<string, number>> = { BTC: 0, ETH: 2, SOL: 2, GOLD: 1, CL: 2, SP500: 1, TSLA: 2, NVDA: 2 };
+const DEFAULT_DP = 2;
+
+/** Decimal places for a coin ("xyz:GOLD" → 1). */
+export function assetDecimals(coin: string): number {
+  return ASSET_DP[splitCoin(coin).ticker] ?? DEFAULT_DP;
+}
 
 /** A watched asset's price at its fixed precision (BTC 76,148 · ETH 2,238.95 · Gold 4,067.5 · S&P 500 7,373.7). */
 export function formatAssetPx(coin: string, v: number): string {
-  const dp = ASSET_DP[splitCoin(coin).ticker] ?? (v >= 1000 ? 1 : v >= 1 ? 2 : 4);
+  const dp = assetDecimals(coin);
   return new Intl.NumberFormat(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp }).format(v);
 }
 

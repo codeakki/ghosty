@@ -86,7 +86,7 @@ describe('market-move detector', () => {
     expect(out).toEqual(['BTC', 'ETH']);
   });
 
-  it('respects a custom threshold (e.g. ?moveThreshold=0.05 for a demo)', () => {
+  it('respects a custom threshold (URL override for local testing)', () => {
     const opts = { ...FAST, thresholdPct: 0.05 };
     const { moves } = run(
       [
@@ -193,7 +193,41 @@ describe('market-move detector: default rules (calm)', () => {
     expect(moves.map((m) => m.price)).toEqual([101, 106]);
   });
 
-  it('flags a ±2% crossing on the day (versus the previous close), once per crossing', () => {
+  it('the default rule is only "0.5% in 5 min" or a 1h high/low: no day crossing, no demo threshold', () => {
+    expect(DEFAULT_MOVE_OPTIONS).toMatchObject({ thresholdPct: 0.5, windowMs: 300_000, throttleMs: 600_000, dayPct: null });
+    // A slow drift through −2% on the day, inside the 1h range, is not news under the default rule.
+    let state: DetectorState = seedRange({}, 'BTC', [{ t: s(-1800), h: 99, l: 97 }], s(0));
+    const out = [];
+    for (const [sec, px] of [
+      [0, 98.1],
+      [400, 98.05],
+      [800, 97.9],
+    ] as const) {
+      const r = detectMoves(state, { BTC: px }, s(sec), DEFAULT_MOVE_OPTIONS, undefined, { BTC: 100 });
+      state = r.state;
+      out.push(...r.moves);
+    }
+    expect(out).toEqual([]);
+  });
+
+  it('flags a new 1h high under the default rule, then stays quiet for 10 minutes', () => {
+    const seeded = seedRange({}, 'BTC', [{ t: s(-1800), h: 100, l: 99 }], s(0));
+    const { moves } = run(
+      [
+        [0, 99.9],
+        [30, 100.2], // only +0.3%, but clears the 1h high by > 0.1% → row
+        [90, 100.6], // higher still, but throttled
+      ],
+      'BTC',
+      seeded,
+      DEFAULT_MOVE_OPTIONS,
+    );
+    expect(moves).toHaveLength(1);
+    expect(moves[0]).toMatchObject({ reason: 'high', from: 100, price: 100.2 });
+  });
+
+  it('can flag a ±2% crossing on the day when enabled, once per crossing', () => {
+    const DAY = { ...DEFAULT_MOVE_OPTIONS, dayPct: 2 };
     const prevDay = { BTC: 100 };
     let state: DetectorState = {};
     const out = [];
@@ -204,7 +238,7 @@ describe('market-move detector: default rules (calm)', () => {
       [800, 97.9],
       [1200, 97.85],
     ] as const) {
-      const r = detectMoves(state, { BTC: px }, s(sec), DEFAULT_MOVE_OPTIONS, undefined, prevDay);
+      const r = detectMoves(state, { BTC: px }, s(sec), DAY, undefined, prevDay);
       state = r.state;
       out.push(...r.moves);
     }
@@ -214,7 +248,7 @@ describe('market-move detector: default rules (calm)', () => {
   });
 
   it('does not call the first sighting of a big day a "crossing"', () => {
-    const r = detectMoves({}, { BTC: 95 }, s(0), DEFAULT_MOVE_OPTIONS, undefined, { BTC: 100 });
+    const r = detectMoves({}, { BTC: 95 }, s(0), { ...DEFAULT_MOVE_OPTIONS, dayPct: 2 }, undefined, { BTC: 100 });
     expect(r.moves).toEqual([]);
     expect(r.state.BTC!.dayBand).toBe(-1);
   });
