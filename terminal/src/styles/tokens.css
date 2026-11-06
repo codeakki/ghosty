@@ -1,0 +1,90 @@
+/* Design tokens. Dark is the default terminal look; light follows prefers-color-scheme. */
+:root {
+  color-scheme: dark;
+
+  --bg: #0a0d12;
+  --panel: #0f131a;
+  --panel-2: #141922;
+  --panel-3: #1a202b;
+  --line: #222a36;
+  --line-strong: #2e3847;
+  --text: #e7eaf0;
+  --text-2: #a3adbb;
+  --muted: #8a94a3;
+  --accent: #7ee0c3;
+  --accent-ink: #062018;
+  --focus: #9fd2ff;
+
+  /* Direction: price up / down. Always paired with a sign or arrow, never colour alone. */
+  --up: #33d69f;
+  --down: #ff6b78;
+
+  /* Status: reserved for state, always with an icon + label. */
+  --ok: #33d69f;
+  --warn: #f2b94b;
+  --bad: #ff6b78;
+  --off: #8a94a3;
+  --info: #79b8ff;
+  --stub: #c3a6ff;
+
+  --ok-bg: rgb(51 214 159 / 0.12);
+  --warn-bg: rgb(242 185 75 / 0.13);
+  --bad-bg: rgb(255 107 120 / 0.13);
+  --info-bg: rgb(121 184 255 / 0.12);
+  --stub-bg: rgb(195 166 255 / 0.12);
+  --accent-bg: rgb(126 224 195 / 0.1);
+
+  --chart-line: #79b8ff;
+
+  --sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --mono: ui-monospace, 'SF Mono', 'JetBrains Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
+
+  --r-sm: 4px;
+  --r: 6px;
+  --r-lg: 10px;
+  --gap: 8px;
+  --pad: 12px;
+
+  --t-fast: 120ms;
+  --t: 200ms;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --bg: #eef1f5;
+    --panel: #ffffff;
+    --panel-2: #f6f8fa;
+    --panel-3: #eceff3;
+    --line: #dde2e8;
+    --line-strong: #c8d0da;
+    --text: #0f1720;
+    --text-2: #3f4a58;
+    --muted: #5f6b7a;
+    --accent: #0d8f6c;
+    --accent-ink: #ffffff;
+    --focus: #1f6feb;
+    --up: #0b8a5f;
+    --down: #c8323f;
+    --ok: #0b8a5f;
+    --warn: #9a6200;
+    --bad: #c8323f;
+    --off: #5f6b7a;
+    --info: #1f6feb;
+    --stub: #7448d6;
+    --ok-bg: rgb(11 138 95 / 0.1);
+    --warn-bg: rgb(154 98 0 / 0.1);
+    --bad-bg: rgb(200 50 63 / 0.1);
+    --info-bg: rgb(31 111 235 / 0.08);
+    --stub-bg: rgb(116 72 214 / 0.09);
+    --accent-bg: rgb(13 143 108 / 0.08);
+    --chart-line: #1f6feb;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --t-fast: 0ms;
+    --t: 0ms;
+  }
+}
