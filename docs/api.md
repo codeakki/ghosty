@@ -451,7 +451,7 @@ Real probes, run in parallel with a 5 s budget each and cached 30 s. Details nev
 
 ### GET /market/snapshot
 
-Hyperliquid info API, no keys. Prices come from `MARKET_DATA_NETWORK` (default `mainnet`, read-only); orders follow `HL_TESTNET`. Both are labelled. Watchlist: `MARKET_WATCHLIST` (default `BTC,ETH,SOL,xyz:GOLD,xyz:CL,xyz:TSLA,xyz:NVDA,xyz:SPX`). Coins that do not exist (or are delisted) on the network are listed in `missing`, never invented; the S&P 500 perp on trade.xyz is `xyz:SP500`, so the default `xyz:SPX` shows up there.
+Hyperliquid info API, no keys. Prices come from `MARKET_DATA_NETWORK` (default `mainnet`, read-only); orders follow `HL_TESTNET`. Both are labelled. Watchlist: `MARKET_WATCHLIST` (default `BTC,ETH,SOL,xyz:GOLD,xyz:CL,xyz:TSLA,xyz:NVDA,xyz:SP500`; the S&P 500 perp on trade.xyz is `xyz:SP500`). Coins that do not exist (or are delisted) on the network are listed in `missing`, never invented; e.g. `xyz:SPX` would show up there.
 
 ```json
 {

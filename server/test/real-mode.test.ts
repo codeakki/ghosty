@@ -37,7 +37,7 @@ describe('config modes', () => {
     assert.equal(live.NEWS_LIVE, true);
     assert.equal(live.ETHOS_ENABLED, true);
     assert.equal(live.MARKET_DATA_NETWORK, 'mainnet');
-    assert.deepEqual(live.MARKET_WATCHLIST, ['BTC', 'ETH', 'SOL', 'xyz:GOLD', 'xyz:CL', 'xyz:TSLA', 'xyz:NVDA', 'xyz:SPX']);
+    assert.deepEqual(live.MARKET_WATCHLIST, ['BTC', 'ETH', 'SOL', 'xyz:GOLD', 'xyz:CL', 'xyz:TSLA', 'xyz:NVDA', 'xyz:SP500']);
     const test = loadConfig({});
     assert.equal(test.GHOSTY_MODE, 'test', 'npm test sets GHOSTY_MODE=test');
     assert.equal(test.NEWS_LIVE, false);

@@ -31,7 +31,7 @@ const list = (fallback: string) =>
         .filter((s) => s.length > 0),
     );
 
-export const DEFAULT_MARKET_WATCHLIST = 'BTC,ETH,SOL,xyz:GOLD,xyz:CL,xyz:TSLA,xyz:NVDA,xyz:SPX';
+export const DEFAULT_MARKET_WATCHLIST = 'BTC,ETH,SOL,xyz:GOLD,xyz:CL,xyz:TSLA,xyz:NVDA,xyz:SP500';
 
 const ConfigSchema = z.object({
   /** live (default): real providers or 503 not_configured, never fakes. test: offline fakes (npm test). */
