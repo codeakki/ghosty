@@ -26,6 +26,7 @@
 
 .lv-sim-banner-text {
   flex: 1;
+  font-variant-numeric: tabular-nums;
   min-width: 0;
   margin: 0;
   overflow: hidden;
@@ -293,8 +294,10 @@
   text-wrap: balance;
 }
 
-.lv-sim-summary-line {
+.lv-sim-summary-line,
+.lv-sim-scenario-meta {
   margin: 0;
+  font-variant-numeric: tabular-nums;
 }
 
 .lv-sim-stats {
@@ -351,6 +354,7 @@
 }
 
 .lv-sim-table td {
+  white-space: nowrap;
   padding: var(--space-2) 0;
   border-top: 1px solid var(--color-line);
 }

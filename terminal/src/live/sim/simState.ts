@@ -53,6 +53,14 @@ export const SPEEDS = [
 
 export type SpeedId = (typeof SPEEDS)[number]['id'];
 
+/**
+ * The server has no simulation routes yet. Any 404 counts: the server's own catch-all answers
+ * `{error: "not_found"}`, which the generic client reads as a real answer, but /sim/* never 404s once it exists.
+ */
+export function simMissing(r: ApiResult<unknown>): boolean {
+  return !r.ok && (r.kind === 'not_found' || r.status === 404);
+}
+
 export function isActive(run: SimRun | null): run is SimRun {
   return run !== null && (run.status === 'running' || run.status === 'paused');
 }
@@ -75,13 +83,13 @@ export function simReducer(state: SimState, action: SimAction): SimState {
     case 'sim/scenarios': {
       const r = action.result;
       if (r.ok) return { ...state, server: 'ready', scenarios: r.data };
-      if (r.kind === 'not_found') return { ...state, server: 'missing' };
+      if (simMissing(r)) return { ...state, server: 'missing', error: null };
       return { ...state, error: describeError(r) };
     }
     case 'sim/run': {
       const r = action.result;
       if (r.ok) return foldRun(state, r.data);
-      if (r.kind === 'not_found') return { ...state, server: 'missing', run: null };
+      if (simMissing(r)) return { ...state, server: 'missing', run: null };
       return state;
     }
     case 'sim/error':

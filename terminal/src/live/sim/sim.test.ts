@@ -146,6 +146,9 @@ describe('sim state', () => {
   it('marks the server as missing simulation on a 404', () => {
     const s = simReducer(initialSim, { type: 'sim/scenarios', result: { ok: false, kind: 'not_found', status: 404, message: 'endpoint not found' } });
     expect(s.server).toBe('missing');
+    // The server's catch-all 404 is JSON with its own code; still "needs the server update".
+    const json404 = simReducer(initialSim, { type: 'sim/run', result: { ok: false, kind: 'http', status: 404, message: 'Route GET:/sim/run not found' } });
+    expect(json404.server).toBe('missing');
   });
 
   it('Stop keeps what the run did as the summary', () => {

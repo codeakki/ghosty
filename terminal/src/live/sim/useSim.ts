@@ -4,7 +4,7 @@ import type { Alert, ApiResult, ReplayEpisode, SimAction as ControlAction, SimRu
 import type { Action as TerminalAction } from '../../state/reducer';
 import type { FeedAction } from '../feed/feedReducer';
 import { playReplay } from './replay';
-import { isActive, type SimAction, type SimState } from './simState';
+import { isActive, simMissing, type SimAction, type SimState } from './simState';
 
 /** The five /sim + /episodes calls, so a dev fixture can stand in for the server. */
 export interface SimApi {
@@ -89,7 +89,7 @@ export function useSim({ client, sim, simDispatch, dispatch, feedDispatch, banne
 
   const fail = useCallback(
     (r: Extract<ApiResult<unknown>, { ok: false }>) =>
-      simDispatch({ type: 'sim/error', message: r.kind === 'not_found' ? 'Simulation needs the server update.' : describeError(r) }),
+      simDispatch({ type: 'sim/error', message: simMissing(r) ? 'Simulation needs the server update.' : describeError(r) }),
     [simDispatch],
   );
 
@@ -105,7 +105,7 @@ export function useSim({ client, sim, simDispatch, dispatch, feedDispatch, banne
       feedDispatch({ type: 'feed/sim-clear' });
       const r = await api.start(scenarioId, speed);
       if (!r.ok) {
-        if (r.kind === 'not_found') simDispatch({ type: 'sim/scenarios', result: r });
+        if (simMissing(r)) simDispatch({ type: 'sim/scenarios', result: r });
         fail(r);
         return;
       }

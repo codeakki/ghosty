@@ -28,7 +28,7 @@ export function SimBanner({ sim, onSimulate }: { sim: SimState; onSimulate: bool
   return (
     <div className="lv-sim-banner" role="status" data-status={run.status}>
       <p className="lv-sim-banner-text">
-        <span className="lv-sim-tag">SIM</span> <span className="lv-num">{bannerText(run, scenario)}</span>
+        <span className="lv-sim-tag">SIM</span> {bannerText(run, scenario)}
       </p>
       {onSimulate ? null : (
         <Link to="/simulate" className="lv-sim-banner-link">
@@ -106,6 +106,8 @@ export function SimPanel({ api }: { api: LiveApi }) {
       ) : (
         <>
           {sim.finished ? <Summary run={sim.finished} scenario={sim.scenarios?.find((s) => s.id === sim.finished?.scenarioId)} /> : null}
+          {sim.server === 'missing' ? null : (
+            <>
           <ScenarioPicker scenarios={sim.scenarios} server={sim.server} chosen={chosen} onPick={setPicked} />
           <fieldset className="lv-sim-speed">
             <legend className="lv-sim-label">Speed</legend>
@@ -127,6 +129,8 @@ export function SimPanel({ api }: { api: LiveApi }) {
               Start simulation
             </button>
           </div>
+            </>
+          )}
         </>
       )}
 
@@ -161,7 +165,7 @@ function ScenarioPicker({
         <li key={s.id}>
           <button type="button" className="lv-sim-scenario" aria-pressed={chosen === s.id} onClick={() => onPick(s.id)}>
             <span className="lv-sim-scenario-title">{s.title}</span>
-            <span className="lv-sim-scenario-meta lv-num">
+            <span className="lv-sim-scenario-meta">
               {formatDateRange(s.start, s.end)} · {s.headlines.length} {s.headlines.length === 1 ? 'headline' : 'headlines'}
             </span>
             <span className="lv-sim-scenario-desc">{s.description}</span>
@@ -263,7 +267,7 @@ function Summary({ run, scenario }: { run: SimRun; scenario: SimScenario | undef
         {run.status === 'done' ? 'Run finished' : 'Run stopped'}
         {scenario ? ` · ${scenario.title}` : ''}
       </h3>
-      <p className="lv-sim-summary-line lv-num">{summaryLine(run)}</p>
+      <p className="lv-sim-summary-line">{summaryLine(run)}</p>
       <p className="lv-sim-hint">
         Ghosty <Signed value={run.pnlUsd} /> · hold <Signed value={run.baselinePnlUsd} /> · paper trades only
       </p>
