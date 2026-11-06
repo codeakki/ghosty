@@ -2,19 +2,21 @@ import { join } from 'node:path';
 import { DEFAULT_STATE_DIR, readJsonFile, writeJsonFile } from './hedera.js';
 
 /**
- * Agent-side spend controls for x402 (Hedera track extra credit):
- * - SpendCap: total tinybars the agent may sign per UTC day, persisted in server/.ghosty/spend.json.
+ * Agent-side spend controls for x402, checked before anything is signed:
+ * - SpendCap: a daily budget PER ASSET (tinybars for HBAR, micro-units for USDC), in bigint so nothing rounds.
+ *   Persisted in server/.ghosty/spend.json so a restart does not reset the budget.
  * - isHostAllowed: the agent only pays hosts on X402_ALLOWED_HOSTS.
  * The per-payment cap is enforced by @x402/core spendControls (see x402Client.ts).
  */
 
 export class SpendCapExceededError extends Error {
   constructor(
-    readonly amountTinybar: number,
-    readonly spentTinybar: number,
-    readonly capTinybar: number,
+    readonly asset: string,
+    readonly amount: bigint,
+    readonly spent: bigint,
+    readonly cap: bigint,
   ) {
-    super(`daily x402 spend cap exceeded: ${spentTinybar} + ${amountTinybar} > ${capTinybar} tinybar`);
+    super(`daily x402 spend cap exceeded for ${asset}: ${spent} + ${amount} > ${cap}`);
     this.name = 'SpendCapExceededError';
   }
 }
@@ -26,66 +28,73 @@ export class HostNotAllowedError extends Error {
   }
 }
 
+/** On disk amounts are decimal strings (JSON has no bigint). */
 interface SpendState {
+  v: 2;
   /** UTC day, YYYY-MM-DD */
   day: string;
-  spentTinybar: number;
-  payments: Array<{ ts: string; amountTinybar: number; ref?: string }>;
+  spent: Record<string, string>;
+  payments: Array<{ ts: string; asset: string; amount: string; ref?: string }>;
 }
 
 export interface SpendCapOptions {
-  maxPerDayTinybar: number;
+  /** Daily cap per asset id, e.g. { '0.0.0': 500_000_000n, '0.0.429274': 2_000_000n }. Unlisted assets: cap 0. */
+  maxPerDay: Record<string, bigint>;
   /** JSON file; default server/.ghosty/spend.json. Pass `null` for in-memory only. */
   file?: string | null;
   now?: () => Date;
 }
 
 export class SpendCap {
-  readonly maxPerDayTinybar: number;
+  private readonly caps: Record<string, bigint>;
   private readonly file: string | null;
   private readonly now: () => Date;
   private state: SpendState;
 
   constructor(opts: SpendCapOptions) {
-    if (!Number.isSafeInteger(opts.maxPerDayTinybar) || opts.maxPerDayTinybar <= 0) {
-      throw new RangeError('maxPerDayTinybar must be a positive integer');
+    for (const [asset, cap] of Object.entries(opts.maxPerDay)) {
+      if (typeof cap !== 'bigint' || cap <= 0n) throw new RangeError(`daily cap for ${asset} must be a positive bigint`);
     }
-    this.maxPerDayTinybar = opts.maxPerDayTinybar;
+    this.caps = { ...opts.maxPerDay };
     this.file = opts.file === undefined ? join(DEFAULT_STATE_DIR, 'spend.json') : opts.file;
     this.now = opts.now ?? (() => new Date());
     const loaded = this.file ? readJsonFile<SpendState>(this.file) : undefined;
-    this.state = isSpendState(loaded) ? loaded : { day: this.today(), spentTinybar: 0, payments: [] };
+    this.state = isSpendState(loaded) ? loaded : this.emptyDay();
   }
 
-  /** Tinybars already signed today (UTC). */
-  spentToday(): number {
+  maxPerDay(asset: string): bigint {
+    return this.caps[asset] ?? 0n;
+  }
+
+  /** Atomic units of `asset` already signed today (UTC). */
+  spentToday(asset: string): bigint {
     this.rollover();
-    return this.state.spentTinybar;
+    return BigInt(this.state.spent[asset] ?? '0');
   }
 
-  remainingToday(): number {
-    return Math.max(0, this.maxPerDayTinybar - this.spentToday());
+  remainingToday(asset: string): bigint {
+    const left = this.maxPerDay(asset) - this.spentToday(asset);
+    return left > 0n ? left : 0n;
   }
 
-  canSpend(amountTinybar: number): boolean {
-    return Number.isSafeInteger(amountTinybar) && amountTinybar > 0 && this.spentToday() + amountTinybar <= this.maxPerDayTinybar;
+  canSpend(asset: string, amount: bigint): boolean {
+    return amount > 0n && this.spentToday(asset) + amount <= this.maxPerDay(asset);
   }
 
-  assertCanSpend(amountTinybar: number): void {
-    if (!this.canSpend(amountTinybar)) {
-      throw new SpendCapExceededError(amountTinybar, this.spentToday(), this.maxPerDayTinybar);
-    }
+  assertCanSpend(asset: string, amount: bigint): void {
+    if (!this.canSpend(asset, amount)) throw new SpendCapExceededError(asset, amount, this.spentToday(asset), this.maxPerDay(asset));
   }
 
-  /**
-   * Count a payment against today's budget and persist. Throws (and records nothing) when it
-   * would exceed the cap, so check-and-record is a single step for callers that want that.
-   */
-  record(amountTinybar: number, ref?: string): void {
-    this.assertCanSpend(amountTinybar);
-    this.state.spentTinybar += amountTinybar;
-    this.state.payments.push({ ts: this.now().toISOString(), amountTinybar, ...(ref ? { ref } : {}) });
+  /** Count a payment against today's budget and persist. Throws (and records nothing) when it would exceed the cap. */
+  record(asset: string, amount: bigint, ref?: string): void {
+    this.assertCanSpend(asset, amount);
+    this.state.spent[asset] = (this.spentToday(asset) + amount).toString();
+    this.state.payments.push({ ts: this.now().toISOString(), asset, amount: amount.toString(), ...(ref ? { ref } : {}) });
     this.persist();
+  }
+
+  private emptyDay(): SpendState {
+    return { v: 2, day: this.today(), spent: {}, payments: [] };
   }
 
   private today(): string {
@@ -93,9 +102,8 @@ export class SpendCap {
   }
 
   private rollover(): void {
-    const today = this.today();
-    if (this.state.day !== today) {
-      this.state = { day: today, spentTinybar: 0, payments: [] };
+    if (this.state.day !== this.today()) {
+      this.state = this.emptyDay();
       this.persist();
     }
   }
@@ -108,7 +116,7 @@ export class SpendCap {
 function isSpendState(v: unknown): v is SpendState {
   if (!v || typeof v !== 'object') return false;
   const s = v as Partial<SpendState>;
-  return typeof s.day === 'string' && typeof s.spentTinybar === 'number' && Number.isFinite(s.spentTinybar) && Array.isArray(s.payments);
+  return s.v === 2 && typeof s.day === 'string' && typeof s.spent === 'object' && s.spent !== null && Array.isArray(s.payments);
 }
 
 /**

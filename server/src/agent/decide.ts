@@ -22,6 +22,23 @@ export interface Decision {
   newsIds?: string[];
   /** Raw 0G Compute identifiers, present only for ZeroGDecider decisions. */
   zeroG?: ZeroGTrace;
+  /** The intel bundle this decision was given, bought via x402 on Hedera (set by the pipeline). */
+  paidIntel?: {
+    txId: string;
+    provider: string;
+    hashscanUrl: string;
+    asset: string;
+    amount: string;
+    /** Mirror-node check: true/false, or null when it had not finished when the episode was written. */
+    verified: boolean | null;
+  };
+}
+
+/** Intel bought for this decision, passed to the model as `paidIntel`. */
+export interface PaidIntelInput {
+  provider: string;
+  txId: string;
+  bundle: object;
 }
 
 export interface ZeroGTrace {
@@ -42,6 +59,8 @@ export interface DecideInput {
   news: NewsItem[];
   memory: UserMemory;
   maxTradeUsd: number;
+  /** Signal Desk bundle for the headline, when the agent bought one (x402). */
+  paidIntel?: PaidIntelInput;
 }
 
 export interface Decider {
@@ -173,7 +192,9 @@ You read market-moving news, weigh each item by its source credibility, and prop
 The wearer confirms every trade with a button press; you never execute anything yourself.
 
 Input (JSON): transcript (what the wearer just said, may be empty), news (items with an Ethos credibility score 0-2800 and level),
-memory (risk profile, preferences incl. watchlist, recent decision history), constraints (allowed venues and markets, budget).
+memory (risk profile, preferences incl. watchlist, recent decision history), constraints (allowed venues and markets, budget),
+and optionally paidIntel: a bundle you bought for the main headline (Ethos credibility of its source, how many other outlets
+corroborate it, shock category and severity). Use paidIntel to weigh the headline; mention it briefly in the rationale when it matters.
 
 Rules:
 - signal is one of "geopolitical_shock", "regulatory_crackdown", "none".
@@ -424,6 +445,7 @@ export class ZeroGDecider implements Decider {
     return {
       transcript: input.transcript,
       news: scored,
+      ...(input.paidIntel ? { paidIntel: input.paidIntel } : {}),
       memory: {
         riskProfile: input.memory.riskProfile,
         preferences: input.memory.preferences,

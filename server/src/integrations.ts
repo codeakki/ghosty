@@ -6,24 +6,23 @@ import type { Config } from './config.js';
 import { notConfiguredInfo, ProviderNotConfiguredError } from './mode.js';
 import type { Executor } from './execution/executor.js';
 import { HyperliquidVenue, parseFallbackCoins, resolveCoinIn, type MarketInfo } from './execution/hyperliquid.js';
-import { HcsAuditLog, type Payments } from './payments/index.js';
-import type { SignalBuyer } from './payments/signalBuyer.js';
+import { HcsAuditLog, readAuditLog, type Payments } from './payments/index.js';
+import { HBAR_ASSET_ID } from './payments/hedera.js';
 import { HostNotAllowedError, SpendCapExceededError } from './payments/spendControls.js';
-import { PaymentPolicyError, X402PaymentError } from './payments/x402Client.js';
+import { PaymentPolicyError, PaymentQueueFullError, X402PaymentError } from './payments/x402Client.js';
 import type { PodState } from './sim/state.js';
 import { UniswapSpotLeg } from './wallet/uniswap.js';
 
 /**
  * Read-only status routes for the integrations (0G, Hedera x402, Hyperliquid/Uniswap) and the
- * sim's "Pay for signal" button. None of these are called by the firmware.
+ * sim's "Pay" button. None of these are called by the firmware.
  */
 export interface IntegrationContext {
   config: Config;
   state: PodState;
   agent: Agent;
+  /** Payer, IntelBuyer (shared with the decision loop: same caps, same lastPayment) and HCS audit log. */
   payments: Payments;
-  /** Shared with the decision loop (X402_AUTOPAY): same spend cap, same lastPayment. */
-  buyer: SignalBuyer;
   executor: Executor;
   /** Same source as /health (includes the sim safe-stop switch). */
   brainOnline: () => Promise<boolean>;
@@ -39,7 +38,9 @@ const MarketsQuery = z.object({
   limit: z.coerce.number().int().min(1).max(500).default(100).catch(100),
 });
 
-export type { LastPayment } from './payments/signalBuyer.js';
+export type { LastPayment } from './payments/intelBuyer.js';
+
+const AuditQuery = z.object({ limit: z.coerce.number().int().min(1).max(100).default(20).catch(20) });
 
 /** 0G explorers: Galileo testnet unless the storage RPC points elsewhere. */
 export function zeroGExplorers(config: Pick<Config, 'OG_RPC_URL'>): { chainscan: string; storagescan: string } {
@@ -84,35 +85,76 @@ export function registerIntegrationRoutes(app: FastifyInstance, ctx: Integration
   });
 
   // ---------- Hedera x402 ----------
-  const { buyer } = ctx;
+  const { buyer } = payments;
   const spendCap = buyer.spendCap;
+  const usdc = config.HEDERA_USDC_TOKEN_ID;
+  const budget = (asset: string, perCall: number, price: number) => ({
+    asset,
+    price: String(price),
+    maxPerCall: String(perCall),
+    spentToday: spendCap.spentToday(asset).toString(),
+    cap: spendCap.maxPerDay(asset).toString(),
+    remainingToday: spendCap.remainingToday(asset).toString(),
+  });
 
   app.get('/x402/status', async () => ({
     mode: payments.mode,
     network: `hedera:${config.HEDERA_NETWORK}`,
     payer: config.HEDERA_ACCOUNT_ID ?? null,
-    payTo: config.X402_PAY_TO ?? config.HEDERA_ACCOUNT_ID ?? null,
-    priceTinybar: config.X402_SIGNAL_PRICE_TINYBAR,
+    payTo: config.X402_PAY_TO ?? null,
+    signalDesk: config.SIGNAL_DESK_URL,
+    preferredAsset: config.X402_PREFERRED_ASSET,
+    budgets: {
+      HBAR: budget(HBAR_ASSET_ID, config.X402_MAX_PER_CALL_TINYBAR, config.X402_INTEL_PRICE_TINYBAR),
+      USDC: budget(usdc, config.X402_MAX_PER_CALL_USDC_MICROS, config.X402_INTEL_PRICE_USDC_MICROS),
+    },
+    // HBAR numbers at the top level, as the terminal reads them.
+    priceTinybar: config.X402_INTEL_PRICE_TINYBAR,
     maxPerCallTinybar: config.X402_MAX_PER_CALL_TINYBAR,
-    spentToday: spendCap.spentToday(),
-    cap: spendCap.maxPerDayTinybar,
-    remainingToday: spendCap.remainingToday(),
+    spentToday: Number(spendCap.spentToday(HBAR_ASSET_ID)),
+    cap: Number(spendCap.maxPerDay(HBAR_ASSET_ID)),
+    remainingToday: Number(spendCap.remainingToday(HBAR_ASSET_ID)),
     allowedHosts: config.X402_ALLOWED_HOSTS,
-    hcsTopicUrl: payments.audit instanceof HcsAuditLog ? (payments.audit.topicUrl() ?? null) : null,
+    hcsTopicUrl: payments.audit instanceof HcsAuditLog ? payments.audit.topicUrl() : null,
     autopay: config.X402_AUTOPAY,
     lastPayment: buyer.lastPayment,
   }));
 
-  // The agent pays for our own paywalled /signal with no human approval (real mode: x402 on hedera:testnet).
-  app.post('/sim/pay-signal', { preHandler: ctx.requireDevice }, async (req, reply) => {
+  // HCS audit log, read back from the mirror node and decoded. Anyone can do the same on HashScan.
+  app.get('/hedera/audit', async (req, reply) => {
+    if (!(payments.audit instanceof HcsAuditLog)) {
+      return reply.code(503).send({ error: 'not_configured', missingEnv: ['HEDERA_HCS_TOPIC_ID', 'HEDERA_HCS_SUBMIT_KEY'] });
+    }
+    const { limit } = AuditQuery.parse(req.query ?? {});
+    const topicId = payments.audit.topicId;
     try {
-      const { paid, payment } = await buyer.buy('sim');
-      req.log.info({ txId: paid.txId, hashscanUrl: paid.hashscanUrl, mode: payments.mode }, 'sim paid for /signal');
-      return { ...payment, status: paid.status, body: paid.body, audit: paid.audit ?? null };
+      const messages = await readAuditLog(topicId, limit, { mirrorUrl: config.HEDERA_MIRROR_URL });
+      return { topicId, topicUrl: payments.audit.topicUrl(), count: messages.length, messages };
+    } catch (err) {
+      return reply.code(502).send({ error: 'mirror_unavailable', message: (err as Error).message });
+    }
+  });
+
+  // The agent buys intel for a headline with no human approval (real mode: x402 on hedera:testnet).
+  // Body {headline?}: defaults to the newest headline the pod has seen.
+  app.post('/sim/pay-signal', { preHandler: ctx.requireDevice }, async (req, reply) => {
+    const asked = (req.body as { headline?: unknown } | undefined)?.headline;
+    const newest = state.snapshot().news[0];
+    const headline = typeof asked === 'string' && asked.trim() ? { title: asked.trim() } : newest;
+    if (!headline) return reply.code(409).send({ error: 'no_headline', message: 'no headline yet: pass {"headline": "..."}' });
+    try {
+      const intel = await buyer.buy(headline, 'sim');
+      req.log.info({ txId: intel.txId, hashscanUrl: intel.hashscanUrl, mode: payments.mode }, 'sim bought intel');
+      return { ...buyer.lastPayment, bundle: intel.bundle };
     } catch (err) {
       // Live mode without Hedera keys: 503 not_configured from the app error handler.
       if (err instanceof ProviderNotConfiguredError) throw err;
-      if (err instanceof PaymentPolicyError || err instanceof HostNotAllowedError || err instanceof SpendCapExceededError) {
+      if (
+        err instanceof PaymentPolicyError ||
+        err instanceof HostNotAllowedError ||
+        err instanceof SpendCapExceededError ||
+        err instanceof PaymentQueueFullError
+      ) {
         return reply.code(409).send({ error: 'payment_refused', message: err.message });
       }
       if (err instanceof X402PaymentError) {
