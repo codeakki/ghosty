@@ -38,6 +38,8 @@ export interface NewsEntry {
   credibility: SourceCredibility | null;
   /** Keyword pre-classification of the title. */
   signal: Signal;
+  /** Set on events emitted by a simulation run (SSE during /sim/run). */
+  sim?: SimTag;
 }
 
 /** Hyperliquid perp leg. */
@@ -72,6 +74,7 @@ export interface DecisionEntry {
   transcript: string;
   headline?: string;
   at: string;
+  sim?: SimTag;
 }
 
 export type OrderStatus = 'simulated' | 'filled' | 'resting' | 'rejected';
@@ -91,6 +94,7 @@ export interface OrderEntry {
   error?: string;
   requestId: string;
   at: string;
+  sim?: SimTag;
 }
 
 export interface SwapResult {
@@ -133,6 +137,7 @@ export interface EpisodeRecord {
   rootHash?: string;
   txHash?: string;
   decision?: { signal: Signal; confidence: number; rationale: string; zeroG?: ZeroGTrace };
+  sim?: SimTag;
 }
 
 export type AlertStatus = 'pending' | 'delivered' | 'acked';
@@ -149,6 +154,7 @@ export interface Alert {
   createdAt: string;
   deliveredAt?: string;
   ackedAt?: string;
+  sim?: SimTag;
 }
 
 export interface PodSnapshot {
@@ -349,6 +355,8 @@ export interface MarketSnapshot {
 export interface MarketTick {
   ts: string;
   mids: Record<string, number>;
+  /** Simulation ticks are HISTORICAL prices: never mixed into the live ticker. */
+  sim?: SimTag;
 }
 
 /** One Hyperliquid candle (candleSnapshot), numbers already parsed. */
@@ -392,4 +400,72 @@ export type ApiResult<T> =
 
 export type ApiFailure = Extract<ApiResult<unknown>, { ok: false }>;
 
-export type SseEventType = 'state' | 'news' | 'decision' | 'alert' | 'order' | 'episode' | 'market' | 'providers';
+export type SseEventType = 'state' | 'news' | 'decision' | 'alert' | 'order' | 'episode' | 'market' | 'providers' | 'sim';
+
+// ---------------------------------------------------------------------------
+// Simulation (NEW: /sim/scenarios, /sim/run, /sim/control, SSE `sim`, /episodes/replay)
+// ---------------------------------------------------------------------------
+
+/** Every SSE event emitted during a run carries `sim: true, runId`. */
+export interface SimTag {
+  runId: string;
+}
+
+export interface SimHeadline {
+  ts: string;
+  title: string;
+  source: string;
+  url: string;
+}
+
+/** GET /sim/scenarios item. */
+export interface SimScenario {
+  id: string;
+  title: string;
+  description: string;
+  start: string;
+  end: string;
+  markets: string[];
+  headlines: SimHeadline[];
+}
+
+export type SimStatus = 'idle' | 'running' | 'paused' | 'done';
+
+export interface SimPosition {
+  market: string;
+  side: 'long' | 'short';
+  sizeUsd: number;
+  entryPx: number;
+  markPx: number;
+  pnlUsd: number;
+}
+
+/** GET /sim/run and SSE `sim`. */
+export interface SimRun {
+  runId: string;
+  scenarioId: string;
+  status: SimStatus;
+  /** Historical clock of the run (ISO). */
+  simTime: string;
+  /** 0..1. */
+  progress: number;
+  pnlUsd: number;
+  baselinePnlUsd: number;
+  positions: SimPosition[];
+  decisions: number;
+  episodes: number;
+}
+
+export type SimAction = 'pause' | 'resume' | 'stop';
+
+/** GET /episodes/replay item (oldest → newest). */
+export interface ReplayEpisode {
+  ts: string;
+  requestId: string;
+  decision: { signal: Signal; confidence: number; rationale: string } | null;
+  actions: PlannedAction[];
+  orders: number;
+  storage: '0g' | 'local';
+  rootHash?: string;
+  storagescanUrl?: string;
+}

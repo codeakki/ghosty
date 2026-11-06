@@ -3,6 +3,7 @@
  * Each probe makes at most a few cheap read-only calls. Secrets go in headers or query strings only and never
  * appear in `detail`: network errors are reduced to their code ("timed out", "ENOTFOUND"), never the URL.
  */
+import Anthropic from '@anthropic-ai/sdk';
 import { privateKeyToAccount } from 'viem/accounts';
 import { join } from 'node:path';
 import type { Config } from '../config.js';
@@ -27,14 +28,18 @@ export interface ProbeResult {
 export interface ProbeContext {
   config: Config;
   fetch: typeof fetch;
-  /** Aborts when the probe's 5 s budget runs out. */
+  /** Aborts when the probe's budget (5 s, or the probe's own timeoutMs) runs out. */
   signal: AbortSignal;
+  /** Per-request timeout inside the budget. Default ATTEMPT_TIMEOUT_MS. */
+  attemptTimeoutMs?: number;
 }
 
 export interface ProviderProbe {
   id: string;
   label: string;
   track: ProviderTrack;
+  /** Whole-probe budget when it needs more than the registry default (slow upstreams). */
+  timeoutMs?: number;
   run(ctx: ProbeContext): Promise<ProbeResult>;
 }
 
@@ -74,7 +79,7 @@ async function http(ctx: ProbeContext, url: string, init: RequestInit = {}): Pro
 }
 
 async function attempt(ctx: ProbeContext, url: string, init: RequestInit): Promise<HttpResult> {
-  const res = await ctx.fetch(url, { ...init, signal: AbortSignal.any([ctx.signal, AbortSignal.timeout(ATTEMPT_TIMEOUT_MS)]) });
+  const res = await ctx.fetch(url, { ...init, signal: AbortSignal.any([ctx.signal, AbortSignal.timeout(ctx.attemptTimeoutMs ?? ATTEMPT_TIMEOUT_MS)]) });
   const text = await res.text().catch(() => '');
   let body: unknown = text;
   try {
@@ -206,10 +211,14 @@ const openaiTts: ProviderProbe = {
 // ---------------------------------------------------------------------------
 // 0G
 
+/** The 0G Router is often slow from far-away networks: give its probe 12 s instead of 5. */
+export const ZERO_G_ROUTER_PROBE_TIMEOUT_MS = 12_000;
+
 const zeroGRouter: ProviderProbe = {
   id: '0g-router',
   label: '0G Compute Router (decisions)',
   track: '0g',
+  timeoutMs: ZERO_G_ROUTER_PROBE_TIMEOUT_MS,
   async run(ctx) {
     const base = ctx.config.OG_ROUTER_URL.replace(/\/+$/, '');
     const testnet = /testnet/i.test(base);
@@ -530,6 +539,36 @@ const xai: ProviderProbe = {
   },
 };
 
+/**
+ * Claude (Anthropic API): GET /v1/models/{ANTHROPIC_MODEL} with the key. Costs no tokens. Claude researches and
+ * talks (voice answers, news scout); it never decides trades, so a dead key only silences those features.
+ */
+const claude: ProviderProbe = {
+  id: 'claude',
+  label: 'Claude (voice answers + news scout)',
+  track: 'data',
+  async run(ctx) {
+    const key = ctx.config.ANTHROPIC_API_KEY;
+    const next = 'Create a key at https://console.anthropic.com/settings/keys and set ANTHROPIC_API_KEY';
+    if (!key) return notConfigured(['ANTHROPIC_API_KEY'], 'questions go to the 0G path; no Claude news scout', next);
+    const client = new Anthropic({ apiKey: key, fetch: ctx.fetch, maxRetries: 0, timeout: ctx.attemptTimeoutMs ?? ATTEMPT_TIMEOUT_MS });
+    const model = ctx.config.ANTHROPIC_MODEL;
+    try {
+      const info = await client.models.retrieve(model, {}, { signal: ctx.signal });
+      const features = [ctx.config.CLAUDE_VOICE_ENABLED ? 'voice on' : 'voice off', ctx.config.CLAUDE_SCOUT_ENABLED ? 'scout on' : 'scout off'];
+      return { state: 'live', detail: `key valid, ${info.id} available (${features.join(', ')})` };
+    } catch (err) {
+      if (err instanceof Anthropic.NotFoundError) return { state: 'offline', detail: `key valid, but model ${model} was not found`, nextAction: 'Set ANTHROPIC_MODEL to a listed model (GET /v1/models)' };
+      if (err instanceof Anthropic.AuthenticationError || err instanceof Anthropic.PermissionDeniedError) {
+        return { state: 'offline', detail: `Anthropic rejected the key (${err.status})`, nextAction: next };
+      }
+      if (err instanceof Anthropic.APIConnectionError) return { state: 'offline', detail: `unreachable: ${describeError(err.cause ?? err)}` };
+      if (err instanceof Anthropic.APIError) return { state: 'offline', detail: `Anthropic answered ${err.status ?? 'error'}` };
+      return { state: 'offline', detail: describeError(err) };
+    }
+  },
+};
+
 /** All probes, in display order. */
 export const PROBES: ProviderProbe[] = [
   zeroGRouter,
@@ -545,6 +584,7 @@ export const PROBES: ProviderProbe[] = [
   cryptopanic,
   ethos,
   xai,
+  claude,
   groq,
   elevenlabs,
   openaiTts,

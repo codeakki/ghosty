@@ -5,7 +5,7 @@ import type { LiveApi } from '../useLive';
 import { coinName, formatAssetPx, formatSignedPct } from '../words';
 import { FeedCardView, type CardContext } from './cards';
 import { filterCards, isSetupFailure, type FeedCard, type FeedFilter } from './feedReducer';
-import { setupNotice, watching, watchingText, type SetupNotice } from './setup';
+import { setupNotice, watching, watchingText, type SetupNotice, type Watching } from './setup';
 
 const FILTERS: Array<{ id: FeedFilter; label: string }> = [
   { id: 'all', label: 'All' },
@@ -223,11 +223,12 @@ export function FeedPage({ api, full = false }: { api: LiveApi; full?: boolean }
       <div className="lv-feed-scroll" ref={scrollRef}>
         {!loading && setup ? <SetupBox notice={setup} /> : null}
         {showIntro ? (
-          <section className="lv-intro" aria-label="What Ghosty is watching">
-            <p className="lv-intro-title">Watching {watchingText(watch)}.</p>
-            <p className="lv-intro-body">
-              Ghosty speaks up when a headline could move one of them. Big price moves show below as one-line rows.
-            </p>
+          <section className="lv-intro" aria-labelledby="intro-title">
+            <h3 id="intro-title" className="lv-intro-title">
+              What Ghosty is watching
+            </h3>
+            <WatchCounts watch={watch} />
+            <p className="lv-intro-body">No decisions yet. Ghosty speaks up when a headline could move one of these markets.</p>
           </section>
         ) : null}
         <ol className="lv-cards" ref={listRef} aria-live="polite" aria-relevant="additions" aria-label="Feed cards, newest first" onPointerEnter={onEnter} onPointerLeave={onLeave}>
@@ -300,6 +301,24 @@ function SetupList({ title, issues }: { title: string; issues: SetupNotice['issu
   );
 }
 
+/** Real counts from the server; a count the server has not reported is left out, never guessed. */
+function WatchCounts({ watch }: { watch: Watching }) {
+  const items: Array<{ n: number | null; label: string }> = [];
+  if (watch.wires !== null) items.push({ n: watch.wires, label: watch.wires === 1 ? 'news wire' : 'news wires' });
+  if (watch.polymarket) items.push({ n: null, label: 'Polymarket odds' });
+  if (watch.markets !== null) items.push({ n: watch.markets, label: watch.markets === 1 ? 'market' : 'markets' });
+  if (items.length === 0) return <p className="lv-intro-counts">{watchingText(watch)}</p>;
+  return (
+    <ul className="lv-intro-counts" aria-label={watchingText(watch)}>
+      {items.map((i) => (
+        <li key={i.label}>
+          {i.n !== null ? <span className="lv-num lv-intro-n">{i.n}</span> : null} {i.label}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /** Placeholders with the final card dimensions, so the first real cards replace them without a jump. */
 function SkeletonCards() {
   return (
@@ -322,7 +341,7 @@ function EmptyFeed({ filter, api }: { filter: FeedFilter; api: LiveApi }) {
   let text: string;
   switch (filter) {
     case 'market':
-      text = `Quiet so far. A row appears when a market moves ${api.moveOptions.thresholdPct}% within 5 minutes, makes a new 1-hour high or low, or crosses 2% on the day.`;
+      text = `Quiet so far. A row appears when a market moves ${api.moveOptions.thresholdPct}% within 5 minutes or makes a new 1-hour high or low.`;
       break;
     case 'news':
       text = `Waiting for the next headline — the agent watches ${feeds ?? 'its'} news wires + Polymarket.`;
@@ -368,7 +387,7 @@ function TestHeadline({ api, onSend }: { api: LiveApi; onSend: () => void }) {
   };
   return (
     <details className="lv-test">
-      <summary>Try It: Send a Test Headline</summary>
+      <summary>Try it: send a test headline</summary>
       <form onSubmit={onSubmit} className="lv-test-form">
         <label htmlFor="test-headline" className="lv-test-label">
           Runs the real agent on 0G. Marked “TEST” in the feed.

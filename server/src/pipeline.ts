@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { SpeechToText } from './audio/stt.js';
 import type { TextToSpeech } from './audio/tts.js';
 import type { WavAudio } from './audio/wav.js';
@@ -10,6 +11,8 @@ import { planSteps, type PlannedAction, type PlanStep, type SpotLegSpec } from '
 import { FakeSpotLeg, type SpotLeg } from './wallet/uniswap.js';
 import { fetchAll, type NewsItem, type NewsProvider } from './news/types.js';
 import { ProviderNotConfiguredError, type NotConfiguredInfo } from './mode.js';
+import { classifyIntent, type VoiceIntent } from './claude/intent.js';
+import { ASSISTANT_FALLBACK_REPLY, type VoiceAssistant } from './claude/voice.js';
 
 /** What started a decision. `text` and `inject` come from the virtual pod, never from the firmware. */
 export type DecisionTrigger = 'voice' | 'text' | 'button' | 'inject';
@@ -27,6 +30,8 @@ export interface DecisionContext {
  */
 export interface PipelineObserver {
   onNews?(items: NewsItem[]): void | Promise<void>;
+  /** Every voice/text turn: what was said, what Ghosty answered and who answered (SSE `voice`). */
+  onVoice?(turn: VoiceTurn): void;
   onDecision?(decision: Decision, ctx: DecisionContext): void;
   onButton?(result: ButtonResult): void;
   onEpisode?(record: EpisodeRecord): void;
@@ -79,15 +84,56 @@ export interface PipelineDeps {
   verifyWaitMs?: number;
   /** HCS audit hook for decisions and trades. */
   audit?: (entry: PipelineAuditEntry) => void;
+  /**
+   * Claude voice answers (CLAUDE_VOICE_ENABLED). When set, questions go to Claude and only trade requests reach the
+   * 0G decider; without it every turn is a 0G decision, as before.
+   */
+  assistant?: VoiceAssistant;
+  /** Safe-stop check for the 0G path when the assistant is on (the route's preHandler no longer does it). */
+  brainOnline?: () => Promise<boolean>;
+}
+
+/** Who produced the spoken reply: Claude (research, chit-chat) or the 0G trade path. */
+export type AnsweredBy = 'claude' | '0g';
+
+/** One voice/text turn as shown in the Live feed (SSE `voice`). */
+export interface VoiceTurn {
+  transcript: string;
+  reply: string;
+  answeredBy: AnsweredBy;
+  intent: VoiceIntent;
+  /** 0G decision id, Anthropic message id, or the pending decision's id for a confirm hint. */
+  requestId?: string;
+  trigger: DecisionTrigger;
+  at: string;
+}
+
+/** The trade path was asked for while safe-stop is engaged (0G unreachable). Mapped to 503 brain_offline. */
+export class SafeStopEngagedError extends Error {
+  override readonly name = 'SafeStopEngagedError';
+  constructor() {
+    super('safe-stop engaged: 0G brain unreachable');
+  }
 }
 
 export interface VoiceResult {
   transcript: string;
-  decision: Decision;
+  answeredBy: AnsweredBy;
+  intent: VoiceIntent;
+  /** What Ghosty said (the 0G rationale, Claude's answer, or the confirm hint). */
+  reply: string;
+  /** 0G decision id, `msg_…` for Claude, or the pending decision's id for a confirm hint. */
+  requestId: string;
+  /** Present on 0G decision turns only. Claude never produces a decision. */
+  decision?: Decision;
+  /** Claude failed or timed out; `reply` is the honest fallback line. */
+  assistantError?: string;
   /** PCM s16le mono 16 kHz. Empty when TTS is not configured (live mode, text turns only). */
   audio: Buffer;
   /** Set when the decision was made but TTS is not configured; /voice refuses earlier, /voice/text reports it. */
   ttsNotConfigured?: NotConfiguredInfo;
+  /** Text turns only: TTS failed (timeout, HTTP error). The reply is real; the audio is empty. */
+  ttsFailed?: string;
 }
 
 export interface ButtonResult {
@@ -191,17 +237,66 @@ export class Pipeline {
   }
 
   private async answer(transcript: string, trigger: DecisionTrigger): Promise<VoiceResult> {
-    const decision = await this.decide(transcript, trigger);
+    const intent = classifyIntent(transcript);
+    const { assistant } = this.deps;
+    let turn: Omit<VoiceResult, 'audio' | 'ttsNotConfigured'>;
+    if (assistant && intent === 'question') {
+      turn = await this.ask(assistant, transcript, intent);
+    } else if (assistant && intent === 'confirm') {
+      turn = this.confirmHint(transcript, intent);
+    } else {
+      // Trade requests (and every turn when Claude is off) stay on the 0G decision path.
+      if (assistant && this.deps.brainOnline && !(await this.deps.brainOnline())) throw new SafeStopEngagedError();
+      const decision = await this.decide(transcript, trigger);
+      turn = { transcript, answeredBy: '0g', intent, reply: decision.rationale, requestId: decision.requestId, decision };
+    }
+    this.deps.observer?.onVoice?.({
+      transcript,
+      reply: turn.reply,
+      answeredBy: turn.answeredBy,
+      intent,
+      requestId: turn.requestId,
+      trigger,
+      at: new Date().toISOString(),
+    });
     try {
-      const audio = await this.deps.tts.synthesize(decision.rationale);
-      return { transcript, decision, audio };
+      const audio = await this.deps.tts.synthesize(turn.reply);
+      return { ...turn, audio };
     } catch (err) {
-      // A text turn still returns its (real) decision without audio; never a placeholder sound.
+      // A text turn still returns its (real) reply without audio; never a placeholder sound.
       if (err instanceof ProviderNotConfiguredError && trigger === 'text') {
-        return { transcript, decision, audio: Buffer.alloc(0), ttsNotConfigured: { provider: err.provider, missingEnv: err.missingEnv } };
+        return { ...turn, audio: Buffer.alloc(0), ttsNotConfigured: { provider: err.provider, missingEnv: err.missingEnv } };
       }
+      // A slow or failing TTS must not turn a real text reply into a 500. /voice still fails (the pod needs audio).
+      if (trigger === 'text') return { ...turn, audio: Buffer.alloc(0), ttsFailed: err instanceof Error ? `${err.name}: ${err.message}` : 'unknown error' };
       throw err;
     }
+  }
+
+  /** Claude answers a question. Any failure becomes the honest fallback line, never a made-up answer. */
+  private async ask(assistant: VoiceAssistant, transcript: string, intent: VoiceIntent): Promise<Omit<VoiceResult, 'audio'>> {
+    try {
+      const reply = await assistant.answer(transcript);
+      return { transcript, answeredBy: 'claude', intent, reply: reply.text, requestId: reply.id };
+    } catch (err) {
+      return {
+        transcript,
+        answeredBy: 'claude',
+        intent,
+        reply: ASSISTANT_FALLBACK_REPLY,
+        requestId: `claude-error-${randomUUID()}`,
+        assistantError: err instanceof Error ? err.name : 'unknown error',
+      };
+    }
+  }
+
+  /** "yes" / "confirm" / "cancel" by voice: the button is the only way to act on a pending 0G decision. */
+  private confirmHint(transcript: string, intent: VoiceIntent): Omit<VoiceResult, 'audio'> {
+    const pending = this.pending;
+    const reply = pending
+      ? 'Use the button to confirm or cancel the pending trade. I never trade on voice alone.'
+      : 'There is nothing waiting for confirmation right now.';
+    return { transcript, answeredBy: '0g', intent, reply, requestId: pending?.requestId ?? `no-pending-${randomUUID()}` };
   }
 
   /**

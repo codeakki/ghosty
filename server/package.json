@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "@0gfoundation/0g-storage-ts-sdk": "^1.2.13",
+    "@anthropic-ai/sdk": "^1.6.0",
     "@fastify/static": "^10.1.10",
     "@hiero-ledger/sdk": "2.90.1",
     "@nktkas/hyperliquid": "^0.33.3",

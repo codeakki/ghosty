@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
 import { NewsPoller } from './news/aggregator.js';
+import { ClaudeScoutProvider } from './claude/scout.js';
 
 const config = loadConfig();
 const app = buildApp({
@@ -25,6 +26,18 @@ const poller = aggregator
     })
   : undefined;
 
+// Claude news scout (CLAUDE_SCOUT_ENABLED, inside the aggregator): one web-search cycle every CLAUDE_SCOUT_MINUTES.
+// Fresh headlines go straight through the poller, so dedupe, the window and the shock detector apply; 0G decides.
+const scout = aggregator?.providers.find((p): p is ClaudeScoutProvider => p instanceof ClaudeScoutProvider);
+const startScout = () =>
+  scout?.start(config.CLAUDE_SCOUT_MINUTES * 60_000, async (r) => {
+    const usage = scout.usage();
+    if (r.skipped) return app.log.info({ skipped: r.skipped, cyclesToday: usage.cycles, max: usage.max }, 'claude scout cycle skipped');
+    if (r.error) return app.log.warn({ err: r.error, searches: r.searches }, 'claude scout cycle failed');
+    app.log.info({ headlines: r.items.length, dropped: r.dropped, searches: r.searches, cyclesToday: usage.cycles }, 'claude scout cycle');
+    if (r.items.length > 0) await poller?.tick();
+  });
+
 // Provider health: poll every 30 s, SSE `providers` whenever a state changes. Details never carry secrets.
 providers.onChange((status, changed) => {
   state.publish('providers', status);
@@ -37,6 +50,7 @@ market.onMids((event) => state.publish('market', event));
 const shutdown = async (signal: string) => {
   app.log.info({ signal }, 'shutting down');
   poller?.stop();
+  scout?.stop();
   providers.stopPolling();
   market.stop();
   await app.close();
@@ -56,6 +70,7 @@ try {
     config.GHOSTY_MODE === 'live' ? 'live mode: real providers only, missing keys answer 503 not_configured' : 'TEST mode: fake providers',
   );
   poller?.start();
+  startScout();
   market.start();
   providers.startPolling();
   providers

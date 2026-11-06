@@ -196,6 +196,58 @@ describe('ZeroGDecider', () => {
     });
   });
 
+  it('retries once after a timeout and returns the real decision', async () => {
+    let calls = 0;
+    const flaky = (async (_url: string | URL | Request, init?: RequestInit) => {
+      calls++;
+      if (calls === 1) {
+        return new Promise<Response>((_, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })));
+        });
+      }
+      return json(completion(VALID))();
+    }) as typeof fetch;
+    const d = await decider(flaky, 50).decide(input());
+    assert.equal(d.signal, 'geopolitical_shock');
+    assert.equal(calls, 2);
+  });
+
+  it('retries once on ECONNRESET', async () => {
+    const reset = () => {
+      throw Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }) });
+    };
+    const { impl, calls } = mockFetch([reset, json(completion(VALID))]);
+    const d = await decider(impl).decide(input());
+    assert.equal(d.signal, 'geopolitical_shock');
+    assert.equal(calls.length, 2);
+  });
+
+  it('does not retry other failures (HTTP errors, DNS)', async () => {
+    const http = mockFetch([json({ error: { message: 'busy' } }, 503), json(completion(VALID))]);
+    await assert.rejects(decider(http.impl).decide(input()), (err: unknown) => err instanceof BrainOfflineError && err.reason === 'http_error');
+    assert.equal(http.calls.length, 1);
+    const dns = mockFetch([
+      () => {
+        throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ENOTFOUND' } });
+      },
+      json(completion(VALID)),
+    ]);
+    await assert.rejects(decider(dns.impl).decide(input()), BrainOfflineError);
+    assert.equal(dns.calls.length, 1);
+  });
+
+  it('retries a timeout only once, then safe-stops (no fake decision)', async () => {
+    let calls = 0;
+    const hang = (async (_url: string | URL | Request, init?: RequestInit) => {
+      calls++;
+      return new Promise<Response>((_, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })));
+      });
+    }) as typeof fetch;
+    await assert.rejects(decider(hang, 30).decide(input()), (err: unknown) => err instanceof BrainOfflineError && err.reason === 'timeout');
+    assert.equal(calls, 2);
+  });
+
   it('returns no actions for signal none', async () => {
     const none = JSON.stringify({ signal: 'none', confidence: 0.1, rationale: 'Quiet market.', suggestedActions: [] });
     const { impl } = mockFetch([json(completion(none))]);

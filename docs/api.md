@@ -36,6 +36,17 @@ Sim-only routes for the [virtual pod](simulator.md). The firmware does not call 
 | POST | `/sim/safe-stop` | device token | Simulate 0G offline at runtime |
 | POST | `/sim/pay-signal` | device token | The agent pays our own `GET /signal` through x402 (fake payer without Hedera keys) |
 
+Simulation runs (historical scenario replay, paper trades only, see [simulation.md](simulation.md) and [below](#simulation-runs)):
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/sim/scenarios` | none | Replay scenarios (real past events, sourced headlines) |
+| POST | `/sim/run` | device token | Start a scenario replay → `{runId}` |
+| POST | `/sim/control` | device token | `pause` / `resume` / `stop` the run |
+| GET | `/sim/run` | none | Run status: sim time, progress, paper P&L vs hold, positions |
+| GET | `/episodes` | none | Episode list (sim runs from the local log, plus the live 0G index) |
+| GET | `/episodes/replay` | none | Walk an episode chain back from a root hash through `prevRoot` |
+
 Integration status routes (read-only, no auth). Used by the dashboard; the firmware does not call them.
 
 | Method | Path | Auth | Purpose |
@@ -123,8 +134,19 @@ Body: WAV, 16-bit, mono, 16 kHz expected (other rates are accepted with a server
 |---|---|
 | `Content-Type` | `application/octet-stream` |
 | `x-sample-rate` | `16000` |
-| `x-request-id` | 0G Compute request ID for this decision (evidence for judges) |
-| `x-signal` | signal class of the decision, e.g. `geopolitical_shock` or `none` |
+| `x-request-id` | 0G Compute request ID for this decision (evidence for judges); the Claude message id (`msg_…`) for a Claude answer |
+| `x-signal` | signal class of the decision, e.g. `geopolitical_shock` or `none` (always `none` for a Claude answer) |
+| `x-answered-by` | `claude` (question or chit-chat, answered by Claude) or `0g` (trade request, 0G decision path) |
+
+**Intent routing** (when `ANTHROPIC_API_KEY` is set and `CLAUDE_VOICE_ENABLED` is not `false`). After STT the transcript is routed by keywords (`server/src/claude/intent.ts`):
+
+| Intent | Examples | Answered by | What happens |
+|---|---|---|---|
+| `question` | "what's moving gold?", "how is BTC doing?", "are you online?", "what did you just do?" | `claude` | Claude answers in at most ~45 spoken words from live context: watchlist mids + 24 h %, last ~10 headlines with credibility, last decision, pending alert and trade, recent orders, mode. No decision, no trade, the pending trade is untouched. Works during safe-stop. |
+| `trade` | "should I buy gold?", "go long oil", "hedge my bitcoin" | `0g` | The existing 0G decision loop. `503 brain_offline` during safe-stop. |
+| `confirm` | "yes", "confirm", "cancel" | `0g` | No decision and no execution: Ghosty says the button confirms or cancels the pending trade. |
+
+Claude has a 20 s timeout. On any Claude error the pod says "I couldn't reach my research assistant. Please try again in a moment." (`answeredBy: "claude"`), never a made-up answer. Claude never decides trades and is never a fallback for 0G. Without the key every turn is a 0G decision (`answeredBy: "0g"`), as before.
 
 Body: raw PCM s16le, 16 kHz, mono. The device reads `http.getStreamPtr()` in 1–2 KB chunks and writes each chunk to I2S. The scaffold's fake TTS returns 0.5 s of a 440 Hz tone (16 000 bytes).
 
@@ -179,6 +201,8 @@ X-Device-Token: <secret>
 | `confirm` | Execute the plan: the Uniswap spot leg first (only with `UNISWAP_SPOT_LEG=true`), then the confirmed Hyperliquid perp legs |
 | `cancel` | Drop them; logged to the episode log as `cancelled` |
 
+**Simulation:** when a simulation run has a pending decision (`GET /sim/run` → `pending` not null), the press goes to that run and fills on its PaperVenue at the historical price; no real venue is ever called, whatever keys are set. The answer then carries `"sim": true, "paper": true, "runId"`, order ids are `paper-<n>` with `status: "simulated"`, and `swaps` is always `[]`. Safe-stop still applies (503 `brain_offline`).
+
 There is no "nothing pending" error. If no decision is pending (for example a press right after boot), the server decides from the current news alone and acts on that. The fake news feed already contains a geopolitical headline, so a bare `confirm` produces a trade plan.
 
 **Response 200**
@@ -228,7 +252,7 @@ curl -s -X POST http://localhost:3000/button \
 
 "Device token" below means the same `X-Device-Token` check as `/voice`: enforced only when `DEVICE_TOKEN` is set.
 The read-only routes (`/sim`, `/state`, `/events`) are open because `EventSource` cannot send headers.
-Routes that run the decision loop (`/voice/text`, `/news/inject`) return `503 {"error":"brain_offline"}` during safe-stop, like `/voice`.
+Routes that run the decision loop (`/voice/text`, `/news/inject`) return `503 {"error":"brain_offline"}` during safe-stop, like `/voice`. With Claude on, questions on `/voice` and `/voice/text` are still answered (only trade requests get the 503).
 
 ### GET /sim
 
@@ -272,6 +296,10 @@ The virtual pod page, `text/html`. Open `http://localhost:3000/sim`. The microph
 | `episode` | One episode record |
 | `providers` | Full `/providers/status` body, sent when any provider changes state (polled every 30 s by the running server) |
 | `market` | `{"ts", "mids": {"BTC": 75680.5, "xyz:GOLD": 4068.65, ...}}` for the watchlist, at most once per second |
+| `sim` | Simulation run status, same shape as `GET /sim/run`, on change, at most 2/s (an auto-pause is sent at once) |
+| `voice` | One conversation turn from `/voice` or `/voice/text`: `{"transcript", "reply", "answeredBy": "claude"\|"0g", "intent": "question"\|"trade"\|"confirm", "requestId"?, "trigger": "voice"\|"text", "at"}`. Not part of the `state` snapshot |
+
+Every event a simulation run produces (`sim`, and its `market`, `news`, `decision`, `alert`, `order`, `episode`) carries `"sim": true, "runId", "scenarioId"`. Sim `market` events carry historical mids with `ts` = sim time; never mix them into the live ticker. Sim events never change the `state` snapshot.
 
 A `: ping` comment every 15 s keeps the connection open. `providers` and `market` come from the running server (`npm run dev` / `npm start`), not from `buildApp`, so tests never see them.
 
@@ -281,14 +309,17 @@ curl -N http://localhost:3000/events
 
 ### POST /voice/text
 
-Body `{"text": "<1–2000 chars>"}`. Runs the voice loop without STT. **200**:
+Body `{"text": "<1–2000 chars>"}`. Runs the voice loop without STT, with the same intent routing as `/voice` (header `x-answered-by` too). **200**:
 
 ```json
-{ "transcript": "is anything moving gold?", "requestId": "fake-…", "signal": "geopolitical_shock", "confidence": 0.95,
-  "rationale": "...", "actions": [ ... ], "sampleRate": 16000, "audioBytes": 16000, "audioBase64": "<PCM s16le>", "tts": null }
+{ "transcript": "Should I go long oil?", "answeredBy": "0g", "intent": "trade", "reply": "...",
+  "requestId": "f337b8c5-…", "signal": "none", "confidence": 0.1, "rationale": "...", "actions": [ ... ],
+  "assistantError": null, "sampleRate": 16000, "audioBytes": 301674, "audioBase64": "<PCM s16le>", "tts": null }
 ```
 
-Errors: `400 bad_request`, `401`, `503 brain_offline`, `503 not_configured`. `tts` is `null` normally, or `{"error":"not_configured", ...}` with empty audio when no TTS key is set in live mode.
+A Claude answer has `answeredBy: "claude"`, `intent: "question"`, `requestId: "msg_…"`, `signal: "none"`, `confidence: 0`, `actions: []`; `rationale` repeats `reply`. When Claude failed, `reply` is the fallback line and `assistantError` names the error class.
+
+Errors: `400 bad_request`, `401`, `503 brain_offline` (trade path only when Claude is on), `503 not_configured`. `tts` is `null` normally, `{"error":"not_configured", ...}` with empty audio when no TTS key is set in live mode, or `{"error":"tts_failed","message"}` with empty audio when TTS failed or timed out (the reply text is still real).
 
 ### POST /news/inject
 
@@ -376,7 +407,7 @@ Read-only snapshots for the dashboard. No device token. Each one works with an e
 
 `mode` is `not_configured` in live mode without `HEDERA_ACCOUNT_ID` + `HEDERA_PRIVATE_KEY` (`fake` in test mode, where the fake payer is charged against an in-memory cap so the numbers still move). The real cap is persisted in `server/.ghosty/spend.json` (UTC day). `hcsTopicUrl` is `null` until the first audit message creates the topic (or `HEDERA_HCS_TOPIC_ID` is set).
 
-`autopay` is `X402_AUTOPAY` (default `true`): every decision (voice, text, button, injected or live headline) pays for one `/signal` on its own, alongside the 0G call, with no human approval. The decision waits up to `X402_AUTOPAY_WAIT_MS` (default 4000) for settlement, and the tx id is added to the `proposed` episode's `receipts`. A failed or refused payment (spend cap, policy) is logged and never blocks the decision. Nothing is paid while safe-stop is engaged or when the Hedera keys are missing. `lastPayment.trigger` is `decision` for these and `sim` for `POST /sim/pay-signal`; both share one daily cap.
+`autopay` is `X402_AUTOPAY` (default `true`): every decision (voice, text, button, injected or live headline) pays for one `/signal` on its own, right after the 0G decider returns, with no human approval. The decision waits up to `X402_AUTOPAY_WAIT_MS` (default 4000) for settlement, and the tx id is added to the `proposed` episode's `receipts`. A failed or refused payment (spend cap, policy) is logged and never blocks the decision. Nothing is paid while safe-stop is engaged, when the 0G call fails or times out (`brain_offline`), on Claude-answered voice turns, for simulation decisions (`/sim/run`, paper only) or when the Hedera keys are missing. `lastPayment.trigger` is `decision` for these and `sim` for `POST /sim/pay-signal`; both share one daily cap.
 
 ### POST /sim/pay-signal
 
@@ -622,3 +653,89 @@ cd server && npm run x402:demo        # prints tx id + HashScan link, appends do
 ```
 
 **Spend controls (agent side, before signing):** host allowlist `X402_ALLOWED_HOSTS`; HBAR on the configured network only; never pays its own account; per-payment cap `X402_MAX_PER_CALL_TINYBAR`; daily cap `X402_MAX_SPEND_TINYBAR` persisted in `server/.ghosty/spend.json`. Each payment is also written to an HCS audit topic (`server/src/payments/hcsAudit.ts`).
+
+---
+
+## Simulation runs
+
+Replay a real past event on a compressed clock: real headlines, real historical prices, a **real** decider call
+per shock headline (0G Compute in live mode; safe-stop applies), paper execution only. Background, scenario format
+and sources: [simulation.md](simulation.md).
+
+### GET /sim/scenarios
+
+`{"scenarios": [{id, title, description, category, start, end, interval, markets: [{coin, source, symbol, proxy?}], headlines: [{ts, title, source, url, handle?, tsNote?}], sources: []}]}`
+
+### POST /sim/run
+
+Body `{"scenarioId": string, "speed"?: number, "autoPauseOnAlert"?: boolean}`. `speed` = market seconds per real
+second (default 360: one market hour per 10 s). `autoPauseOnAlert` (default true) stops the clock while an alert
+waits for a press. Loads the candles (cached in `server/.ghosty/candles/`), starts the clock, replaces any earlier
+run. **200** `{"runId": "sim-1a2b3c4d"}`. **400** bad body, **401** device token, **404** `unknown_scenario`,
+**502** `candles_failed` (price source unreachable).
+
+### POST /sim/control
+
+Body `{"action": "pause" | "resume" | "stop"}`. **200** `{"ok": true, ...status}` (the `GET /sim/run` shape, so
+`status` is the run status). `stop` ends the run and clears any pending sim decision. **409** `no_run` before the
+first run.
+
+### GET /sim/run
+
+```json
+{
+  "sim": true,
+  "runId": "sim-b908cfd6",
+  "scenarioId": "sec-sues-binance-2023",
+  "status": "paused",
+  "pauseReason": "awaiting_press",
+  "simTime": "2023-06-05T15:00:00.000Z",
+  "start": "2023-06-05T12:00:00Z",
+  "end": "2023-06-06T20:00:00Z",
+  "progress": 0.094,
+  "speed": 1800,
+  "autoPauseOnAlert": true,
+  "notionalUsd": 25,
+  "pnlUsd": -0.5897,
+  "pnlPct": -2.3588,
+  "realizedPnlUsd": 0,
+  "unrealizedPnlUsd": -0.5897,
+  "baselinePnlUsd": 0.2924,
+  "baselinePct": 1.1696,
+  "baseline": "hold: $25 equal-weight long across the scenario markets from the run start",
+  "positions": [{ "coin": "BTC", "size": -0.00085265, "entryPx": 26388.45, "markPx": 27080.12, "unrealizedPnlUsd": -0.5897, "realizedPnlUsd": 0 }],
+  "fills": [{ "orderId": "paper-1", "coin": "BTC", "isBuy": false, "sizeUsd": 12.5, "size": 0.00046661, "px": 26788.81, "mid": 26802.21, "simTime": "2023-06-05T15:00:00.000Z" }],
+  "mids": { "BTC": 26802.21, "ETH": 1846.1 },
+  "decisions": 1,
+  "decisionList": [{ "sim": true, "runId": "sim-b908cfd6", "simTime": "...", "headline": "SEC Files 13 Charges ...", "requestId": "8ed99de9-…", "signal": "regulatory_crackdown", "confidence": 0.72, "rationale": "...", "actions": [], "zeroG": {} }],
+  "episodes": 1,
+  "episodeList": [{ "seq": 1, "ts": "...", "runId": "sim-b908cfd6", "requestId": "8ed99de9-…", "outcome": "proposed", "storage": "local", "rootHash": "local:945a…", "prevRoot": null }],
+  "lastRootHash": "local:945a…",
+  "pending": { "requestId": "8ed99de9-…", "signal": "regulatory_crackdown", "actions": [], "headline": "SEC Files 13 Charges ..." },
+  "headlines": { "total": 2, "delivered": 1 },
+  "memory": "default snapshot: 0G memory not configured (OG_PRIVATE_KEY unset); watchlist = scenario markets",
+  "storage": "local",
+  "error": null
+}
+```
+
+`status` is `idle` (no run yet; ids null, numbers 0) | `running` | `paused` | `done`. `notionalUsd` is
+`MAX_TRADE_USD`, the base for `pnlPct` and `baselinePct`. `decisions` / `episodes` are counts; the lists hold the
+details. A decision entry with `skipped` (`no_shock`, `brain_offline`, `error`) had no trade; `brain_offline` is the
+safe-stop and never becomes a fake decision. `lastRootHash` is this run's newest episode root (replay start).
+
+### GET /episodes
+
+Query `runId?`, `limit?` (1–500, default 50). `{"runId", "storage": "local" | "0g", "episodes": [...]}`, oldest
+first. Sim entries: `{seq, ts, runId, scenarioId, requestId, outcome, storage, rootHash, prevRoot, txHash?,
+storageError?, sim: true, simTime, headline, signal, storagescan}`. Without `runId` the live 0G episode index
+(`episodes.jsonl`) is merged in (`sim: false`).
+
+### GET /episodes/replay
+
+Query `from=<rootHash>` (a `local:<sha256>` root or a 0G merkle root), `limit?` (1–200, default 20). Reads each
+body (local log, or download from 0G Storage when `OG_PRIVATE_KEY` is set), follows `prevRoot`, and returns
+`{"from", "episodes": [...], "stoppedAt", "problems": []}` with episodes **oldest → newest**:
+`{rootHash, storage, requestId, seq, ts, outcome, sim, runId, prevRoot, storagescan, decision: {signal, confidence,
+rationale}, orders: [], episode}`. `stoppedAt` is null when the walk reached the chain start, else the next root
+(limit hit, or the root that could not be read; see `problems`). Live batch blobs expand to one entry per episode.

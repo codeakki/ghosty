@@ -1,0 +1,389 @@
+/* ---------------------------------------------------------------------------
+ * Simulation: SIM banner, Simulate tab (scenarios, controls, scoreboard, summary, replay), SIM tags on cards.
+ * Sim is always labelled in words ("SIM", "Paper trade"). Spacing uses the strict scale only.
+ * ------------------------------------------------------------------------- */
+
+.lv-app[data-sim='true'] {
+  /* Banner height, built from the scale: 32 + 8 = 40px. Every fixed-height column subtracts it. */
+  --sim-h: calc(var(--space-6) + var(--space-2));
+}
+
+.lv-sim-banner {
+  position: sticky;
+  top: calc(var(--nav-h) + env(safe-area-inset-top));
+  z-index: 19;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: var(--sim-h);
+  padding: 0 var(--gutter);
+  background: var(--color-raised);
+  border-bottom: 1px solid var(--color-line);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  animation: lv-sim-fade var(--dur-base) var(--ease-out) both;
+}
+
+.lv-sim-banner-text {
+  flex: 1;
+  font-variant-numeric: tabular-nums;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lv-sim-banner-link {
+  flex: none;
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  text-decoration: underline;
+  text-underline-offset: var(--space-0);
+}
+
+.lv-sim-banner-link:hover {
+  color: var(--color-text);
+}
+
+.lv-sim-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: var(--space-0);
+}
+
+.lv-sim-progress-fill {
+  display: block;
+  height: 100%;
+  background: var(--color-muted);
+  transform-origin: left center;
+  transition: transform var(--dur-base) linear;
+}
+
+.lv-sim-tag {
+  display: inline-flex;
+  align-items: center;
+  height: calc(var(--space-4) + var(--space-1));
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  box-shadow: inset 0 0 0 1px var(--color-line-strong);
+  color: var(--color-text);
+  font: 600 11px / 1 var(--font-mono);
+  letter-spacing: 0.06em;
+}
+
+.lv-sim-time {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A faint hatch on every sim card: a second cue next to the SIM tag, never colour alone. */
+.lv-card[data-sim='true'],
+.lv-row[data-sim='true'] {
+  background-image: repeating-linear-gradient(135deg, transparent 0 var(--space-2), rgb(155 166 181 / 0.04) var(--space-2) var(--space-3));
+}
+
+.lv-kind-replay::before {
+  background: var(--color-track-0g);
+}
+
+/* ---- Simulate tab layout ---------------------------------------------------- */
+
+.lv-sim {
+  display: flex;
+  flex-direction: column;
+  gap: var(--stack-gap);
+  min-width: 0;
+  padding: var(--space-5) var(--gutter);
+}
+
+.lv-main-simulate > .lv-feed {
+  height: calc(100dvh - var(--nav-h) - var(--sim-h, 0px));
+}
+
+@media (min-width: 1200px) {
+  .lv-main-simulate {
+    flex: none;
+    display: grid;
+    grid-template-columns: minmax(340px, 3fr) minmax(320px, 3fr) 5fr;
+    grid-template-rows: minmax(0, 1fr);
+    height: calc(100dvh - var(--nav-h) - var(--sim-h, 0px));
+  }
+
+  .lv-main-simulate > .lv-sim,
+  .lv-main-simulate > .lv-device {
+    overflow-y: auto;
+    border-right: 1px solid var(--color-line);
+  }
+
+  .lv-main-simulate > .lv-device {
+    padding-top: var(--space-5);
+  }
+
+  .lv-main-simulate .orb {
+    --orb: clamp(176px, 13vw, 232px);
+  }
+
+  .lv-main-simulate > .lv-feed {
+    height: 100%;
+  }
+}
+
+.lv-sim-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.lv-sim-title {
+  margin: 0;
+  font-size: var(--text-lg);
+  line-height: var(--leading-lg);
+  font-weight: 600;
+}
+
+.lv-sim-sub,
+.lv-sim-hint,
+.lv-sim-empty {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: var(--text-sm);
+}
+
+.lv-sim-hint {
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+}
+
+.lv-sim-notice {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-warn-tint);
+  color: var(--color-text);
+}
+
+.lv-sim-label {
+  padding: 0;
+  margin-bottom: var(--space-2);
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  font-weight: 500;
+}
+
+.lv-sim-speed {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.lv-sim-mult {
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+}
+
+.lv-sim-scenarios {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lv-sim-scenario {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-1);
+  color: var(--color-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.lv-sim-scenario:hover {
+  box-shadow: inset 0 0 0 1px var(--color-line-strong);
+}
+
+.lv-sim-scenario[aria-pressed='true'] {
+  box-shadow: inset 0 0 0 2px var(--color-ghost);
+}
+
+.lv-sim-scenario-title {
+  font-size: var(--text-md);
+  line-height: var(--leading-md);
+  font-weight: 600;
+}
+
+.lv-sim-scenario-meta {
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+}
+
+.lv-sim-scenario-desc {
+  color: var(--color-muted);
+}
+
+.lv-sim-scenario-skel {
+  height: var(--size-card-min);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-1);
+}
+
+.lv-sim-controls,
+.lv-sim-replay {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.lv-sim-replay {
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-line);
+}
+
+.lv-sim-replay .lv-sim-hint,
+.lv-sim-controls .lv-sim-hint {
+  flex: 1;
+  min-width: 12rem;
+}
+
+.lv-btn-primary {
+  border-color: var(--color-ghost);
+  background: var(--color-ghost);
+  color: var(--color-ghost-ink);
+}
+
+.lv-btn-primary:disabled {
+  border-color: var(--color-line-strong);
+  background: var(--color-raised);
+}
+
+.lv-sim-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--card-pad-y) var(--card-pad-x);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-1);
+}
+
+.lv-sim-card-title {
+  margin: 0;
+  font-size: var(--text-md);
+  line-height: var(--leading-md);
+  font-weight: 600;
+  text-wrap: balance;
+}
+
+.lv-sim-summary-line,
+.lv-sim-scenario-meta {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.lv-sim-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.lv-sim-stats > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.lv-sim-stats dt {
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+}
+
+.lv-sim-stats dd {
+  margin: 0;
+  font-size: var(--text-lg);
+  line-height: var(--leading-lg);
+  font-weight: 600;
+}
+
+.lv-sim-signed {
+  white-space: nowrap;
+}
+
+.lv-sim-up {
+  color: var(--color-up);
+}
+
+.lv-sim-down {
+  color: var(--color-down);
+}
+
+.lv-sim-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+}
+
+.lv-sim-table th {
+  padding: 0 0 var(--space-2);
+  color: var(--color-muted);
+  font-weight: 500;
+  text-align: left;
+}
+
+.lv-sim-table td {
+  white-space: nowrap;
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--color-line);
+}
+
+.lv-sim-table th + th,
+.lv-sim-table td + td {
+  padding-left: var(--space-2);
+}
+
+.lv-sim-table .lv-sim-r {
+  text-align: right;
+}
+
+.lv-sim-none {
+  color: var(--color-muted);
+}
+
+@keyframes lv-sim-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lv-sim-banner {
+    animation-duration: 150ms;
+  }
+
+  .lv-sim-progress-fill {
+    transition: none;
+  }
+}

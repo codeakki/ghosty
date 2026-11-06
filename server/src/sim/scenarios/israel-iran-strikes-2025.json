@@ -1,0 +1,45 @@
+{
+  "id": "israel-iran-strikes-2025",
+  "title": "Israel strikes Iran (13 Jun 2025)",
+  "description": "Israel struck Iranian nuclear and missile sites shortly after midnight UTC on 13 June 2025, and Iran answered with drones. BTC fell about 2% within the hour while gold rallied.",
+  "category": "geopolitical",
+  "start": "2025-06-12T18:00:00Z",
+  "end": "2025-06-13T12:00:00Z",
+  "interval": "15m",
+  "markets": [
+    { "coin": "BTC", "source": "binance", "symbol": "BTCUSDT" },
+    { "coin": "ETH", "source": "binance", "symbol": "ETHUSDT" },
+    { "coin": "xyz:GOLD", "source": "binance", "symbol": "PAXGUSDT", "proxy": "PAXG (gold-backed token) as the gold price" }
+  ],
+  "headlines": [
+    {
+      "ts": "2025-06-13T00:15:00Z",
+      "title": "Israel strikes Iran nuclear facilities, missile factories",
+      "source": "Reuters",
+      "handle": "Reuters",
+      "url": "https://www.deccanherald.com/amp/story/world%2Fisrael-strikes-iran-nuclear-facilities-missile-factories-3584001",
+      "tsNote": "Reuters headline (syndicated copy). Strikes began around 03:00 Tehran time (about 23:30 UTC on 12 Jun); minute of publication not verified."
+    },
+    {
+      "ts": "2025-06-13T05:30:00Z",
+      "title": "Israel hits Iran nuclear, missile facilities; Tehran launches drones",
+      "source": "Reuters",
+      "handle": "Reuters",
+      "url": "https://theeastafrican.co.ke/tea/news/world/israel-hits-iran-nuclear-facilities-iran-launches-drones-5079952",
+      "tsNote": "Updated Reuters headline on 13 Jun 2025 after Iran's drone launch; minute not verified."
+    },
+    {
+      "ts": "2025-06-13T09:00:00Z",
+      "title": "Israel hits Iran nuclear and missile facilities, appears to block retaliation",
+      "source": "Reuters",
+      "handle": "Reuters",
+      "url": "https://www.thejakartapost.com/world/2025/06/13/israel-hits-iran-nuclear-and-missile-facilities-appears-to-block-retaliation.html",
+      "tsNote": "Later Reuters update dated 13 Jun 2025; minute not verified."
+    }
+  ],
+  "sources": [
+    "https://www.rte.ie/news/middle-east/2025/0613/1518227-israel-strikes-iran",
+    "https://www.irishtimes.com/world/2025/06/13/israel-attacks-irans-nuclear-sites-in-major-attack",
+    "Prices: Binance public klines BTCUSDT, ETHUSDT and PAXGUSDT, 15m (data-api.binance.vision). Gold is the PAXG proxy, not a gold future."
+  ]
+}
