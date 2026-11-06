@@ -23,7 +23,8 @@ import { createNewsAggregator, createNewsProviders } from './news/factory.js';
 import { shockDetector, type ShockResult } from './news/shock.js';
 import type { NewsItem } from './news/types.js';
 import { createPayments, decisionToSignal, registerPaidRoutes, type PaidRoutesOptions, type Payments, type SignalPayload } from './payments/index.js';
-import { Pipeline, type PipelineDeps } from './pipeline.js';
+import { SignalBuyer } from './payments/signalBuyer.js';
+import { Pipeline, type PipelineDeps, type SignalPaymentReceipt } from './pipeline.js';
 import { BrainSwitch, isBrainOnline } from './safety/safeStop.js';
 import { InjectedNewsProvider } from './sim/injected.js';
 import { registerSimRoutes } from './sim/routes.js';
@@ -169,7 +170,31 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
   // Headlines posted to /news/inject join whatever news providers are configured.
   const injected = new InjectedNewsProvider();
   const deps = { ...providers.deps, ...opts.deps };
-  const pipeline = new Pipeline({ ...deps, news: [...deps.news, injected], observer: state });
+  // One buyer for the decision loop and POST /sim/pay-signal: same daily cap, same lastPayment.
+  const buyer = new SignalBuyer(config, payments);
+  // X402_AUTOPAY: every decision pays for /signal itself, no human approval. Skipped while the brain is offline
+  // (no decision will come of it) and when Hedera keys are missing (live mode would only throw not_configured).
+  const paySignal =
+    config.X402_AUTOPAY && payments.mode !== 'not_configured'
+      ? async (): Promise<SignalPaymentReceipt> => {
+          if (!(await brainOnline())) throw new Error('brain offline: not paying for /signal');
+          try {
+            const { payment } = await buyer.buy('decision');
+            app.log.info({ txId: payment.txId, hashscanUrl: payment.hashscanUrl, mode: payment.mode }, 'agent paid for /signal (autopay)');
+            return { txId: payment.txId, hashscanUrl: payment.hashscanUrl };
+          } catch (err) {
+            app.log.warn({ err: (err as Error).message }, 'autopay for /signal failed; deciding without it');
+            throw err;
+          }
+        }
+      : undefined;
+  const pipeline = new Pipeline({
+    paySignal,
+    paySignalWaitMs: config.X402_AUTOPAY_WAIT_MS,
+    ...deps,
+    news: [...deps.news, injected],
+    observer: state,
+  });
 
   // 0G failures never become a fake decision: map them to 503 so the pod says "brain offline".
   app.setErrorHandler(async (err, req, reply) => {
@@ -373,6 +398,7 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
     state,
     agent: providers.agent,
     payments,
+    buyer,
     executor: providers.executor,
     brainOnline,
     requireDevice,

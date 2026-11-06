@@ -77,6 +77,10 @@ const ConfigSchema = z.object({
   HEDERA_HCS_TOPIC_ID: optional,
   /** Facilitator that verifies and settles payments. Default: Blocky402 for HEDERA_NETWORK (see defaultFacilitatorUrl). */
   X402_FACILITATOR_URL: optional,
+  /** The decision loop pays for GET /signal itself, once per decision, with no human approval. */
+  X402_AUTOPAY: bool(true),
+  /** How long a decision waits for its payment to settle before answering; a later settlement is still logged. */
+  X402_AUTOPAY_WAIT_MS: posInt(4000),
   /** Merchant account that receives /signal payments. Defaults to HEDERA_ACCOUNT_ID; must differ from the payer. */
   X402_PAY_TO: optional,
   /** Price of one GET /signal in tinybars (1 HBAR = 100,000,000). Default 0.01 HBAR. */

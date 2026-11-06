@@ -369,17 +369,20 @@ Read-only snapshots for the dashboard. No device token. Each one works with an e
   "remainingToday": 99000000,
   "allowedHosts": ["localhost", "127.0.0.1"],
   "hcsTopicUrl": "https://hashscan.io/testnet/topic/0.0.…",
-  "lastPayment": { "mode": "real", "txId": "0.0.1001@…", "hashscanUrl": "https://hashscan.io/testnet/transaction/…", "amountTinybar": 1000000, "requestId": "…", "at": "…" }
+  "autopay": true,
+  "lastPayment": { "mode": "real", "txId": "0.0.1001@…", "hashscanUrl": "https://hashscan.io/testnet/transaction/…", "amountTinybar": 1000000, "requestId": "…", "trigger": "decision", "at": "…" }
 }
 ```
 
 `mode` is `not_configured` in live mode without `HEDERA_ACCOUNT_ID` + `HEDERA_PRIVATE_KEY` (`fake` in test mode, where the fake payer is charged against an in-memory cap so the numbers still move). The real cap is persisted in `server/.ghosty/spend.json` (UTC day). `hcsTopicUrl` is `null` until the first audit message creates the topic (or `HEDERA_HCS_TOPIC_ID` is set).
 
+`autopay` is `X402_AUTOPAY` (default `true`): every decision (voice, text, button, injected or live headline) pays for one `/signal` on its own, alongside the 0G call, with no human approval. The decision waits up to `X402_AUTOPAY_WAIT_MS` (default 4000) for settlement, and the tx id is added to the `proposed` episode's `receipts`. A failed or refused payment (spend cap, policy) is logged and never blocks the decision. Nothing is paid while safe-stop is engaged or when the Hedera keys are missing. `lastPayment.trigger` is `decision` for these and `sim` for `POST /sim/pay-signal`; both share one daily cap.
+
 ### POST /sim/pay-signal
 
 Device token. No body. The agent pays `http://127.0.0.1:$PORT/signal` with no human approval (`payForSignal` → x402 → facilitator → Hedera), then `/x402/status.lastPayment` shows the HashScan link.
 
-**200** `{"mode","txId","hashscanUrl","amountTinybar","requestId","at","status","body","audit"}` where `body` is the paid `/signal` payload.
+**200** `{"mode","txId","hashscanUrl","amountTinybar","requestId","trigger":"sim","at","status","body","audit"}` where `body` is the paid `/signal` payload.
 
 | Status | When | Body |
 |---|---|---|

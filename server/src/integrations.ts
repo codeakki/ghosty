@@ -7,8 +7,9 @@ import { notConfiguredInfo, ProviderNotConfiguredError } from './mode.js';
 import type { Executor } from './execution/executor.js';
 import { HyperliquidVenue, parseFallbackCoins, resolveCoinIn, type MarketInfo } from './execution/hyperliquid.js';
 import { HcsAuditLog, type Payments } from './payments/index.js';
-import { HostNotAllowedError, SpendCap, SpendCapExceededError } from './payments/spendControls.js';
-import { PaymentPolicyError, X402Payer, X402PaymentError } from './payments/x402Client.js';
+import type { SignalBuyer } from './payments/signalBuyer.js';
+import { HostNotAllowedError, SpendCapExceededError } from './payments/spendControls.js';
+import { PaymentPolicyError, X402PaymentError } from './payments/x402Client.js';
 import type { PodState } from './sim/state.js';
 import { UniswapSpotLeg } from './wallet/uniswap.js';
 
@@ -21,6 +22,8 @@ export interface IntegrationContext {
   state: PodState;
   agent: Agent;
   payments: Payments;
+  /** Shared with the decision loop (X402_AUTOPAY): same spend cap, same lastPayment. */
+  buyer: SignalBuyer;
   executor: Executor;
   /** Same source as /health (includes the sim safe-stop switch). */
   brainOnline: () => Promise<boolean>;
@@ -36,14 +39,7 @@ const MarketsQuery = z.object({
   limit: z.coerce.number().int().min(1).max(500).default(100).catch(100),
 });
 
-export interface LastPayment {
-  mode: Payments['mode'];
-  txId: string;
-  hashscanUrl: string;
-  amountTinybar?: number;
-  requestId?: string;
-  at: string;
-}
+export type { LastPayment } from './payments/signalBuyer.js';
 
 /** 0G explorers: Galileo testnet unless the storage RPC points elsewhere. */
 export function zeroGExplorers(config: Pick<Config, 'OG_RPC_URL'>): { chainscan: string; storagescan: string } {
@@ -88,13 +84,8 @@ export function registerIntegrationRoutes(app: FastifyInstance, ctx: Integration
   });
 
   // ---------- Hedera x402 ----------
-  // The real payer persists its daily cap in server/.ghosty/spend.json. The fake payer gets an in-memory cap
-  // charged at the /signal price so the sim panel still shows the budget moving.
-  const spendCap =
-    payments.payer instanceof X402Payer
-      ? payments.payer.spendCap
-      : new SpendCap({ maxPerDayTinybar: config.X402_MAX_SPEND_TINYBAR, file: null });
-  let lastPayment: LastPayment | null = null;
+  const { buyer } = ctx;
+  const spendCap = buyer.spendCap;
 
   app.get('/x402/status', async () => ({
     mode: payments.mode,
@@ -108,27 +99,16 @@ export function registerIntegrationRoutes(app: FastifyInstance, ctx: Integration
     remainingToday: spendCap.remainingToday(),
     allowedHosts: config.X402_ALLOWED_HOSTS,
     hcsTopicUrl: payments.audit instanceof HcsAuditLog ? (payments.audit.topicUrl() ?? null) : null,
-    lastPayment,
+    autopay: config.X402_AUTOPAY,
+    lastPayment: buyer.lastPayment,
   }));
 
   // The agent pays for our own paywalled /signal with no human approval (real mode: x402 on hedera:testnet).
   app.post('/sim/pay-signal', { preHandler: ctx.requireDevice }, async (req, reply) => {
-    const url = `http://127.0.0.1:${config.PORT}/signal`;
     try {
-      if (payments.mode === 'fake') spendCap.assertCanSpend(config.X402_SIGNAL_PRICE_TINYBAR);
-      const paid = await payments.payer.payForSignal(url);
-      if (payments.mode === 'fake') spendCap.record(config.X402_SIGNAL_PRICE_TINYBAR, 'fake');
-      const body = paid.body as { requestId?: unknown } | undefined;
-      lastPayment = {
-        mode: payments.mode,
-        txId: paid.txId,
-        hashscanUrl: paid.hashscanUrl,
-        amountTinybar: paid.amountTinybar ?? (payments.mode === 'fake' ? config.X402_SIGNAL_PRICE_TINYBAR : undefined),
-        requestId: typeof body?.requestId === 'string' ? body.requestId : undefined,
-        at: new Date().toISOString(),
-      };
+      const { paid, payment } = await buyer.buy('sim');
       req.log.info({ txId: paid.txId, hashscanUrl: paid.hashscanUrl, mode: payments.mode }, 'sim paid for /signal');
-      return { ...lastPayment, status: paid.status, body: paid.body, audit: paid.audit ?? null };
+      return { ...payment, status: paid.status, body: paid.body, audit: paid.audit ?? null };
     } catch (err) {
       // Live mode without Hedera keys: 503 not_configured from the app error handler.
       if (err instanceof ProviderNotConfiguredError) throw err;
