@@ -156,8 +156,8 @@ export const SignalCard = memo(function SignalCard(props: {
     >
       {safeStop ? (
         <Empty tone="bad" title="Brain offline: trading blocked (safe-stop)">
-          0G is unreachable (or simulated off). Ghosty never fakes a decision: Confirm returns 503 and no order is sent. Turn off
-          Safe-stop in the top bar to resume.
+          0G Compute is not answering, or Safe-stop was switched on. Ghosty never fakes a decision: Confirm returns 503 and no
+          order is sent. It resumes by itself once 0G answers again; if you switched Safe-stop on, switch it off in the top bar.
         </Empty>
       ) : null}
 
