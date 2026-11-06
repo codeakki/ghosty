@@ -175,13 +175,13 @@ describe('sim engine', () => {
     assert.equal(eng.status().simTime, '2025-01-01T00:30:00.000Z');
     await eng.step(60_000); // would be +6 h, clamps at the first headline (01:00)
     assert.equal(eng.status().simTime, '2025-01-01T01:00:00.000Z');
-    assert.equal(eng.status().decisions[0]!.skipped, 'no_shock');
+    assert.equal(eng.status().decisionList[0]!.skipped, 'no_shock');
     assert.equal((decider as StubDecider).calls.length, 0);
     await eng.step(60_000); // clamps at 02:00, the shock → real decider call
     let st = eng.status();
     assert.equal(st.simTime, '2025-01-01T02:00:00.000Z');
     assert.equal((decider as StubDecider).calls.length, 1);
-    assert.equal(st.decisions[1]!.requestId, '0g-mock-1');
+    assert.equal(st.decisionList[1]!.requestId, '0g-mock-1');
     assert.equal(st.status, 'paused');
     assert.equal(st.pauseReason, 'awaiting_press');
     assert.equal(st.pending?.requestId, '0g-mock-1');
@@ -204,8 +204,16 @@ describe('sim engine', () => {
     // Short $12.50 from 99.9, BTC closes at 90.
     assert.ok(Math.abs(st.pnlUsd - (12.5 / 99.9) * 9.9) < 1e-3, `pnl ${st.pnlUsd}`);
     assert.equal(st.baselinePnlUsd, -1.25); // $25 hold: half BTC −10 %, half ETH flat
+    assert.equal(st.notionalUsd, 25);
+    assert.equal(st.baselinePct, -5);
+    assert.ok(Math.abs(st.pnlPct - (st.pnlUsd / 25) * 100) < 1e-3);
+    assert.equal(st.decisions, 2);
+    assert.equal(st.episodes, 2);
+    assert.equal(st.lastRootHash, st.episodeList[1]!.rootHash);
+    // The auto-pause was broadcast as a `sim` event with status "paused".
+    assert.ok(events.some((e) => e.type === 'sim' && e.data.status === 'paused' && e.data.pauseReason === 'awaiting_press'));
     assert.deepEqual(
-      st.episodes.map((e) => [e.outcome, e.storage]),
+      st.episodeList.map((e) => [e.outcome, e.storage]),
       [
         ['proposed', 'local'],
         ['executed', 'local'],
@@ -227,15 +235,15 @@ describe('sim engine', () => {
     await eng.runUntilIdle();
     const st = eng.status();
     assert.equal(st.status, 'done');
-    assert.equal(st.decisions[1]!.skipped, 'brain_offline');
-    assert.equal(st.decisions[1]!.requestId, 'rq-fail');
+    assert.equal(st.decisionList[1]!.skipped, 'brain_offline');
+    assert.equal(st.decisionList[1]!.requestId, 'rq-fail');
     assert.equal(st.fills.length, 0);
-    assert.equal(st.episodes.length, 0);
+    assert.equal(st.episodes, 0);
 
     const off = engine({ online: false });
     await off.eng.start({ scenarioId: 'test-shock' });
     await off.eng.runUntilIdle();
-    assert.equal(off.eng.status().decisions[1]!.skipped, 'brain_offline');
+    assert.equal(off.eng.status().decisionList[1]!.skipped, 'brain_offline');
     assert.equal((off.decider as StubDecider).calls.length, 0);
   });
 
@@ -246,12 +254,27 @@ describe('sim engine', () => {
     const st = eng.status();
     assert.match(st.memory!, /default snapshot: 0G memory not configured/);
     assert.equal(st.storage, 'local');
-    assert.equal(st.decisions[1]!.requestId, '0g-mock-1');
+    assert.equal(st.decisionList[1]!.requestId, '0g-mock-1');
     assert.equal(st.pending?.requestId, '0g-mock-1'); // no auto-pause: still pending, clock ran on
     const lines = readFileSync(episodes.path, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
     assert.equal(lines[0].storage, 'local');
     assert.match(lines[0].rootHash, /^local:[0-9a-f]{64}$/);
     assert.equal(lines[0].body.sim, true);
+  });
+});
+
+describe('sim stop', () => {
+  it('stop clears a pending sim decision so a later press cannot fill', async () => {
+    const { eng } = engine();
+    await eng.start({ scenarioId: 'test-shock' });
+    await eng.runUntilIdle();
+    assert.ok(eng.hasPending());
+    const st = eng.control('stop');
+    assert.equal(st.status, 'done');
+    assert.equal(st.pending, null);
+    assert.equal(eng.hasPending(), false);
+    await assert.rejects(eng.press('confirm'), /no pending sim decision/);
+    assert.equal(eng.status().fills.length, 0);
   });
 });
 
@@ -387,8 +410,12 @@ describe('sim routes', () => {
     const eps = (await app.inject({ method: 'GET', url: `/episodes?runId=${runId}` })).json();
     assert.equal(eps.storage, 'local');
     assert.deepEqual(eps.episodes.map((e: { outcome: string }) => e.outcome), ['proposed', 'executed']);
-    const replay = (await app.inject({ method: 'GET', url: `/episodes/replay?from=${encodeURIComponent(eps.episodes[1].rootHash)}` })).json();
+    assert.equal(st.lastRootHash, eps.episodes[1].rootHash);
+    const replay = (await app.inject({ method: 'GET', url: `/episodes/replay?from=${encodeURIComponent(st.lastRootHash)}` })).json();
     assert.deepEqual(replay.episodes.map((e: { requestId: string }) => e.requestId), ['0g-mock-1', '0g-mock-1']);
+    assert.deepEqual(replay.episodes[0].decision, { signal: 'geopolitical_shock', confidence: 0.8, rationale: 'Shock. Short BTC. Press to confirm.' });
+    assert.deepEqual(replay.episodes[0].orders, []);
+    assert.equal(replay.episodes[1].orders[0].orderId, 'paper-1');
     await app.close();
   });
 
@@ -407,8 +434,10 @@ describe('sim routes', () => {
     assert.equal((await app.inject({ method: 'POST', url: '/sim/control', payload: { action: 'resume' } })).json().status, 'running');
     await app.ghosty.sim.runUntilIdle();
     assert.equal(app.ghosty.sim.status().storage, '0g');
-    assert.equal(app.ghosty.sim.status().episodes[0]!.storage, '0g');
-    assert.equal((await app.inject({ method: 'POST', url: '/sim/control', payload: { action: 'stop' } })).json().status, 'done');
+    assert.equal(app.ghosty.sim.status().episodeList[0]!.storage, '0g');
+    const stopped = (await app.inject({ method: 'POST', url: '/sim/control', payload: { action: 'stop' } })).json();
+    assert.equal(stopped.ok, true);
+    assert.equal(stopped.status, 'done');
     assert.equal((await app.inject({ method: 'POST', url: '/sim/control', payload: { action: 'bogus' } })).statusCode, 400);
     await app.close();
   });

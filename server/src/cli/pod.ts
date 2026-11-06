@@ -261,8 +261,8 @@ async function sim(args: string[]): Promise<void> {
   if (sub === 'status') {
     const { res, data } = await request('GET', '/sim/run');
     check(res, data, 'GET /sim/run');
-    const { decisions, episodes, fills, ...s } = data as Record<string, unknown> & { decisions: unknown[]; episodes: unknown[]; fills: unknown[] };
-    print({ ...s, decisions, fills, episodes: episodes.length });
+    const { episodeList: _episodes, ...s } = data as Record<string, unknown>;
+    print(s);
     return;
   }
   throw new CliError('sim needs list | run <id> [--speed N] | pause | resume | stop | status');

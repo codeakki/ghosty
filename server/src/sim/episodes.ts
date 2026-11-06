@@ -156,6 +156,10 @@ export interface ReplayedEpisode {
   prevRoot: string | null;
   /** storagescan link for 0G roots. */
   storagescan: string | null;
+  decision: { signal: string | null; confidence: number | null; rationale: string | null };
+  /** Venue (or paper) order results; [] for proposals. */
+  orders: unknown[];
+  /** The raw episode body as stored. */
   episode: unknown;
 }
 
@@ -231,10 +235,21 @@ export async function replayChain(opts: {
         runId: typeof ep.runId === 'string' ? ep.runId : null,
         prevRoot: body.prevRoot ?? null,
         storagescan: storage === '0g' ? `${opts.storagescan}/submission/${root}` : null,
+        decision: decisionOf(ep.decision),
+        orders: Array.isArray(ep.orders) ? ep.orders : [],
         episode: ep,
       });
     }
     root = body.prevRoot ?? null;
   }
   return { from: opts.from, episodes: out.reverse(), stoppedAt: root, problems };
+}
+
+function decisionOf(d: unknown): ReplayedEpisode['decision'] {
+  const o = (d && typeof d === 'object' ? d : {}) as Record<string, unknown>;
+  return {
+    signal: typeof o.signal === 'string' ? o.signal : null,
+    confidence: typeof o.confidence === 'number' ? o.confidence : null,
+    rationale: typeof o.rationale === 'string' ? o.rationale : null,
+  };
 }

@@ -66,7 +66,7 @@ export function registerSimRunRoutes(app: FastifyInstance, ctx: SimRunRouteConte
     const parsed = ControlBody.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: 'bad_request', message: 'body must be {"action": "pause"|"resume"|"stop"}' });
     try {
-      return engine.control(parsed.data.action);
+      return { ok: true, ...engine.control(parsed.data.action) };
     } catch (err) {
       return fail(reply, err);
     }

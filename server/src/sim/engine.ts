@@ -66,16 +66,28 @@ export interface SimRunStatus {
   progress: number;
   speed: number;
   autoPauseOnAlert: boolean;
+  /** Capital base for the percentages (MAX_TRADE_USD): the most one decision may deploy, and the hold notional. */
+  notionalUsd: number;
   pnlUsd: number;
+  /** pnlUsd / notionalUsd × 100. */
+  pnlPct: number;
   realizedPnlUsd: number;
   unrealizedPnlUsd: number;
   baselinePnlUsd: number;
+  /** baselinePnlUsd / notionalUsd × 100. */
+  baselinePct: number;
   baseline: string;
   positions: ReturnType<PaperVenue['snapshot']>['positions'];
   fills: PaperFill[];
   mids: Record<string, number>;
-  decisions: SimDecisionEntry[];
-  episodes: Array<Omit<SimEpisodeEntry, 'body'>>;
+  /** Number of headlines that went through the decision loop (incl. skipped). Details in decisionList. */
+  decisions: number;
+  decisionList: SimDecisionEntry[];
+  /** Number of episodes written for this run. Details in episodeList. */
+  episodes: number;
+  episodeList: Array<Omit<SimEpisodeEntry, 'body'>>;
+  /** Root of this run's newest episode (start GET /episodes/replay here), or null. */
+  lastRootHash: string | null;
   pending: { requestId: string; signal: Signal; actions: PlannedAction[]; headline: string } | null;
   headlines: { total: number; delivered: number };
   memory: string | null;
@@ -254,6 +266,8 @@ export class SimEngine {
       } else {
         run.status = 'done';
         run.pauseReason = null;
+        // Stopping drops the pending sim decision: a later press must not fill on a finished run.
+        run.pending = null;
         this.stopTimer();
       }
     }
@@ -358,16 +372,22 @@ export class SimEngine {
         progress: 0,
         speed: DEFAULT_SPEED,
         autoPauseOnAlert: true,
+        notionalUsd: this.deps.maxTradeUsd,
         pnlUsd: 0,
+        pnlPct: 0,
         realizedPnlUsd: 0,
         unrealizedPnlUsd: 0,
         baselinePnlUsd: 0,
+        baselinePct: 0,
         baseline: baselineLabel(this.deps.maxTradeUsd),
         positions: [],
         fills: [],
         mids: {},
-        decisions: [],
-        episodes: [],
+        decisions: 0,
+        decisionList: [],
+        episodes: 0,
+        episodeList: [],
+        lastRootHash: null,
         pending: null,
         headlines: { total: 0, delivered: 0 },
         memory: null,
@@ -377,6 +397,9 @@ export class SimEngine {
     }
     const book = run.venue.snapshot();
     const span = run.endMs - run.startMs;
+    const notional = this.deps.maxTradeUsd;
+    const baselinePnl = holdBaselinePnl(run.startPx, (c) => run.price(c), notional);
+    const pct = (usd: number) => (notional > 0 ? Math.round((usd / notional) * 100 * 10_000) / 10_000 : 0);
     return {
       sim: true,
       runId: run.runId,
@@ -389,16 +412,22 @@ export class SimEngine {
       progress: span > 0 ? Math.round(Math.min(1, (run.simTime - run.startMs) / span) * 1000) / 1000 : 1,
       speed: run.speed,
       autoPauseOnAlert: run.autoPauseOnAlert,
+      notionalUsd: notional,
       pnlUsd: book.pnlUsd,
+      pnlPct: pct(book.pnlUsd),
       realizedPnlUsd: book.realizedPnlUsd,
       unrealizedPnlUsd: book.unrealizedPnlUsd,
-      baselinePnlUsd: holdBaselinePnl(run.startPx, (c) => run.price(c), this.deps.maxTradeUsd),
-      baseline: baselineLabel(this.deps.maxTradeUsd),
+      baselinePnlUsd: baselinePnl,
+      baselinePct: pct(baselinePnl),
+      baseline: baselineLabel(notional),
       positions: book.positions,
       fills: [...run.venue.fills],
       mids: run.mids(),
-      decisions: structuredClone(run.decisions),
-      episodes: run.episodes.map(({ body: _body, ...rest }) => rest),
+      decisions: run.decisions.length,
+      decisionList: structuredClone(run.decisions),
+      episodes: run.episodes.length,
+      episodeList: run.episodes.map(({ body: _body, ...rest }) => rest),
+      lastRootHash: run.episodes.at(-1)?.rootHash ?? null,
       pending: run.pending
         ? {
             requestId: run.pending.decision.requestId,
@@ -503,6 +532,7 @@ export class SimEngine {
       if (run.autoPauseOnAlert && run.status === 'running') {
         run.status = 'paused';
         run.pauseReason = 'awaiting_press';
+        this.emitStatus(true);
       }
     }
   }
@@ -536,6 +566,7 @@ export class SimEngine {
       })
       .then((entry) => {
         run.episodes.push(entry);
+        run.episodes.sort((a, b) => a.seq - b.seq);
         const { body: _body, ...summary } = entry;
         this.deps.publish('episode', run.tag(summary));
         this.emitStatus();
