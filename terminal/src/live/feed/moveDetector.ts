@@ -4,9 +4,10 @@
  *
  * A move is emitted when a watched asset
  *  - moves at least `thresholdPct` within the last `windowMs` (default 0.5% in 5 min), or
- *  - breaks its rolling 1 h high or low, or
- *  - crosses ±`dayPct` (default 2%) on the day (versus the previous day's close from /market/snapshot).
+ *  - breaks its rolling 1 h high or low.
+ * An optional ±`dayPct` crossing on the day (versus the previous close) exists but is off by default.
  * At most one move per asset per `throttleMs` (default 10 min): market moves are context, not the story.
+ * `?moveThreshold=` can override the percentage for a local test; the UI never advertises it.
  * A high/low break must clear the old level by a fifth of the threshold (0.1% by default), so a
  * one-tick wobble across the level is not news.
  *
@@ -21,7 +22,8 @@ export interface MoveOptions {
   throttleMs: number;
   rangeMs: number;
   minRangeMs: number;
-  dayPct: number;
+  /** ±% on the day that counts as a crossing; null (the default) turns the rule off. */
+  dayPct: number | null;
 }
 
 export const DEFAULT_MOVE_OPTIONS: MoveOptions = {
@@ -30,7 +32,7 @@ export const DEFAULT_MOVE_OPTIONS: MoveOptions = {
   throttleMs: 10 * 60_000,
   rangeMs: 60 * 60_000,
   minRangeMs: 10 * 60_000,
-  dayPct: 2,
+  dayPct: null,
 };
 
 interface Sample {
@@ -155,8 +157,9 @@ export function detectMoves(
 
     // Day band: which side of ±dayPct the change on the day is on. The first sighting only records it.
     const ref = prevDay?.[coin];
-    const dayPctNow = ref && ref > 0 ? ((px - ref) / ref) * 100 : null;
-    const band: -1 | 0 | 1 | null = dayPctNow === null ? null : dayPctNow >= opts.dayPct ? 1 : dayPctNow <= -opts.dayPct ? -1 : 0;
+    const dayPct = opts.dayPct;
+    const dayPctNow = dayPct !== null && ref && ref > 0 ? ((px - ref) / ref) * 100 : null;
+    const band: -1 | 0 | 1 | null = dayPct === null || dayPctNow === null ? null : dayPctNow >= dayPct ? 1 : dayPctNow <= -dayPct ? -1 : 0;
     const crossedDay = band !== null && band !== 0 && prev.dayBand !== null && band !== prev.dayBand;
 
     let track: CoinTrack = { ...prev, samples: [...samples, { t: at, px }], buckets, dayBand: band ?? prev.dayBand };
