@@ -189,7 +189,26 @@ Reply with ONLY one JSON object, no prose, no code fences:
 
 const MAX_NEWS = 15;
 const MAX_HISTORY = 10;
-export const DECIDE_TIMEOUT_MS = 20_000;
+/** Per-attempt deadline (OG_DECIDE_TIMEOUT_MS). Slow networks and busy providers need far more than 20 s. */
+export const DECIDE_TIMEOUT_MS = 45_000;
+
+/** Error code anywhere on the cause chain (undici puts ECONNRESET a level or two down). */
+function causeCode(err: unknown): string | undefined {
+  let cur: unknown = err;
+  for (let depth = 0; depth < 5 && cur && typeof cur === 'object'; depth++) {
+    const code = (cur as { code?: unknown }).code;
+    if (typeof code === 'string') return code;
+    cur = (cur as { cause?: unknown }).cause;
+  }
+  return undefined;
+}
+
+/** Transport failures worth exactly one more try: our deadline / SDK timeout, or a reset connection. Nothing else. */
+export function isRetryableTransportError(err: unknown): boolean {
+  if (err instanceof OpenAI.APIConnectionTimeoutError || err instanceof OpenAI.APIUserAbortError) return true;
+  if (err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError')) return true;
+  return causeCode(err) === 'ECONNRESET';
+}
 
 /** Pull the JSON object out of a model reply (tolerates code fences and <think> blocks). */
 export function extractJson(content: string): unknown {
@@ -263,7 +282,7 @@ export interface ZeroGDeciderOptions {
   model: string;
   scorer?: CredibilityScorer;
   logger?: Logger;
-  /** Overall deadline for decide(), both attempts included. Default 20 s. */
+  /** Per-attempt deadline. Default 45 s. A timeout or ECONNRESET is retried once; nothing else is. */
   timeoutMs?: number;
   /** Send response_format json_object. Default true. */
   jsonMode?: boolean;
@@ -323,20 +342,9 @@ export class ZeroGDecider implements Decider {
       { role: 'user', content: JSON.stringify(userPayload) },
     ];
 
-    const deadline = AbortSignal.timeout(this.timeoutMs);
     let lastProblem = '';
     for (let attempt = 1; attempt <= 2; attempt++) {
-      const { data, response, request_id } = await this.client.chat.completions
-        .create(
-          {
-            model: this.opts.model,
-            messages,
-            // No temperature: several catalog models do not list it in supported_parameters.
-            ...(this.jsonMode ? { response_format: { type: 'json_object' as const } } : {}),
-          },
-          { signal: deadline },
-        )
-        .withResponse();
+      const { data, response, request_id } = await this.complete(messages);
 
       const trace = (data as unknown as { x_0g_trace?: RouterTrace }).x_0g_trace;
       const ids: ZeroGTrace = {
@@ -379,6 +387,29 @@ export class ZeroGDecider implements Decider {
       );
     }
     throw new BrainOfflineError(`0G returned invalid decision JSON twice: ${lastProblem}`, 'invalid_output');
+  }
+
+  /** One chat completion with its own deadline; a timeout or ECONNRESET gets exactly one more try. */
+  private async complete(messages: OpenAI.Chat.ChatCompletionMessageParam[]) {
+    const once = () =>
+      this.client.chat.completions
+        .create(
+          {
+            model: this.opts.model,
+            messages,
+            // No temperature: several catalog models do not list it in supported_parameters.
+            ...(this.jsonMode ? { response_format: { type: 'json_object' as const } } : {}),
+          },
+          { signal: AbortSignal.timeout(this.timeoutMs) },
+        )
+        .withResponse();
+    try {
+      return await once();
+    } catch (err) {
+      if (!isRetryableTransportError(err)) throw err;
+      this.logger.warn({ err: errorMessage(err), code: causeCode(err) ?? null }, '0G call timed out or was reset: retrying once');
+      return once();
+    }
   }
 
   private parse(content: string): { ok: true; value: LlmDecision } | { ok: false; problem: string } {
