@@ -6,15 +6,8 @@ import type { TerminalState } from '../state/reducer';
 import { Sparkline } from './Sparkline';
 import { Empty, Panel, Tag } from './ui';
 
-/** Watch-list order. Only coins the server actually reports are shown; nothing is invented. */
+/** Fallback rows from bare mids before the snapshot arrives. Only coins the server reports are shown. */
 const PREFERRED = ['BTC', 'ETH', 'xyz:GOLD', 'xyz:CL', 'xyz:TSLA'];
-
-function rank(coin: string): number {
-  const i = PREFERRED.indexOf(coin);
-  if (i !== -1) return i;
-  if (/SPX|SP500|US500/i.test(coin)) return PREFERRED.length;
-  return PREFERRED.length + 1;
-}
 
 interface Row {
   coin: string;
@@ -38,7 +31,8 @@ function buildRows(assets: MarketAsset[] | undefined, mids: Record<string, numbe
       rows.set(coin, { coin, label: coin, mid: mids[coin]!, change: null, funding: null, oi: null });
     }
   }
-  return [...rows.values()].sort((a, b) => rank(a.coin) - rank(b.coin) || a.coin.localeCompare(b.coin));
+  // Server order = MARKET_WATCHLIST order; mid-only fallback rows go after it in PREFERRED order.
+  return [...rows.values()];
 }
 
 /** 24 h of hourly closes with the live mid as the last point; session ticks until history arrives. */
