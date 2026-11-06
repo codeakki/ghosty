@@ -204,6 +204,8 @@ export interface TextTurnResult {
   sampleRate: number;
   audioBytes: number;
   audioBase64: string;
+  /** Live mode without TTS keys: the decision stands and the audio is empty. */
+  tts?: { error: string; provider?: string; missingEnv?: string[] } | null;
 }
 
 export interface VoiceReply {

@@ -153,6 +153,8 @@ export class MicRecorder {
   private stream: MediaStream | null = null;
   private nodes: AudioNode[] = [];
   private rate = 48000;
+  /** Live input level for visuals (the Live view's orb). Null until recording starts. */
+  analyser: AnalyserNode | null = null;
   private cancelled = false;
 
   static supported(): boolean {
@@ -179,7 +181,12 @@ export class MicRecorder {
     source.connect(tap);
     tap.connect(mute);
     mute.connect(ac.destination);
-    this.nodes = [source, tap, mute];
+    const analyser = ac.createAnalyser();
+    analyser.fftSize = 512;
+    analyser.smoothingTimeConstant = 0.6;
+    source.connect(analyser);
+    this.analyser = analyser;
+    this.nodes = [source, tap, mute, analyser];
   }
 
   /** Stop and return a 16 kHz WAV, or null when the clip is too short. */
@@ -197,5 +204,81 @@ export class MicRecorder {
       off += c.length;
     }
     return encodeWav(downsampleTo16k(samples, this.rate), 16000);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Levels for visuals (Live view orb)
+// ---------------------------------------------------------------------------
+
+/** RMS of the analyser's current time-domain frame, scaled to roughly 0..1 for speech. */
+export function readLevel(analyser: AnalyserNode, buf: Float32Array<ArrayBuffer>): number {
+  analyser.getFloatTimeDomainData(buf);
+  let sum = 0;
+  for (let i = 0; i < buf.length; i++) sum += buf[i]! * buf[i]!;
+  const rms = Math.sqrt(sum / buf.length);
+  // Speech RMS sits around 0.02..0.2; map it onto 0..1 with a soft knee.
+  return Math.min(1, Math.sqrt(rms * 6));
+}
+
+/** Play raw PCM s16le mono through an analyser, so the caller can animate with the real amplitude. */
+export function playPcmMetered(buf: ArrayBuffer, rate: number): { analyser: AnalyserNode | null; done: Promise<void>; stop: () => void } {
+  const n = Math.floor(buf.byteLength / 2);
+  if (n === 0) return { analyser: null, done: Promise.resolve(), stop: () => {} };
+  const ac = audioContext();
+  const dv = new DataView(buf);
+  const ab = ac.createBuffer(1, n, rate);
+  const ch = ab.getChannelData(0);
+  for (let i = 0; i < n; i++) ch[i] = dv.getInt16(i * 2, true) / 32768;
+  const src = ac.createBufferSource();
+  src.buffer = ab;
+  const analyser = ac.createAnalyser();
+  analyser.fftSize = 512;
+  analyser.smoothingTimeConstant = 0.5;
+  src.connect(analyser);
+  analyser.connect(ac.destination);
+  const done = new Promise<void>((resolve) => {
+    src.onended = () => {
+      analyser.disconnect();
+      resolve();
+    };
+  });
+  src.start();
+  return {
+    analyser,
+    done,
+    stop: () => {
+      try {
+        src.stop();
+      } catch {
+        // Already stopped.
+      }
+    },
+  };
+}
+
+/** A soft two-note chime (E5 → B5) for an incoming alert. Silent until the page has had a user gesture. */
+export function chime(): void {
+  try {
+    const ac = ctx;
+    if (!ac || ac.state !== 'running') return;
+    const t0 = ac.currentTime;
+    for (const [offset, freq] of [
+      [0, 659.25],
+      [0.16, 987.77],
+    ] as const) {
+      const osc = ac.createOscillator();
+      const g = ac.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      g.gain.setValueAtTime(0.0001, t0 + offset);
+      g.gain.exponentialRampToValueAtTime(0.09, t0 + offset + 0.03);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + offset + 0.6);
+      osc.connect(g).connect(ac.destination);
+      osc.start(t0 + offset);
+      osc.stop(t0 + offset + 0.65);
+    }
+  } catch {
+    // Audio unavailable: the orb and the label still show the alert.
   }
 }
