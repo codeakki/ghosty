@@ -232,6 +232,7 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
       : config.CLAUDE_VOICE_ENABLED && config.ANTHROPIC_API_KEY
         ? new ClaudeVoiceAssistant({ apiKey: config.ANTHROPIC_API_KEY, model: config.ANTHROPIC_MODEL, context: () => voiceContext() })
         : undefined;
+  // Only the live decision loop pays. The SimEngine below gets the bare decider, never paySignal: sim decisions are paper-only.
   const pipeline = new Pipeline({
     paySignal,
     paySignalWaitMs: config.X402_AUTOPAY_WAIT_MS,

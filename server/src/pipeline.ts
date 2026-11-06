@@ -60,8 +60,9 @@ export interface PipelineDeps {
   userId?: string;
   observer?: PipelineObserver;
   /**
-   * Pay for the premium /signal (x402 on Hedera) once per decision, with no human approval. Runs alongside the
-   * 0G call; a failed payment never blocks or fakes a decision. Undefined = no autonomous payments.
+   * Pay for the premium /signal (x402 on Hedera) once per decision, with no human approval. Starts only after the
+   * 0G decider returned a decision (never on brain_offline, safe-stop or Claude-answered turns); a failed payment
+   * never blocks or fakes a decision. Undefined = no autonomous payments. The SimEngine never gets one (paper only).
    */
   paySignal?: () => Promise<SignalPaymentReceipt>;
   /** Max wait for that payment after the decision is ready (default 4000 ms). It still settles and is logged later. */
@@ -278,12 +279,13 @@ export class Pipeline {
   }
 
   private async decide(transcript: string, trigger: DecisionTrigger, headline?: NewsItem): Promise<Decision> {
-    const payment = this.startSignalPayment();
     const [fetched, memory] = await Promise.all([fetchAll(this.deps.news), this.deps.memory.load(this.userId)]);
     await this.deps.observer?.onNews?.(fetched);
     // Put the headline being asked about first so the rationale quotes it.
     const news = headline ? [headline, ...fetched.filter((n) => n.id !== headline.id)] : fetched;
     const decision = await this.deps.decider.decide({ transcript, news, memory, maxTradeUsd: this.deps.maxTradeUsd });
+    // Pay only once the 0G decision actually ran: a 0G timeout / brain_offline throws above and never pays.
+    const payment = this.startSignalPayment();
     this.deps.observer?.onDecision?.(decision, { trigger, transcript, headline });
     const paid = await this.awaitSignalPayment(payment);
     await this.logEpisode({
