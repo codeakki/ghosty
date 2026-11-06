@@ -75,7 +75,8 @@ const ConfigSchema = z.object({
   HEDERA_NETWORK: z.enum(['testnet', 'mainnet']).default('testnet').catch('testnet'),
   /** Pin an existing HCS audit topic instead of creating one (cached in server/.ghosty/hcs.json). */
   HEDERA_HCS_TOPIC_ID: optional,
-  X402_FACILITATOR_URL: z.string().default('https://x402.org/facilitator'),
+  /** Facilitator that verifies and settles payments. Default: Blocky402 for HEDERA_NETWORK (see defaultFacilitatorUrl). */
+  X402_FACILITATOR_URL: optional,
   /** Merchant account that receives /signal payments. Defaults to HEDERA_ACCOUNT_ID; must differ from the payer. */
   X402_PAY_TO: optional,
   /** Price of one GET /signal in tinybars (1 HBAR = 100,000,000). Default 0.01 HBAR. */
@@ -167,8 +168,9 @@ const ConfigSchema = z.object({
 
 type ParsedConfig = z.infer<typeof ConfigSchema>;
 
-export type Config = Omit<ParsedConfig, 'GHOSTY_MODE' | 'NEWS_LIVE' | 'ETHOS_ENABLED'> & {
+export type Config = Omit<ParsedConfig, 'GHOSTY_MODE' | 'NEWS_LIVE' | 'ETHOS_ENABLED' | 'X402_FACILITATOR_URL'> & {
   GHOSTY_MODE: 'live' | 'test';
+  X402_FACILITATOR_URL: string;
   NEWS_LIVE: boolean;
   ETHOS_ENABLED: boolean;
 };
@@ -191,5 +193,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     GHOSTY_MODE: mode,
     NEWS_LIVE: parsed.NEWS_LIVE ?? live,
     ETHOS_ENABLED: parsed.ETHOS_ENABLED ?? live,
+    X402_FACILITATOR_URL: parsed.X402_FACILITATOR_URL ?? defaultFacilitatorUrl(parsed.HEDERA_NETWORK),
   };
+}
+
+/**
+ * Blocky402: open (no API key) and lists hedera:testnet / hedera:mainnet in /supported (checked 2026-11-06).
+ * https://x402.org/facilitator, the old default, reset connections on the bare host; only www.x402.org answered.
+ */
+export function defaultFacilitatorUrl(network: 'testnet' | 'mainnet'): string {
+  return network === 'mainnet' ? 'https://api.blocky402.com' : 'https://api.testnet.blocky402.com';
 }

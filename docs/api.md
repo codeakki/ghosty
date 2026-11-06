@@ -497,7 +497,7 @@ Protocol: x402 **v2** as spoken by `@x402/core` / `@x402/fetch` 2.30. Scheme `ex
 **Flow**
 
 ```
-Agent (X402Payer)                        Server GET /signal                Facilitator (x402.org, hedera:testnet)
+Agent (X402Payer)                        Server GET /signal                Facilitator (Blocky402, hedera:testnet)
    | GET /signal                            |  (first call: GET /supported → feePayer, cached)
    |--------------------------------------->|                                 |
    |<-- 402 + PAYMENT-REQUIRED header ------|                                 |
@@ -569,7 +569,7 @@ Sent when there is no payment header, or when the payment is malformed, does not
 | `amount` | `X402_SIGNAL_PRICE_TINYBAR` (default `1000000` = 0.01 HBAR) |
 | `asset` | `0.0.0` = HBAR. (A `"$0.01"` price would mean testnet USDC `0.0.429274`, not HBAR.) |
 | `payTo` | `X402_PAY_TO`, falling back to `HEDERA_ACCOUNT_ID`. Must not be the payer's account. |
-| `extra.feePayer` | Facilitator's fee-payer account from its `GET /supported` (x402.org: `0.0.9185802`) |
+| `extra.feePayer` | Facilitator's fee-payer account from its `GET /supported` (Blocky402 testnet: `0.0.7162784`, x402.org: `0.0.9185802`) |
 
 `error` values: `payment required` (no header), `invalid_payment_header`, `no_matching_payment_requirements`, any facilitator `invalidReason` (e.g. `invalid_exact_hedera_payload_signature_invalid`, `invalid_exact_hedera_payload_preflight_failed`), or a settle `errorReason` (e.g. `transaction_failed`).
 
@@ -603,7 +603,7 @@ Body:
 | Status | When | Body |
 |---|---|---|
 | 503 | No `X402_PAY_TO` / `HEDERA_ACCOUNT_ID` configured | `{"error":"payments_not_configured"}` |
-| 503 | Facilitator `/supported` unreachable (retried on the next request) | `{"error":"facilitator_unavailable","facilitator":"https://x402.org/facilitator"}` |
+| 503 | Facilitator `/supported` unreachable (retried on the next request) | `{"error":"facilitator_unavailable","facilitator":"https://api.testnet.blocky402.com"}` |
 
 ### Try it
 

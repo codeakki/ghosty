@@ -198,7 +198,7 @@ describe('provider registry', () => {
     if (url === 'https://api.groq.com/openai/v1/models') return { status: 200, body: { data: [{ id: 'whisper-large-v3-turbo' }] } };
     if (url.startsWith('https://api.elevenlabs.io/')) return { status: 401, body: { detail: 'invalid_api_key' } };
     if (url.endsWith('/v1/models') && url.includes('router')) return new TypeError('fetch failed', { cause: { code: 'ECONNRESET' } });
-    if (url === 'https://x402.org/facilitator/supported') return { status: 200, body: { kinds: [{ network: 'hedera:testnet' }] } };
+    if (url === 'https://api.testnet.blocky402.com/supported') return { status: 200, body: { kinds: [{ network: 'hedera:testnet' }] } };
     if (url === 'https://api.hyperliquid-testnet.xyz/info') {
       const body = JSON.parse(String(init.body)) as { type: string; dex?: string };
       if (body.type === 'clearinghouseState') return { status: 200, body: { marginSummary: { accountValue: body.dex === 'xyz' ? '0.0' : '25.5' } } };

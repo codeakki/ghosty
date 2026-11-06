@@ -91,7 +91,7 @@ Details, endpoints and gas numbers: [research/0g.md → Implementation notes](re
 
 ### 2. Hedera x402
 
-- [x] x402 endpoint (`GET /signal`) settling on `hedera:testnet` through a listed facilitator. Evidence: `server/src/payments/x402Server.ts` (`registerPaidRoutes`; `@x402/core` resource server + `@x402/hedera` exact scheme, facilitator `https://x402.org/facilitator`); 402 payload in [api.md](api.md#get-signal-x402-on-hedera); tests in `server/test/x402.test.ts`. Live settlement needs a funded account (see next item).
+- [x] x402 endpoint (`GET /signal`) settling on `hedera:testnet` through a listed facilitator. Evidence: `server/src/payments/x402Server.ts` (`registerPaidRoutes`; `@x402/core` resource server + `@x402/hedera` exact scheme, facilitator: Blocky402 by default, `X402_FACILITATOR_URL` to override); 402 payload in [api.md](api.md#get-signal-x402-on-hedera); tests in `server/test/x402.test.ts`. Live settlement needs a funded account (see next item).
 - [ ] Agent wallet pays at least once with **no human approval**. Code done: `server/src/payments/x402Client.ts` (`@x402/fetch` + Hedera signer). To finish: fund two testnet accounts, run `npm run x402:demo`, and a row lands in [evidence.md](evidence.md).
 - [ ] Settled **tx ID** in README with HashScan link (copy the first row of [evidence.md](evidence.md))
 - [ ] Architecture + payment-flow diagram in README (flow diagram ready in [api.md](api.md#get-signal-x402-on-hedera))

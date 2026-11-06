@@ -73,7 +73,7 @@ See [`.env.example`](.env.example) for every variable with a comment. All keys a
 | `DEVICE_TOKEN` | unset (check skipped) | `X-Device-Token` on `/voice` and `/button` |
 | `GROQ_API_KEY`, `ELEVENLABS_API_KEY` | unset | `audio/` |
 | `OG_ROUTER_URL`, `OG_API_KEY`, `OG_PRIVATE_KEY`, `OG_INDEXER_URL` | testnet URLs | `agent/`, `safety/` |
-| `HEDERA_ACCOUNT_ID`, `HEDERA_PRIVATE_KEY`, `X402_FACILITATOR_URL` | x402.org facilitator | `payments/` |
+| `HEDERA_ACCOUNT_ID`, `HEDERA_PRIVATE_KEY`, `X402_FACILITATOR_URL` | Blocky402 facilitator (default; override with `X402_FACILITATOR_URL`) | `payments/` |
 | `HL_MASTER_ADDRESS`, `HL_AGENT_PRIVATE_KEY`, `HL_TESTNET` | `HL_TESTNET=true` | `execution/` |
 | `UNISWAP_API_KEY`, `EVM_PRIVATE_KEY`, `EVM_ADDRESS`, `EVM_RPC_URL` | unset | `wallet/` |
 | `CRYPTOPANIC_TOKEN`, `ETHOS_CLIENT`, `XAI_API_KEY` | `ETHOS_CLIENT=ghosty@0.1.0` | `news/`, `credibility/` |
