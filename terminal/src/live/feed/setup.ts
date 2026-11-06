@@ -30,10 +30,10 @@ interface Rule {
 
 /** Most important first. `headline` is used when this is the top issue. */
 const RULES: Rule[] = [
-  { id: '0g-router', label: '0G brain key', effect: 'decisions', headline: 'Ghosty can’t decide yet — the 0G brain key isn’t set up.', blocking: true },
-  { id: '0g-storage', label: 'Storage wallet', effect: 'decisions and memory', headline: 'Ghosty can’t decide yet — the storage wallet isn’t set up.', blocking: true },
-  { id: 'hyperliquid', label: 'Trading wallet', effect: 'placing trades', headline: 'Ghosty can’t place trades yet — the trading wallet isn’t set up.', blocking: true },
-  { id: 'groq', label: 'Voice input', effect: 'talking to the pod', headline: 'Voice isn’t set up yet — you can type instead.', blocking: false },
+  { id: '0g-router', label: '0G brain key', effect: 'decisions', headline: 'Ghosty can’t decide yet: the 0G brain key isn’t set up.', blocking: true },
+  { id: '0g-storage', label: 'Storage wallet', effect: 'decisions and memory', headline: 'Ghosty can’t decide yet: the storage wallet isn’t set up.', blocking: true },
+  { id: 'hyperliquid', label: 'Trading wallet', effect: 'placing trades', headline: 'Ghosty can’t place trades yet: the trading wallet isn’t set up.', blocking: true },
+  { id: 'groq', label: 'Voice input', effect: 'talking to the pod', headline: 'Voice isn’t set up yet. You can type instead.', blocking: false },
   { id: 'elevenlabs', label: 'Voice output', effect: 'spoken replies', headline: 'Spoken replies aren’t set up yet.', blocking: false },
   { id: 'hedera-payer', label: 'Hedera wallet', effect: 'paying for signals', headline: 'Paying for signals isn’t set up yet.', blocking: false },
   { id: 'hedera-merchant', label: 'Hedera merchant account', effect: 'selling signals', headline: 'Selling signals isn’t set up yet.', blocking: false },

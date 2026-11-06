@@ -170,6 +170,15 @@ describe('feed reducer: event → card', () => {
     expect(systemText(sys[0]!).raw[0]).toContain('probe text');
   });
 
+  it('a provider losing its config is a Setup notice, never a System card', () => {
+    const p = (state: 'live' | 'not_configured'): ProvidersStatus => ({
+      providers: [{ id: '0g-storage', label: '0G Storage', track: '0g', state, detail: 'OG_PRIVATE_KEY missing', missingEnv: state === 'live' ? [] : ['OG_PRIVATE_KEY'] }],
+    });
+    const s = run([sse('providers', p('live')), sse('providers', p('not_configured'), T0 + 1)]);
+    expect(only(s, 'system')).toEqual([]);
+    expect(s.cards.some((c) => c.kind === 'brain')).toBe(false);
+  });
+
   it('a network blip across several providers is one card, led by the most important one', () => {
     const many = (state: 'live' | 'offline'): ProvidersStatus => ({
       providers: [
@@ -180,9 +189,12 @@ describe('feed reducer: event → card', () => {
     const s = run([sse('providers', many('live')), sse('providers', many('offline'), T0 + 1)]);
     const [card] = only(s, 'system');
     const text = systemText(card!);
-    expect(text.title).toBe('0G brain unreachable — trading paused');
-    expect(text.detail).toContain('RSS feeds unreachable');
+    expect(text.title).toBe('0G brain unreachable, trading paused');
+    expect(text.detail).toContain('News wires unreachable');
     expect(text.title).not.toContain('glm-4.7');
+    expect(text.detail).not.toContain('glm-4.7');
+    // The raw probe text is only in the collapsed details.
+    expect(text.raw.join('\n')).toContain('glm-4.7 NOT listed');
     expect(text.tone).toBe('warn');
   });
 
@@ -200,7 +212,7 @@ describe('feed reducer: event → card', () => {
     const sys = only(s1, 'system');
     expect(sys).toHaveLength(1);
     expect(sys[0]!.flips).toBe(4);
-    expect(systemText(sys[0]!).title).toBe('RSS feeds online (4/4)');
+    expect(systemText(sys[0]!).title).toBe('News wires online (4/4)');
     expect(systemText(sys[0]!).detail).toContain('Changed 4 times');
     const s2 = run([sse('providers', p('offline'), T0 + 200_000)], s1);
     expect(only(s2, 'system')).toHaveLength(2);
@@ -210,9 +222,9 @@ describe('feed reducer: event → card', () => {
     const s = run([sse('state', snapshot()), sse('state', snapshot({ safeStop: true }), T0 + 1), sse('state', snapshot({ safeStop: false }), T0 + 2)]);
     const sys = only(s, 'system');
     expect(sys).toHaveLength(1);
-    expect(systemText(sys[0]!).title).toBe('Safe-stop off — trading allowed');
+    expect(systemText(sys[0]!).title).toBe('Safe-stop off, trading allowed');
     const later = run([sse('state', snapshot({ safeStop: true }), T0 + 120_000)], s);
-    expect(only(later, 'system').map((c) => systemText(c).title)).toEqual(['Safe-stop on — trading paused', 'Safe-stop off — trading allowed']);
+    expect(only(later, 'system').map((c) => systemText(c).title)).toEqual(['Safe-stop on, trading paused', 'Safe-stop off, trading allowed']);
   });
 
   it('an order that changes status updates its card in place', () => {

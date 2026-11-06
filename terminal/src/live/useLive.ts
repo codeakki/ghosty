@@ -116,7 +116,7 @@ function morphsOnScreen(prev: FeedCard[], next: FeedCard[], view: FeedView): boo
   return next.slice(0, 12).some((c) => c.kind === 'brain' && c.localId !== undefined && was.has(c.localId) && was.get(c.localId) !== c.status);
 }
 
-/** The move threshold can be lowered for a demo with ?moveThreshold=0.05 (read once per page load). */
+/** ?moveThreshold= overrides the move % for local testing (read once per page load). The UI never advertises it. */
 function useMoveOptions() {
   return useMemo(() => {
     const thresholdPct = typeof window === 'undefined' ? DEFAULT_MOVE_OPTIONS.thresholdPct : thresholdFromSearch(window.location.search);
