@@ -73,6 +73,15 @@ See [`.env.example`](.env.example) for every variable with a comment. All keys a
 | `DEVICE_TOKEN` | unset (check skipped) | `X-Device-Token` on `/voice` and `/button` |
 | `GROQ_API_KEY`, `ELEVENLABS_API_KEY` | unset | `audio/` |
 | `OG_ROUTER_URL`, `OG_API_KEY`, `OG_PRIVATE_KEY`, `OG_INDEXER_URL` | testnet URLs | `agent/`, `safety/` |
+| `OG_HEALTH_TIMEOUT_MS` | `15000` | `safety/safeStop.ts` (router reachability probe; offline after 2 failures in a row, online after 1 success) |
+| `OG_DECIDE_TIMEOUT_MS` | `45000` | `agent/decide.ts` (per 0G call; one retry on timeout or `ECONNRESET` only) |
+| `ANTHROPIC_API_KEY` | unset (Claude features off) | `claude/` (voice answers, news scout, `claude` probe). Claude never decides trades |
+| `ANTHROPIC_MODEL` | `claude-sonnet-5-5` | `claude/` |
+| `CLAUDE_VOICE_ENABLED` | `true` when `ANTHROPIC_API_KEY` is set | `claude/voice.ts`: questions on `/voice` and `/voice/text` answered by Claude (`answeredBy: "claude"`) |
+| `CLAUDE_SCOUT_ENABLED` | `true` when `ANTHROPIC_API_KEY` is set (needs `NEWS_LIVE`) | `claude/scout.ts`: web-search news scout feeding the aggregator |
+| `CLAUDE_SCOUT_MINUTES` | `5` | Scout cycle interval |
+| `CLAUDE_SCOUT_MAX_PER_DAY` | `200` | Scout cost guard: cycles per UTC day (overlapping cycles are skipped) |
+| `CLAUDE_SCOUT_QUERY` | breaking geopolitical, regulatory, exchange-hack and macro news that could move BTC, ETH, gold, oil or US stocks in the last hour | What the scout searches for |
 | `HEDERA_ACCOUNT_ID`, `HEDERA_PRIVATE_KEY`, `X402_FACILITATOR_URL` | x402.org facilitator | `payments/` |
 | `HL_MASTER_ADDRESS`, `HL_AGENT_PRIVATE_KEY`, `HL_TESTNET` | `HL_TESTNET=true` | `execution/` |
 | `UNISWAP_API_KEY`, `EVM_PRIVATE_KEY`, `EVM_ADDRESS`, `EVM_RPC_URL` | unset | `wallet/` |
@@ -85,7 +94,7 @@ See [`.env.example`](.env.example) for every variable with a comment. All keys a
 | Method | Path | Request | Response |
 |---|---|---|---|
 | `GET` | `/health` | none | `{"ok":true,"version":"0.1.0","safeStop":false}`. `safeStop: true` means 0G is unreachable and trading is blocked. |
-| `POST` | `/voice` | Body: WAV, 16-bit mono (16 kHz expected). `Content-Type: audio/wav` or `application/octet-stream`. Header `X-Device-Token` when `DEVICE_TOKEN` is set. | `200 application/octet-stream`: raw PCM s16le, mono, 16 kHz, no header. Headers `x-sample-rate`, `x-request-id` (0G inference id), `x-signal`. `400 bad_wav` for stereo or non-16-bit input, `401 unauthorized`, `503 {"error":"brain_offline"}`. |
+| `POST` | `/voice` | Body: WAV, 16-bit mono (16 kHz expected). `Content-Type: audio/wav` or `application/octet-stream`. Header `X-Device-Token` when `DEVICE_TOKEN` is set. | `200 application/octet-stream`: raw PCM s16le, mono, 16 kHz, no header. Headers `x-sample-rate`, `x-request-id` (0G inference id, or Claude `msg_…` id), `x-signal`, `x-answered-by` (`claude` or `0g`). `400 bad_wav` for stereo or non-16-bit input, `401 unauthorized`, `503 {"error":"brain_offline"}`. |
 | `POST` | `/button` | JSON `{"action":"confirm"}` or `{"action":"cancel"}`, same token header | `200 {action, requestId, signal, executed, actions[], orders[], swaps[]}`. Acts on the last spoken decision; with none pending it decides from the news alone. Confirm runs the Uniswap spot leg (if `UNISWAP_SPOT_LEG=true`) then the perp legs. `400` on a bad body, `503 brain_offline` or `503 memory_unavailable`. |
 | `GET` | `/signal` | x402 payment header | `402` with Hedera payment requirements, then `200` with the latest decision once paid. |
 

@@ -23,6 +23,8 @@ export interface SimRouteContext {
   requireDevice: preHandlerAsyncHookHandler;
   /** 503 brain_offline when safe-stop is engaged. */
   requireBrain: preHandlerAsyncHookHandler;
+  /** Claude answers questions: /voice/text then checks safe-stop on the 0G trade path only (in the pipeline). */
+  voiceRouting?: boolean;
 }
 
 const InjectBody = z.object({
@@ -132,23 +134,38 @@ export function registerSimRoutes(app: FastifyInstance, ctx: SimRouteContext): v
   });
 
   // Text turn: the voice loop without STT. JSON out, with the TTS reply as base64 PCM s16le.
-  app.post('/voice/text', guarded, async (req, reply) => {
+  // Questions are answered by Claude (answeredBy "claude", signal "none", no actions); trade requests by 0G.
+  const textGuard = ctx.voiceRouting ? { preHandler: [ctx.requireDevice] } : guarded;
+  app.post('/voice/text', textGuard, async (req, reply) => {
     const parsed = TextBody.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: 'bad_request', message: 'body must be {"text": string}' });
     const result = await pipeline.handleText(parsed.data.text);
-    req.log.info({ requestId: result.decision.requestId, signal: result.decision.signal }, 'text decision');
+    const decision = result.decision;
+    req.log.info(
+      { answeredBy: result.answeredBy, intent: result.intent, requestId: result.requestId, signal: decision?.signal, assistantError: result.assistantError },
+      'text turn',
+    );
+    reply.header('x-answered-by', result.answeredBy);
     return {
       transcript: result.transcript,
-      requestId: result.decision.requestId,
-      signal: result.decision.signal,
-      confidence: result.decision.confidence,
-      rationale: result.decision.rationale,
-      actions: result.decision.suggestedActions,
+      answeredBy: result.answeredBy,
+      intent: result.intent,
+      reply: result.reply,
+      requestId: result.requestId,
+      signal: decision?.signal ?? 'none',
+      confidence: decision?.confidence ?? 0,
+      rationale: result.reply,
+      actions: decision?.suggestedActions ?? [],
+      assistantError: result.assistantError ?? null,
       sampleRate: OUTPUT_SAMPLE_RATE,
       audioBytes: result.audio.length,
       audioBase64: result.audio.toString('base64'),
       // Live mode without TTS keys: the decision stands, the audio is empty.
-      tts: result.ttsNotConfigured ? { error: 'not_configured', ...result.ttsNotConfigured } : null,
+      tts: result.ttsNotConfigured
+        ? { error: 'not_configured', ...result.ttsNotConfigured }
+        : result.ttsFailed
+          ? { error: 'tts_failed', message: result.ttsFailed }
+          : null,
     };
   });
 
