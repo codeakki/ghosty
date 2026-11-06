@@ -36,3 +36,4 @@ Each row is one autonomous `GET /signal` payment by the agent wallet, settled on
 
 | Time (UTC) | Transaction (HashScan) | Amount | Payer → payTo | Signal requestId | HCS audit |
 |---|---|---|---|---|---|
+| 2026-11-06T17:09:08.654Z | [`0.0.9185802@1793984930.617250384`](https://hashscan.io/testnet/transaction/0.0.9185802-1793984930-617250384) | 0.01 HBAR | 0.0.11342726 → 0.0.11342424 | yes | [0.0.11342727 #4](https://hashscan.io/testnet/topic/0.0.11342727) |
