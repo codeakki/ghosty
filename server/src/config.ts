@@ -87,6 +87,9 @@ const ConfigSchema = z.object({
   OG_EPISODE_BATCH_SIZE: z.coerce.number().int().min(1).max(100).default(5).catch(5),
   /** Local cache dir for root-hash pointers (default: server/.ghosty). */
   OG_DATA_DIR: optional,
+  /** Where the newest memory root hash per account is kept: `file` (OG_DATA_DIR) or `ssm` (survives container restarts). */
+  OG_POINTER_STORE: z.enum(['file', 'ssm']).default('file').catch('file'),
+  OG_POINTER_PREFIX: z.string().default('/ghosty/memory'),
 
   // ---------- Hedera (accounts and keys: docs/hedera.md) ----------
   /** AGENT hot wallet: pays for intel via x402. Holds a small balance only (~20 HBAR + ~5 USDC). */
@@ -149,6 +152,10 @@ const ConfigSchema = z.object({
 
   HL_MASTER_ADDRESS: optional,
   HL_AGENT_PRIVATE_KEY: optional,
+  /** Who signs orders: `key` = HL_AGENT_PRIVATE_KEY on this server; `dabao` = the Dabao in the pod (key never here). */
+  HL_SIGNER: z.enum(['key', 'dabao']).default('key').catch('key'),
+  /** The Dabao's address (its GET_INFO reply), approved by the master as an API wallet. Required for HL_SIGNER=dabao. */
+  HL_DABAO_ADDRESS: optional,
   HL_TESTNET: bool(true),
   /** Builder-deployed (HIP-3) dexes to load besides the main dex. Testnet lists 250+ dexes, so never load all. */
   HL_DEXES: z.string().default('xyz'),
@@ -206,6 +213,8 @@ const ConfigSchema = z.object({
   SAFE_STOP_ENABLED: bool(true),
   SIMULATE_BRAIN_OFFLINE: bool(false),
   MAX_TRADE_USD: z.coerce.number().positive().default(25).catch(25),
+  /** Claude hears every voice turn and places explicit spoken orders on Hyperliquid, capped at MAX_TRADE_USD. */
+  VOICE_ORDERS_ENABLED: bool(false),
   /**
    * Let a simulation run also place REAL orders on Hyperliquid MAINNET when a sim trade is confirmed (opt-in per run
    * too). Always mainnet, whatever HL_TESTNET says. Off by default.

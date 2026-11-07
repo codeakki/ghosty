@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
+import type { JournalEntry } from '../agent/memory.js';
 import type { PlannedAction, Signal } from '../execution/playbook.js';
 
 /**
@@ -37,6 +38,8 @@ export interface VoiceContext {
   pendingTrade: PlannedAction[];
   /** Recent orders (newest first); stands in for positions. */
   recentOrders: Array<{ coin: string; isBuy: boolean; sizeUsd: number; status: string; at: string }>;
+  /** The wearer's stored memory from 0G (oldest first), or null when it could not be loaded. */
+  memory?: { riskProfile: string; journal: JournalEntry[] } | null;
 }
 
 export interface AssistantReply {
@@ -62,8 +65,12 @@ How you speak:
 - Your words are read aloud: no markdown, no lists, no emojis, no URLs, no symbols like % or $ written as symbols. Say numbers naturally ("about sixty-eight thousand dollars", "up one point two percent").
 - No hype and no financial advice. Do not tell the wearer to buy or sell. If they want a trade, say Ghosty's decision engine on 0G proposes trades and the button confirms them.
 - If the context does not contain the answer, say so plainly. Never invent prices, headlines or events.
+- The context includes the wearer's stored memory: earlier things they said, your replies and their past orders. Use it when it helps, for example "what did I buy today?".
 - Mention a headline's source when it matters, and say when a source has low credibility.
 - You never execute anything. Trades are proposed by 0G and confirmed with the physical button.`;
+
+/** Stored turns handed to Claude each time (the journal on 0G keeps more). */
+export const MEMORY_TURNS = 20;
 
 const round = (n: number | null, digits: number) => (n === null ? null : Number(n.toFixed(digits)));
 
@@ -90,6 +97,20 @@ export function buildVoiceUserMessage(question: string, ctx: VoiceContext): stri
     pendingAlert: ctx.pendingAlert,
     pendingTrade: ctx.pendingTrade.map((a) => ({ coin: a.coin, side: a.side, sizeUsd: a.sizeUsd })),
     recentOrders: ctx.recentOrders,
+    memory: ctx.memory
+      ? {
+          riskProfile: ctx.memory.riskProfile,
+          // Last turns only: enough to resolve "same as before" without flooding the prompt.
+          earlierTurns: ctx.memory.journal.slice(-MEMORY_TURNS).map((e) => ({
+            at: e.at,
+            said: e.said,
+            reply: e.reply,
+            ...(e.orders
+              ? { orders: e.orders.map((o) => ({ side: o.side, coin: o.coin, sizeUsd: o.sizeUsd, status: o.status, avgPx: o.avgPx, txHash: o.txHash })) }
+              : {}),
+          })),
+        }
+      : 'unavailable',
   };
   return `Context (live state, JSON):\n${JSON.stringify(context)}\n\nThe wearer says: ${question}`;
 }

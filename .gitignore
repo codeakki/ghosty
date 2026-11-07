@@ -39,3 +39,8 @@ Thumbs.db
 # Local agent tooling
 .claude/
 .playwright-mcp/
+
+# Dabao: one-time key header and build outputs (never commit)
+firmware/dabao/ghosty_signer/provision_key.h
+firmware/dabao/ghosty_signer.uf2
+firmware/dabao/ghosty_signer/host/host_signer

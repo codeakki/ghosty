@@ -9,6 +9,7 @@ import { InMemoryEpisodeLog, ZeroGEpisodeLog, type EpisodeLog } from './episode.
 import { consoleLogger, type Logger } from './log.js';
 import { InMemoryMemoryStore, ZeroGMemory, type MemoryStore } from './memory.js';
 import { updateZeroGState, zeroGState } from './status.js';
+import { SsmPointerStore } from './ssmPointer.js';
 import { ZeroGBlobStore, type BlobStore } from './storage.js';
 
 export { BrainOfflineError, ZeroGDecider, FakeDecider } from './decide.js';
@@ -91,6 +92,7 @@ export function createStorage(
   const dataDir = config.OG_DATA_DIR;
   const memory = new ZeroGMemory({
     store,
+    ...(config.OG_POINTER_STORE === 'ssm' ? { pointers: new SsmPointerStore(config.OG_POINTER_PREFIX) } : {}),
     key: deriveMemoryKey({ memoryKeyHex: config.OG_MEMORY_KEY, privateKey: config.OG_PRIVATE_KEY }),
     dataDir,
     logger,

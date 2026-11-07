@@ -19,12 +19,41 @@ export interface HistoryEntry {
   outcome: string;
 }
 
+/** One order a voice turn sent to the venue, as remembered. */
+export interface JournalOrder {
+  coin: string;
+  side: 'buy' | 'sell';
+  sizeUsd: number;
+  status: string;
+  orderId?: string;
+  avgPx?: number;
+  filled?: number;
+  /** Hyperliquid transaction hash of the fill, when it could be looked up. */
+  txHash?: string;
+  error?: string;
+}
+
+/** One thing the wearer said, what Ghosty answered, any orders, and the news at that moment. Most recent last. */
+export interface JournalEntry {
+  at: string;
+  said: string;
+  reply: string;
+  answeredBy: string;
+  orders?: JournalOrder[];
+  /** Top headlines in the context when the wearer spoke. */
+  news?: Array<{ title: string; source: string }>;
+  /** News-driven signal: the 0G decision and both checks (prediction-market odds, price move). */
+  signal?: Record<string, unknown>;
+}
+
 export interface UserMemory {
   /** Free-form preferences: watchlist, voice, quiet hours, etc. */
   preferences: Record<string, string | string[]>;
   riskProfile: RiskProfile;
   /** Most recent last. */
   history: HistoryEntry[];
+  /** Voice turns, trades and news, most recent last (stored on 0G with the rest). */
+  journal: JournalEntry[];
 }
 
 export interface MemoryStore {
@@ -37,10 +66,16 @@ export function defaultMemory(): UserMemory {
     preferences: { watchlist: ['BTC', 'ETH', 'xyz:GOLD', 'xyz:WTI'], voice: 'calm' },
     riskProfile: 'balanced',
     history: [],
+    journal: [],
   };
 }
 
 const MAX_HISTORY = 200;
+const MAX_JOURNAL = 200;
+
+function trim(memory: UserMemory): UserMemory {
+  return { ...memory, history: memory.history.slice(-MAX_HISTORY), journal: (memory.journal ?? []).slice(-MAX_JOURNAL) };
+}
 
 export class InMemoryMemoryStore implements MemoryStore {
   private readonly data = new Map<string, UserMemory>();
@@ -51,8 +86,7 @@ export class InMemoryMemoryStore implements MemoryStore {
   }
 
   async save(userId: string, memory: UserMemory): Promise<void> {
-    const trimmed = { ...memory, history: memory.history.slice(-MAX_HISTORY) };
-    this.data.set(userId, structuredClone(trimmed));
+    this.data.set(userId, structuredClone(trim(memory)));
   }
 }
 
@@ -64,6 +98,34 @@ export const UserMemorySchema = z.object({
   preferences: z.record(z.string(), z.union([z.string(), z.array(z.string())])),
   riskProfile: z.enum(['conservative', 'balanced', 'aggressive']),
   history: z.array(z.object({ at: z.string(), requestId: z.string(), signal: z.string(), outcome: z.string() })),
+  // Older blobs predate the journal.
+  journal: z
+    .array(
+      z.object({
+        at: z.string(),
+        said: z.string(),
+        reply: z.string(),
+        answeredBy: z.string(),
+        orders: z
+          .array(
+            z.object({
+              coin: z.string(),
+              side: z.enum(['buy', 'sell']),
+              sizeUsd: z.number(),
+              status: z.string(),
+              orderId: z.string().optional(),
+              avgPx: z.number().optional(),
+              filled: z.number().optional(),
+              txHash: z.string().optional(),
+              error: z.string().optional(),
+            }),
+          )
+          .optional(),
+        news: z.array(z.object({ title: z.string(), source: z.string() })).optional(),
+        signal: z.record(z.string(), z.unknown()).optional(),
+      }),
+    )
+    .default([]),
 });
 
 /** Plaintext inside the encrypted blob. */
@@ -88,8 +150,19 @@ export class MemoryUnavailableError extends Error {
   override readonly name = 'MemoryUnavailableError';
 }
 
+/**
+ * Where the newest {rootHash, txHash} per user is kept. The memory itself is on 0G; this is only its address.
+ * Default: <dataDir>/memory.json. On a container with a throwaway disk use a durable one (agent/ssmPointer.ts).
+ */
+export interface PointerStore {
+  get(userId: string): Promise<MemoryPointer | undefined>;
+  set(userId: string, pointer: MemoryPointer): Promise<void>;
+}
+
 export interface ZeroGMemoryOptions {
   store: BlobStore;
+  /** Durable pointer store; the local memory.json is still written as a cache. */
+  pointers?: PointerStore;
   /** 32-byte AES-256-GCM key (see deriveMemoryKey). */
   key: Uint8Array;
   /** Holds memory.json with the latest root hash per user. Default server/.ghosty */
@@ -130,7 +203,16 @@ export class ZeroGMemory implements MemoryStore {
     const cached = this.live.get(userId);
     if (cached) return structuredClone(cached);
 
-    const ptr = this.pointers[userId];
+    let ptr = this.pointers[userId];
+    if (!ptr && this.opts.pointers) {
+      try {
+        ptr = await this.opts.pointers.get(userId);
+      } catch (err) {
+        this.logger.error({ userId, err: errorMessage(err) }, 'memory pointer lookup failed');
+        throw new MemoryUnavailableError(`memory pointer for ${userId} could not be read: ${errorMessage(err)}`, { cause: err });
+      }
+      if (ptr) this.pointers[userId] = ptr;
+    }
     if (!ptr) return defaultMemory();
 
     let memory: UserMemory;
@@ -150,8 +232,7 @@ export class ZeroGMemory implements MemoryStore {
   }
 
   async save(userId: string, memory: UserMemory): Promise<void> {
-    const trimmed: UserMemory = structuredClone({ ...memory, history: memory.history.slice(-MAX_HISTORY) });
-    this.live.set(userId, trimmed);
+    this.live.set(userId, structuredClone(trim(memory)));
     const job = this.scheduleUpload(userId);
     if (this.opts.waitForUpload) await job;
   }
@@ -174,6 +255,7 @@ export class ZeroGMemory implements MemoryStore {
         const stored = await this.opts.store.upload(blob, `memory-${userId}`);
         this.pointers[userId] = { ...stored, savedAt };
         writeCache(this.cachePath, { v: 1, users: this.pointers });
+        await this.opts.pointers?.set(userId, this.pointers[userId]);
         updateZeroGState({ memoryRootHash: stored.rootHash, memoryTxHash: stored.txHash, lastStorageError: null });
         this.logger.info({ userId, ...stored }, '0G memory saved');
       })

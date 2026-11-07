@@ -83,6 +83,8 @@ export class GroqStt implements SpeechToText {
     form.append('model', this.model);
     form.append('response_format', 'verbose_json');
     form.append('temperature', '0');
+    // Spelling hint: without it Whisper writes the wake word as "Goshty" or in Devanagari.
+    form.append('prompt', 'Ghosty');
     if (this.opts.language) form.append('language', this.opts.language);
 
     let res: Response;

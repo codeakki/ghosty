@@ -18,7 +18,9 @@ Contract between the pod (ESP32) and the server. Base URL during development is 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | GET | `/health` | none | Liveness + safe-stop state |
-| POST | `/voice` | device token | Push-to-talk: WAV in, spoken answer out |
+| POST | `/voice` | device token | WAV in, spoken answer out. `X-Listen: always` = answer only speech with the wake word "Ghosty" (`204` otherwise). `202` + a Dabao frame when an order needs a signature |
+| POST | `/sign` | device token | The Dabao's reply frame for a `202` (header `X-Sign-Id`). Resumes the voice turn: `200` audio, or another `202` |
+| GET | `/announce` | device token | Oldest queued news signal (with its odds and price checks) as PCM, or `204`. The always-listening pod polls it every 15 s |
 | POST | `/button` | device token | Confirm or cancel the pending alert the wearer heard (409 when there is none) |
 | GET | `/hedera/audit` | none | HCS audit topic messages (payments, decisions, trades), decoded from the mirror node |
 
@@ -179,6 +181,27 @@ ffplay -f s16le -ar 16000 -ac 1 reply.pcm      # or: play -t raw -r 16000 -e sig
 curl -s -o /dev/null -w "%{http_code}\n" -X POST http://localhost:3000/voice \
   -H "Content-Type: audio/wav" --data-binary @sample.wav
 ```
+
+### Orders signed on the Dabao (`HL_SIGNER=dabao`)
+
+With `VOICE_ORDERS_ENABLED=true`, Claude (`ANTHROPIC_MODEL`) hears the exact words and calls `place_order`,
+`get_positions` or `close_positions`. With `HL_SIGNER=dabao` the server holds no trading key:
+
+1. `POST /voice` answers `202`, header `X-Sign-Id`, body = a sign request frame (order fields, not a hash).
+2. The pod sends the frame to the Dabao over UART and POSTs the Dabao's reply frame to `POST /sign`.
+3. The server checks that the signature recovers to `HL_DABAO_ADDRESS`, submits the order to Hyperliquid and
+   answers with the spoken result (`200`), or with the next `202` when one turn has several orders.
+
+Frame format, limits and error codes: [firmware/dabao/ghosty_signer/hl_signer.h](../firmware/dabao/ghosty_signer/hl_signer.h).
+A `POST /voice/text` turn has no pod to relay through, so an order there fails with "no pod is connected".
+
+### Memory and signal checks
+
+- Every voice turn, order (with the Hyperliquid tx hash), news snapshot and signal goes into the account's
+  encrypted memory on 0G Storage; the account is `HL_MASTER_ADDRESS`. The last 20 turns go to Claude each turn.
+  `OG_POINTER_STORE=ssm` keeps the newest root hash in AWS SSM (`OG_POINTER_PREFIX`) so a restart finds it.
+- Every news signal runs two checks before it is queued for `GET /announce`: related Polymarket markets (YES odds
+  now vs one minute ago) and the 1 and 5 minute price move on Hyperliquid and Binance.
 
 ---
 
