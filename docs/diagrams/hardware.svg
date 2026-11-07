@@ -1,0 +1,118 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="800" viewBox="0 0 960 800" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+<defs>
+<marker id="ahK" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#111"/></marker>
+<marker id="asK" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M10,0 L0,5 L10,10 z" fill="#111"/></marker>
+<marker id="ahA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#0b7a66"/></marker>
+<marker id="asA" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M10,0 L0,5 L10,10 z" fill="#0b7a66"/></marker>
+</defs>
+<rect x="0.75" y="0.75" width="958.5" height="798.5" rx="18" fill="#ffffff" stroke="#d0d7de" stroke-width="1.5"/>
+<text x="28" y="40" font-size="20" text-anchor="start" fill="#111" font-weight="700">Ghosty: pod wiring</text>
+<rect x="24" y="64" width="190" height="214" rx="8" fill="#fff" stroke="#111" stroke-width="1.4"/>
+<text x="38" y="90" font-size="16" text-anchor="start" fill="#111" font-weight="700">INMP441 mic</text>
+<text x="38" y="112" font-size="14.5" text-anchor="start" fill="#444" font-weight="400">I2S MEMS, 3.3 V</text>
+<circle cx="214" cy="134" r="3.5" fill="#111"/><text x="205" y="139" font-size="14.5" text-anchor="end" fill="#111" font-weight="400">VDD</text>
+<circle cx="214" cy="158" r="3.5" fill="#111"/><text x="205" y="163" font-size="14.5" text-anchor="end" fill="#111" font-weight="400">GND</text>
+<circle cx="214" cy="182" r="3.5" fill="#111"/><text x="205" y="187" font-size="14.5" text-anchor="end" fill="#111" font-weight="400">L/R</text>
+<circle cx="214" cy="206" r="3.5" fill="#111"/><text x="205" y="211" font-size="14.5" text-anchor="end" fill="#111" font-weight="400">SCK</text>
+<circle cx="214" cy="230" r="3.5" fill="#111"/><text x="205" y="235" font-size="14.5" text-anchor="end" fill="#111" font-weight="400">WS</text>
+<circle cx="214" cy="254" r="3.5" fill="#111"/><text x="205" y="259" font-size="14.5" text-anchor="end" fill="#111" font-weight="400">SD</text>
+<rect x="24" y="300" width="190" height="210" rx="8" fill="#fff" stroke="#111" stroke-width="1.4"/>
+<text x="38" y="326" font-size="16" text-anchor="start" fill="#111" font-weight="700">MAX98357A amp</text>
+<text x="38" y="348" font-size="14.5" text-anchor="start" fill="#444" font-weight="400">GAIN, SD not wired</text>
+<circle cx="214" cy="376" r="3.5" fill="#111"/><text x="205" y="381" font-size="14.5" text-anchor="end" fill="#111" font-weight="400">VIN</text>
+<circle cx="214" cy="400" r="3.5" fill="#111"/><text x="205" y="405" font-size="14.5" text-anchor="end" fill="#111" font-weight="400">GND</text>
+<circle cx="214" cy="424" r="3.5" fill="#111"/><text x="205" y="429" font-size="14.5" text-anchor="end" fill="#111" font-weight="400">BCLK</text>
+<circle cx="214" cy="448" r="3.5" fill="#111"/><text x="205" y="453" font-size="14.5" text-anchor="end" fill="#111" font-weight="400">LRC</text>
+<circle cx="214" cy="472" r="3.5" fill="#111"/><text x="205" y="477" font-size="14.5" text-anchor="end" fill="#111" font-weight="400">DIN</text>
+<text x="38" y="498" font-size="14.5" text-anchor="start" fill="#444" font-weight="400">+ / - to speaker</text>
+<rect x="44" y="530" width="150" height="40" rx="20" fill="#fff" stroke="#111" stroke-width="1.4"/>
+<text x="119" y="556" font-size="14.5" text-anchor="middle" fill="#111" font-weight="700">40 mm speaker</text>
+<line x1="119" y1="510" x2="119" y2="530" stroke="#111" stroke-width="2"/>
+<rect x="44" y="596" width="150" height="56" rx="8" fill="#fff" stroke="#111" stroke-width="1.4"/>
+<text x="119" y="620" font-size="15" text-anchor="middle" fill="#111" font-weight="700">Push button</text>
+<text x="119" y="642" font-size="14.5" text-anchor="middle" fill="#444" font-weight="400">to GND</text>
+<circle cx="194" cy="624" r="3.5" fill="#111"/>
+<circle cx="194" cy="640" r="3.5" fill="#111"/>
+<rect x="412" y="64" width="200" height="500" rx="8" fill="#f3f5f4" stroke="#111" stroke-width="2"/>
+<text x="512.0" y="92" font-size="16" text-anchor="middle" fill="#111" font-weight="700">ESP32-S3 N16R8</text>
+<text x="512.0" y="114" font-size="14.5" text-anchor="middle" fill="#444" font-weight="400">16 MB flash, 8 MB PSRAM</text>
+<circle cx="412" cy="146" r="3.5" fill="#111"/><text x="421" y="151" font-size="14.5" text-anchor="start" fill="#111" font-weight="400">3V3</text>
+<circle cx="412" cy="170" r="3.5" fill="#111"/><text x="421" y="175" font-size="14.5" text-anchor="start" fill="#111" font-weight="400">GND</text>
+<circle cx="412" cy="220" r="3.5" fill="#111"/><text x="421" y="225" font-size="14.5" text-anchor="start" fill="#111" font-weight="400">GPIO4  BCLK</text>
+<circle cx="412" cy="250" r="3.5" fill="#111"/><text x="421" y="255" font-size="14.5" text-anchor="start" fill="#111" font-weight="400">GPIO5  WS</text>
+<circle cx="412" cy="280" r="3.5" fill="#111"/><text x="421" y="285" font-size="14.5" text-anchor="start" fill="#111" font-weight="400">GPIO6  mic SD</text>
+<circle cx="412" cy="310" r="3.5" fill="#111"/><text x="421" y="315" font-size="14.5" text-anchor="start" fill="#111" font-weight="400">GPIO7  amp DIN</text>
+<circle cx="412" cy="350" r="3.5" fill="#111"/><text x="421" y="355" font-size="14.5" text-anchor="start" fill="#111" font-weight="400">GPIO15  button</text>
+<circle cx="612" cy="160" r="3.5" fill="#111"/><text x="603" y="165" font-size="14.5" text-anchor="end" fill="#111" font-weight="400">GPIO17  TX</text>
+<circle cx="612" cy="200" r="3.5" fill="#111"/><text x="603" y="205" font-size="14.5" text-anchor="end" fill="#111" font-weight="400">GPIO18  RX</text>
+<circle cx="612" cy="240" r="3.5" fill="#111"/><text x="603" y="245" font-size="14.5" text-anchor="end" fill="#111" font-weight="400">GND</text>
+<circle cx="612" cy="520" r="3.5" fill="#111"/><text x="603" y="525" font-size="14.5" text-anchor="end" fill="#111" font-weight="400">5V in</text>
+<text x="512.0" y="410" font-size="14.5" text-anchor="middle" fill="#a35200" font-weight="400">Avoid GPIO0/3/45/46,</text>
+<text x="512.0" y="432" font-size="14.5" text-anchor="middle" fill="#a35200" font-weight="400">19/20 and 26 to 37</text>
+<path d="M214,134 H236 V376 H214" fill="none" stroke="#c0182f" stroke-width="2" stroke-linejoin="round"/>
+<path d="M236,146 H412" fill="none" stroke="#c0182f" stroke-width="2" stroke-linejoin="round"/>
+<circle cx="236" cy="146" r="4" fill="#c0182f"/>
+<path d="M214,158 H258 V624 H194" fill="none" stroke="#111" stroke-width="2" stroke-linejoin="round"/>
+<path d="M214,182 H258" fill="none" stroke="#111" stroke-width="2" stroke-linejoin="round"/>
+<path d="M214,400 H258" fill="none" stroke="#111" stroke-width="2" stroke-linejoin="round"/>
+<path d="M258,170 H412" fill="none" stroke="#111" stroke-width="2" stroke-linejoin="round"/>
+<circle cx="258" cy="182" r="4" fill="#111"/>
+<circle cx="258" cy="170" r="4" fill="#111"/>
+<circle cx="258" cy="400" r="4" fill="#111"/>
+<path d="M214,206 H282 V424 H214" fill="none" stroke="#7b3fb5" stroke-width="2" stroke-linejoin="round"/>
+<path d="M282,220 H412" fill="none" stroke="#7b3fb5" stroke-width="2" stroke-linejoin="round"/>
+<circle cx="282" cy="220" r="4" fill="#7b3fb5"/>
+<path d="M214,230 H306 V448 H214" fill="none" stroke="#7b3fb5" stroke-width="2" stroke-linejoin="round"/>
+<path d="M306,250 H412" fill="none" stroke="#7b3fb5" stroke-width="2" stroke-linejoin="round"/>
+<circle cx="306" cy="250" r="4" fill="#7b3fb5"/>
+<path d="M214,254 H330 V280 H412" fill="none" stroke="#1f4fbf" stroke-width="2" stroke-linejoin="round"/>
+<path d="M412,310 H354 V472 H214" fill="none" stroke="#1f4fbf" stroke-width="2" stroke-linejoin="round"/>
+<path d="M194,640 H380 V350 H412" fill="none" stroke="#1f4fbf" stroke-width="2" stroke-linejoin="round"/>
+<rect x="724" y="100" width="212" height="330" rx="8" fill="#e8f5f2" stroke="#0b7a66" stroke-width="2.2"/>
+<text x="736" y="128" font-size="16" text-anchor="start" fill="#111" font-weight="700">Dabao (Baochip-1x)</text>
+<circle cx="724" cy="160" r="3.5" fill="#111"/><text x="733" y="165" font-size="14.5" text-anchor="start" fill="#111" font-weight="400">PB13  UART2 RX</text>
+<circle cx="724" cy="200" r="3.5" fill="#111"/><text x="733" y="205" font-size="14.5" text-anchor="start" fill="#111" font-weight="400">PB14  UART2 TX</text>
+<circle cx="724" cy="240" r="3.5" fill="#111"/><text x="733" y="245" font-size="14.5" text-anchor="start" fill="#111" font-weight="400">GND</text>
+<text x="736" y="290" font-size="14.5" text-anchor="start" fill="#0b7a66" font-weight="700">Key in RRAM, never sent</text>
+<text x="736" y="316" font-size="14.5" text-anchor="start" fill="#111" font-weight="400">PB3: approve button</text>
+<text x="736" y="342" font-size="14.5" text-anchor="start" fill="#444" font-weight="400">(off: AUTO_APPROVE=1)</text>
+<text x="736" y="368" font-size="14.5" text-anchor="start" fill="#111" font-weight="400">PB1: LED (optional)</text>
+<text x="736" y="394" font-size="14.5" text-anchor="start" fill="#111" font-weight="700">Power: its own USB-C</text>
+<path d="M612,160 H724" fill="none" stroke="#0b7a66" stroke-width="2" stroke-linejoin="round"/>
+<rect x="648" y="153" width="40" height="14" rx="2" fill="#fff" stroke="#111" stroke-width="1.4"/>
+<text x="668" y="148" font-size="14.5" text-anchor="middle" fill="#111" font-weight="400">1 kΩ</text>
+<path d="M612,200 H724" fill="none" stroke="#0b7a66" stroke-width="2" stroke-linejoin="round"/>
+<rect x="648" y="193" width="40" height="14" rx="2" fill="#fff" stroke="#111" stroke-width="1.4"/>
+<text x="668" y="188" font-size="14.5" text-anchor="middle" fill="#111" font-weight="400">1 kΩ</text>
+<path d="M612,240 H724" fill="none" stroke="#111" stroke-width="2" stroke-linejoin="round"/>
+<text x="668" y="274" font-size="14.5" text-anchor="middle" fill="#0b7a66" font-weight="700">UART</text>
+<text x="668" y="294" font-size="14.5" text-anchor="middle" fill="#0b7a66" font-weight="700">115200</text>
+<rect x="412" y="616" width="118" height="58" rx="6" fill="#fff" stroke="#c0182f" stroke-width="1.4" stroke-dasharray="6 4"/>
+<text x="471" y="640" font-size="15" text-anchor="middle" fill="#111" font-weight="700">LiPo 3.7 V</text>
+<text x="471" y="662" font-size="14.5" text-anchor="middle" fill="#444" font-weight="400">500 mAh</text>
+<line x1="532" y1="645" x2="544" y2="645" stroke="#c0182f" stroke-width="2" marker-end="url(#ahK)"/>
+<rect x="546" y="616" width="118" height="58" rx="6" fill="#fff" stroke="#c0182f" stroke-width="1.4" stroke-dasharray="6 4"/>
+<text x="605" y="640" font-size="15" text-anchor="middle" fill="#111" font-weight="700">TP4056</text>
+<text x="605" y="662" font-size="14.5" text-anchor="middle" fill="#444" font-weight="400">charge, protect</text>
+<line x1="666" y1="645" x2="678" y2="645" stroke="#c0182f" stroke-width="2" marker-end="url(#ahK)"/>
+<rect x="680" y="616" width="118" height="58" rx="6" fill="#fff" stroke="#c0182f" stroke-width="1.4" stroke-dasharray="6 4"/>
+<text x="739" y="640" font-size="15" text-anchor="middle" fill="#111" font-weight="700">Switch</text>
+<text x="739" y="662" font-size="14.5" text-anchor="middle" fill="#444" font-weight="400">optional</text>
+<line x1="800" y1="645" x2="812" y2="645" stroke="#c0182f" stroke-width="2" marker-end="url(#ahK)"/>
+<rect x="814" y="616" width="118" height="58" rx="6" fill="#fff" stroke="#c0182f" stroke-width="1.4" stroke-dasharray="6 4"/>
+<text x="873" y="640" font-size="15" text-anchor="middle" fill="#111" font-weight="700">5 V boost</text>
+<text x="873" y="662" font-size="14.5" text-anchor="middle" fill="#444" font-weight="400">1 A, to buy</text>
+<path d="M873,616 V520 H612" fill="none" stroke="#c0182f" stroke-width="2" stroke-linejoin="round"/>
+<text x="626" y="508" font-size="14.5" text-anchor="start" fill="#c0182f" font-weight="400">5 V + 470 to 1000 µF cap (to buy)</text>
+<text x="412" y="704" font-size="14.5" text-anchor="start" fill="#a35200" font-weight="700">Battery path is planned, not built. Today: USB power, amp VIN on 3V3.</text>
+<line x1="28" y1="760" x2="58" y2="760" stroke="#c0182f" stroke-width="3"/>
+<text x="66" y="765" font-size="14.5" text-anchor="start" fill="#111" font-weight="400">power</text>
+<line x1="150" y1="760" x2="180" y2="760" stroke="#111" stroke-width="3"/>
+<text x="188" y="765" font-size="14.5" text-anchor="start" fill="#111" font-weight="400">ground</text>
+<line x1="280" y1="760" x2="310" y2="760" stroke="#7b3fb5" stroke-width="3"/>
+<text x="318" y="765" font-size="14.5" text-anchor="start" fill="#111" font-weight="400">I2S clocks (shared)</text>
+<line x1="490" y1="760" x2="520" y2="760" stroke="#1f4fbf" stroke-width="3"/>
+<text x="528" y="765" font-size="14.5" text-anchor="start" fill="#111" font-weight="400">data / GPIO</text>
+<line x1="650" y1="760" x2="680" y2="760" stroke="#0b7a66" stroke-width="3"/>
+<text x="688" y="765" font-size="14.5" text-anchor="start" fill="#111" font-weight="400">signer link</text>
+</svg>
