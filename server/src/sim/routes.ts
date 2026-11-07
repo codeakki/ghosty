@@ -1,8 +1,8 @@
 import type { ServerResponse } from 'node:http';
-import type { FastifyInstance, preHandlerAsyncHookHandler } from 'fastify';
+import type { FastifyInstance, FastifyRequest, preHandlerAsyncHookHandler } from 'fastify';
 import { z } from 'zod';
 import { OUTPUT_SAMPLE_RATE } from '../audio/tts.js';
-import type { Pipeline } from '../pipeline.js';
+import type { Pipeline, VoiceResult } from '../pipeline.js';
 import type { BrainSwitch } from '../safety/safeStop.js';
 import type { InjectedNewsProvider } from './injected.js';
 import type { PodEvent, PodState } from './state.js';
@@ -23,6 +23,10 @@ export interface SimRouteContext {
   requireDevice: preHandlerAsyncHookHandler;
   /** 503 brain_offline when safe-stop is engaged. */
   requireBrain: preHandlerAsyncHookHandler;
+  /** Owner or a metered guest (POST /voice/text). Default: requireDevice. */
+  requireTalk?: preHandlerAsyncHookHandler;
+  /** Runs a text turn for this request (guests are question-only). Default: pipeline.handleText. */
+  textTurn?: (req: FastifyRequest, text: string) => Promise<VoiceResult>;
   /** Claude answers questions: /voice/text then checks safe-stop on the 0G trade path only (in the pipeline). */
   voiceRouting?: boolean;
 }
@@ -135,11 +139,12 @@ export function registerSimRoutes(app: FastifyInstance, ctx: SimRouteContext): v
 
   // Text turn: the voice loop without STT. JSON out, with the TTS reply as base64 PCM s16le.
   // Questions are answered by Claude (answeredBy "claude", signal "none", no actions); trade requests by 0G.
-  const textGuard = ctx.voiceRouting ? { preHandler: [ctx.requireDevice] } : guarded;
+  const talk = ctx.requireTalk ?? ctx.requireDevice;
+  const textGuard = { preHandler: ctx.voiceRouting ? [talk] : [talk, ctx.requireBrain] };
   app.post('/voice/text', textGuard, async (req, reply) => {
     const parsed = TextBody.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: 'bad_request', message: 'body must be {"text": string}' });
-    const result = await pipeline.handleText(parsed.data.text);
+    const result = ctx.textTurn ? await ctx.textTurn(req, parsed.data.text) : await pipeline.handleText(parsed.data.text);
     const decision = result.decision;
     req.log.info(
       { answeredBy: result.answeredBy, intent: result.intent, requestId: result.requestId, signal: decision?.signal, assistantError: result.assistantError },

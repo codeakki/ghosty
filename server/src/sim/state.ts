@@ -91,7 +91,7 @@ export interface PodSnapshot {
  * `providers` and `market` come from index.ts (provider poller, market stream), never from the pipeline.
  * `voice` is one conversation turn {transcript, reply, answeredBy, requestId?}; it is not part of the snapshot.
  */
-export type PodEventType = 'state' | 'news' | 'decision' | 'alert' | 'order' | 'episode' | 'providers' | 'market' | 'sim' | 'voice';
+export type PodEventType = 'state' | 'news' | 'decision' | 'alert' | 'order' | 'episode' | 'providers' | 'market' | 'sim' | 'voice' | 'pod';
 
 export interface PodEvent {
   id: number;
@@ -250,7 +250,7 @@ export class PodState implements PipelineObserver {
   }
 
   /** Broadcast an event that is not part of the pod snapshot (provider health, market mids). */
-  publish(type: 'providers' | 'market', data: unknown): void {
+  publish(type: 'providers' | 'market' | 'pod', data: unknown): void {
     this.emit(type, data, false);
   }
 

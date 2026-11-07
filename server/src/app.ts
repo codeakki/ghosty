@@ -44,6 +44,8 @@ import { loadScenarios, type Scenario } from './sim/scenarios.js';
 import { registerSimRoutes } from './sim/routes.js';
 import { PodState, type Alert } from './sim/state.js';
 import { VERSION } from './version.js';
+import { GuestAccess, type GuestSession } from './guest/access.js';
+import { PodMirror, type PodMirrorEvent } from './pod/mirror.js';
 
 /** server/public, from both src/ (tsx) and dist/ (built). Holds the virtual pod page. */
 const PUBLIC_DIR = fileURLToPath(new URL('../public/', import.meta.url));
@@ -61,6 +63,24 @@ export function terminalDistDir(config: Pick<Config, 'TERMINAL_DIST'>): string |
 const AUDIO_BODY_LIMIT = 4 * 1024 * 1024;
 
 const ButtonBody = z.object({ action: z.enum(['confirm', 'cancel']) });
+
+const PodStateBody = z.object({
+  state: z.enum(['listening', 'idle']),
+  level: z.number().min(0).max(1).optional(),
+});
+
+/** Which credential a request carried: the owner's DEVICE_TOKEN (or none configured) or a guest token. */
+type Scope = { kind: 'owner' } | { kind: 'guest'; session: GuestSession };
+
+/** Client IP for guest issuance limits: the first X-Forwarded-For hop (Vercel/ALB put the client there), else the socket. */
+function clientIp(req: FastifyRequest): string {
+  const fwd = req.headers['x-forwarded-for'];
+  const first = (Array.isArray(fwd) ? fwd[0] : fwd)?.split(',')[0]?.trim();
+  return first || req.ip;
+}
+
+/** The firmware tags its requests `x-ghosty-client: pod`; only those drive the web orb's pod mirror. */
+const fromPod = (req: FastifyRequest) => req.headers['x-ghosty-client'] === 'pod';
 
 export interface BuildAppOptions {
   config?: Config;
@@ -82,6 +102,13 @@ export interface BuildAppOptions {
    * null turns routing off (every turn is a 0G decision). Tests pass a mock.
    */
   assistant?: VoiceAssistant | null;
+  /**
+   * What answers guest questions. Default: a ClaudeVoiceAssistant whose context leaves out the owner's memory
+   * (or `assistant` when a test passes one). null = guests get the "questions are off" line.
+   */
+  guestAssistant?: VoiceAssistant | null;
+  /** Clock for guest tokens and limits (tests). */
+  guestNow?: () => number;
   /** Spoken orders. Default: ClaudeOrderAgent when VOICE_ORDERS_ENABLED and ANTHROPIC_API_KEY are set. null = off. Tests pass a mock. */
   orderAgent?: PipelineDeps['orderAgent'] | null;
   logger?: FastifyServerOptions['logger'];
@@ -254,6 +281,19 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
       : config.CLAUDE_VOICE_ENABLED && config.ANTHROPIC_API_KEY
         ? new ClaudeVoiceAssistant({ apiKey: config.ANTHROPIC_API_KEY, model: config.ANTHROPIC_MODEL, context: () => voiceContext() })
         : undefined;
+  // Guests get the same Claude, minus the owner's stored memory (journal, risk profile).
+  const guestAssistant: VoiceAssistant | undefined =
+    opts.guestAssistant !== undefined
+      ? (opts.guestAssistant ?? undefined)
+      : opts.assistant !== undefined
+        ? (opts.assistant ?? undefined)
+        : config.CLAUDE_VOICE_ENABLED && config.ANTHROPIC_API_KEY
+          ? new ClaudeVoiceAssistant({
+              apiKey: config.ANTHROPIC_API_KEY,
+              model: config.ANTHROPIC_MODEL,
+              context: async () => ({ ...(await voiceContext()), memory: null }),
+            })
+          : undefined;
   // Memory, journal and trades are kept per Hyperliquid account (the master address), not per device.
   const accountId = isAddress(config.HL_MASTER_ADDRESS) ? config.HL_MASTER_ADDRESS.toLowerCase() : 'device-0';
   // Spoken orders: Claude hears every turn and places explicit orders on the venue, capped at MAX_TRADE_USD.
@@ -457,12 +497,12 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
       if (req.method === 'OPTIONS') {
         return reply
           .header('access-control-allow-methods', 'GET,POST,OPTIONS')
-          .header('access-control-allow-headers', String(req.headers['access-control-request-headers'] ?? 'content-type,x-device-token'))
+          .header('access-control-allow-headers', String(req.headers['access-control-request-headers'] ?? 'content-type,x-device-token,x-ghosty-client'))
           .header('access-control-max-age', '600')
           .code(204)
           .send();
       }
-      reply.header('access-control-expose-headers', 'x-request-id,x-signal,x-answered-by,x-sample-rate,payment-required,payment-response');
+      reply.header('access-control-expose-headers', 'x-request-id,x-signal,x-answered-by,x-sample-rate,payment-required,payment-response,retry-after');
     });
   }
 
@@ -477,13 +517,85 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
     (_req, body, done) => done(null, body),
   );
 
-  const requireDevice = async (req: FastifyRequest, reply: FastifyReply) => {
-    if (!config.DEVICE_TOKEN) return; // local dev: no token configured
+  // Guest access (GUEST_ACCESS=true): question-only tokens. Owner routes answer a guest token with 403.
+  const guests = config.GUEST_ACCESS
+    ? new GuestAccess(
+        {
+          ttlSec: config.GUEST_TTL_SEC,
+          maxPerHour: config.GUEST_MAX_PER_HOUR,
+          maxPerDay: config.GUEST_MAX_PER_DAY,
+          issuePerIpPerHour: config.GUEST_ISSUE_PER_IP_PER_HOUR,
+          maxActive: config.GUEST_MAX_ACTIVE,
+        },
+        {
+          // Live servers keep (hashed) guest tokens across restarts; tests stay in memory.
+          persistPath: config.GHOSTY_MODE === 'live' ? join(config.OG_DATA_DIR ?? DEFAULT_DATA_DIR, 'guests.json') : undefined,
+          now: opts.guestNow,
+          onPersistError: (err) => app.log.warn({ err: String(err) }, 'guest token store failed'),
+        },
+      )
+    : undefined;
+  const scopes = new WeakMap<FastifyRequest, Scope>();
+  const scopeOf = (req: FastifyRequest): Scope => scopes.get(req) ?? { kind: 'owner' };
+
+  /** owner | guest | why not (401 body). Never logs or echoes the token. */
+  const identify = (req: FastifyRequest): Scope | { error: 'unauthorized' | 'guest_expired' } => {
+    if (!config.DEVICE_TOKEN) return { kind: 'owner' }; // local dev: no token configured
     const got = req.headers['x-device-token'];
-    if (typeof got !== 'string' || !tokenMatches(got, config.DEVICE_TOKEN)) {
-      return reply.code(401).send({ error: 'unauthorized' });
-    }
+    if (typeof got !== 'string') return { error: 'unauthorized' };
+    if (tokenMatches(got, config.DEVICE_TOKEN)) return { kind: 'owner' };
+    const session = guests?.verify(got);
+    if (session) return { kind: 'guest', session };
+    return { error: guests?.wasExpired(got) ? 'guest_expired' : 'unauthorized' };
   };
+
+  const GUEST_FORBIDDEN = { error: 'guest_forbidden', message: "Guests can ask questions; this needs the owner's device token." };
+
+  /** Owner only (decisions, orders, payments, injects, the button, pod state). A guest token gets 403. */
+  const requireDevice = async (req: FastifyRequest, reply: FastifyReply) => {
+    const who = identify(req);
+    if ('error' in who) return reply.code(401).send({ error: who.error });
+    if (who.kind === 'guest') return reply.code(403).send(GUEST_FORBIDDEN);
+    scopes.set(req, who);
+  };
+
+  const meterGuest = (reply: FastifyReply, session: GuestSession) => {
+    const turn = guests!.consumeTurn(session);
+    if (turn.ok) return undefined;
+    return reply.header('retry-after', String(turn.retryAfterSec)).code(429).send({ error: turn.error, retryAfterSec: turn.retryAfterSec });
+  };
+
+  /** Owner, or a guest within its limits: /voice and /voice/text. Guest turns are routed question-only below. */
+  const requireTalk = async (req: FastifyRequest, reply: FastifyReply) => {
+    const who = identify(req);
+    if ('error' in who) return reply.code(401).send({ error: who.error });
+    if (who.kind === 'guest') {
+      const limited = meterGuest(reply, who.session);
+      if (limited) return limited;
+    }
+    scopes.set(req, who);
+  };
+
+  /** POST /sim/run: owner, or a guest when GUEST_SIM=true and the run is paper-only. */
+  const requireSimRun = async (req: FastifyRequest, reply: FastifyReply) => {
+    const who = identify(req);
+    if ('error' in who) return reply.code(401).send({ error: who.error });
+    if (who.kind === 'guest') {
+      const live = (req.body as { liveOrders?: unknown } | undefined)?.liveOrders === true;
+      if (!config.GUEST_SIM || live) return reply.code(403).send(GUEST_FORBIDDEN);
+      const limited = meterGuest(reply, who.session);
+      if (limited) return limited;
+    }
+    scopes.set(req, who);
+  };
+
+  // The web orb mirrors the physical pod (SSE `pod`). Only pod-tagged owner requests drive it.
+  const podMirror = new PodMirror({
+    publish: (event: PodMirrorEvent) => state.publish('pod', event),
+    sampleRate: OUTPUT_SAMPLE_RATE,
+  });
+  app.addHook('onClose', async () => podMirror.close());
+  const mirrorsPod = (req: FastifyRequest) => fromPod(req) && scopeOf(req).kind === 'owner';
 
   const requireBrain = async (_req: FastifyRequest, reply: FastifyReply) => {
     if (!(await brainOnline())) {
@@ -505,10 +617,70 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
     version: VERSION,
     // true = safe-stop engaged: 0G unreachable, trading blocked.
     safeStop: !(await brainOnline()),
+    guestAccess: config.GUEST_ACCESS,
   }));
 
+  // What the web needs to offer guest access, and (with a token) which scope that token has.
+  app.get('/access', async (req) => {
+    const got = req.headers['x-device-token'];
+    let scope: 'owner' | 'guest' | null = null;
+    let expiresAt: string | null = null;
+    if (typeof got === 'string' && got.length > 0) {
+      const who = identify(req);
+      if (!('error' in who)) {
+        scope = who.kind;
+        if (who.kind === 'guest') expiresAt = new Date(who.session.expiresAt).toISOString();
+      }
+    }
+    return {
+      guestAccess: config.GUEST_ACCESS,
+      guestSim: config.GUEST_ACCESS && config.GUEST_SIM,
+      guestTtlSec: config.GUEST_TTL_SEC,
+      guestMaxPerHour: config.GUEST_MAX_PER_HOUR,
+      scope,
+      expiresAt,
+    };
+  });
+
+  // Self-serve guest token: questions only. Per-IP and global caps; the token is shown once and stored hashed.
+  app.post('/guest/token', async (req, reply) => {
+    if (!guests) return reply.code(404).send({ error: 'guest_access_off', message: 'Guest access is switched off on this server.' });
+    const issued = guests.issue(clientIp(req));
+    if (!issued.ok) {
+      req.log.warn({ error: issued.error }, 'guest token refused');
+      return reply.header('retry-after', String(issued.retryAfterSec)).code(429).send({ error: issued.error, retryAfterSec: issued.retryAfterSec });
+    }
+    req.log.info({ active: guests.activeCount() }, 'guest token issued');
+    return {
+      token: issued.token,
+      scope: 'guest',
+      expiresAt: new Date(issued.expiresAt).toISOString(),
+      ttlSec: issued.ttlSec,
+      limits: { perHour: config.GUEST_MAX_PER_HOUR },
+      can: ['ask questions (voice or text)'],
+      cannot: ['trade', 'confirm alerts', 'pay for intel', 'inject news', ...(config.GUEST_SIM ? [] : ['run simulations'])],
+    };
+  });
+
+  // The pod reports its button: listening while recording (optional mic level, at most 10/s), idle on cancel.
+  app.post('/pod/state', { preHandler: [requireDevice] }, async (req, reply) => {
+    const parsed = PodStateBody.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'bad_request', message: 'body must be {"state": "listening"|"idle", "level"?: 0..1}' });
+    const { state: next, level } = parsed.data;
+    if (next === 'idle') {
+      podMirror.set('idle');
+      return { ok: true, state: 'idle' };
+    }
+    if (podMirror.state !== 'listening') {
+      podMirror.set('listening');
+      return { ok: true, state: 'listening' };
+    }
+    const accepted = level === undefined ? true : podMirror.level(level);
+    return { ok: true, state: 'listening', ...(accepted ? {} : { dropped: true }) };
+  });
+
   // With Claude on, questions do not need 0G: the pipeline checks safe-stop on the trade path only.
-  const voicePreHandlers = assistant ? [requireDevice, requireVoice] : [requireDevice, requireVoice, requireBrain];
+  const voicePreHandlers = assistant ? [requireTalk, requireVoice] : [requireTalk, requireVoice, requireBrain];
   /** Signals waiting for the pod to fetch and speak (GET /announce). Old ones expire unspoken. */
   const announcements: Array<{ id: string; text: string; at: number }> = [];
   const ANNOUNCE_TTL_MS = 10 * 60_000;
@@ -520,6 +692,7 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
     if (!next) return reply.code(204).send();
     const audio = await deps.tts.synthesize(next.text);
     req.log.info({ id: next.id, text: next.text }, 'announcement sent to the pod');
+    if (mirrorsPod(req)) podMirror.speaking(audio);
     return reply
       .header('content-type', 'application/octet-stream')
       .header('x-sample-rate', String(OUTPUT_SAMPLE_RATE))
@@ -528,7 +701,7 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
   });
 
   /** Voice turns paused on a Dabao signature, by sign request id. */
-  const openTurns = new Map<string, Promise<VoiceResult | undefined>>();
+  const openTurns = new Map<string, { result: Promise<VoiceResult | undefined>; pod: boolean }>();
   app.post('/voice', { preHandler: voicePreHandlers }, async (req, reply) => {
     if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
       return reply.code(400).send({ error: 'expected_wav_body' });
@@ -542,6 +715,14 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
     }
     if (wav.sampleRate !== 16000) req.log.warn({ sampleRate: wav.sampleRate }, 'expected 16 kHz input');
 
+    if (scopeOf(req).kind === 'guest') {
+      // Guests: question-only, and never part of a Dabao sign relay (that belongs to the owner's turn).
+      const result = await pipeline.handleGuestVoice(wav, guestAssistant, req.headers['x-listen'] === 'always');
+      return sendTurn(result, req, reply);
+    }
+    const pod = mirrorsPod(req);
+    if (pod) podMirror.set('thinking');
+
     // X-Listen: always = the pod records on its own, so only speech that says "Ghosty" gets an answer (204 otherwise).
     const turn: Promise<VoiceResult | undefined> =
       req.headers['x-listen'] === 'always'
@@ -550,7 +731,7 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
             return heard.result;
           })
         : pipeline.handleVoice(wav);
-    return relayTurn(turn, req, reply);
+    return relayTurn(turn, req, reply, pod);
   });
 
   // The Dabao's reply to a 202 sign request (the frame, byte for byte). Resumes the voice turn that asked for it.
@@ -561,28 +742,44 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
     if (!Buffer.isBuffer(req.body) || req.body.length === 0) return reply.code(400).send({ error: 'expected_signer_frame' });
     openTurns.delete(id);
     if (!signerHub.deliver(id, req.body)) req.log.warn({ signId: id }, 'sign reply after the request expired');
-    return relayTurn(turn, req, reply);
+    return relayTurn(turn.result, req, reply, turn.pod);
   });
 
   /**
    * Answer the pod for a running voice turn: 202 + a Dabao frame when the turn needs a signature (the pod relays it and
    * POSTs the reply to /sign), else the turn's audio (200) or 204 when it was not for us.
    */
-  async function relayTurn(turn: Promise<VoiceResult | undefined>, req: FastifyRequest, reply: FastifyReply) {
+  async function relayTurn(turn: Promise<VoiceResult | undefined>, req: FastifyRequest, reply: FastifyReply, pod = false) {
     turn.catch(() => undefined);  // awaited below or by /sign; never an unhandled rejection meanwhile
     const next = signerHub.nextRequest();
-    const outcome = await Promise.race([
-      turn.then((result) => ({ kind: 'done' as const, result })),
-      next.promise.then((request) => ({ kind: 'sign' as const, request })),
-    ]).finally(next.cancel);
+    let outcome;
+    try {
+      outcome = await Promise.race([
+        turn.then((result) => ({ kind: 'done' as const, result })),
+        next.promise.then((request) => ({ kind: 'sign' as const, request })),
+      ]).finally(next.cancel);
+    } catch (err) {
+      if (pod) podMirror.set('idle');
+      throw err;
+    }
     if (outcome.kind === 'sign') {
+      // The pod relays the frame to its Dabao and stays "thinking" until /sign resumes the turn.
       const { id, frame } = outcome.request;
-      openTurns.set(id, turn);
+      openTurns.set(id, { result: turn, pod });
       setTimeout(() => openTurns.delete(id), 2 * SIGN_TIMEOUT_MS).unref();
       req.log.info({ signId: id }, 'order needs the Dabao: sign request sent to the pod');
       return reply.code(202).header('content-type', 'application/octet-stream').header('x-sign-id', id).send(frame);
     }
     const result = outcome.result;
+    if (pod) {
+      if (result && result.audio.length > 0) podMirror.speaking(result.audio);
+      else podMirror.set('idle');
+    }
+    return sendTurn(result, req, reply);
+  }
+
+  /** 200 + the turn's PCM, or 204 when the turn was not for us (no wake word). */
+  function sendTurn(result: VoiceResult | undefined, req: FastifyRequest, reply: FastifyReply) {
     if (!result) return reply.code(204).send();
     req.log.info(
       {
@@ -594,7 +791,7 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
         confidence: result.decision?.confidence,
         assistantError: result.assistantError,
       },
-      'voice turn',
+      scopeOf(req).kind === 'guest' ? 'guest voice turn' : 'voice turn',
     );
     return reply
       .header('content-type', 'application/octet-stream')
@@ -648,6 +845,10 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
     safeStopEngaged: async () => !(await brainOnline()),
     requireDevice,
     requireBrain,
+    requireTalk,
+    // Guest text turns are question-only; owner turns run the full pipeline.
+    textTurn: (req, text) =>
+      scopeOf(req).kind === 'guest' ? pipeline.handleGuestText(text, guestAssistant) : pipeline.handleText(text),
     voiceRouting: assistant !== undefined,
   });
 
@@ -658,6 +859,7 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
     store: simStore,
     storagescan: zeroGExplorers(config).storagescan,
     requireDevice,
+    requireRun: requireSimRun,
   });
 
   // The paid resource lives on the Signal Desk (its own process, `npm run signal-desk`), not on this server.

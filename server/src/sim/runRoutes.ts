@@ -13,6 +13,8 @@ export interface SimRunRouteContext {
   store?: BlobStore;
   storagescan: string;
   requireDevice: preHandlerAsyncHookHandler;
+  /** POST /sim/run: owner, or a guest for paper runs when GUEST_SIM=true. Default: requireDevice. */
+  requireRun?: preHandlerAsyncHookHandler;
 }
 
 const RunBody = z.object({
@@ -56,7 +58,7 @@ export function registerSimRunRoutes(app: FastifyInstance, ctx: SimRunRouteConte
     })),
   }));
 
-  app.post('/sim/run', { preHandler: ctx.requireDevice }, async (req, reply) => {
+  app.post('/sim/run', { preHandler: ctx.requireRun ?? ctx.requireDevice }, async (req, reply) => {
     const parsed = RunBody.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({ error: 'bad_request', message: 'body must be {"scenarioId": string, "speed"?: number, "autoPauseOnAlert"?: boolean, "liveOrders"?: boolean}' });
