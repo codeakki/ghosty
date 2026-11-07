@@ -157,7 +157,7 @@ No hardware yet, so the web UI stands in for the pod. Open it and you see two th
 
 | Route | What it is |
 |---|---|
-| `/` | Landing page: what Ghosty is, features, how it works, live proof, the sponsor stack. "Open the app" goes to `/live` |
+| `/` | Landing page: what Ghosty is, features, how it works, the sponsor stack. "Open the app" goes to `/live` |
 | `/live` | Split view: Device (left) + Feed (right). Stacks on phones, device first |
 | `/device` | The pod, full screen. Open it on a phone as the pod stand-in |
 | `/feed` | The feed only |

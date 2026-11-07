@@ -5,7 +5,7 @@ import { ROUTE_PATH } from '../live/router';
 import './landing.css';
 
 /**
- * Landing page at `/`: what Ghosty is, how it works, what ran for real, and the way into the app (`/live`).
+ * Landing page at `/`: what Ghosty is, how it works, the sponsor stack, and the way into the app (`/live`).
  * Motion is CSS (transform/opacity) plus one small state loop for the pod demo; all of it stops under
  * prefers-reduced-motion. Sections fade in once as they scroll into view.
  */
@@ -161,15 +161,6 @@ const FLOW = [
   { n: '06', t: 'Trade + log', d: 'Hyperliquid and Uniswap fill; the episode goes to 0G Storage.' },
 ];
 
-const PROOF = [
-  { k: '0G Compute', v: 'glm-4.7 · request 24a5bcde…93a7', s: 'geopolitical shock, 78%', tone: 'og' },
-  { k: 'Hedera x402', v: '0.0.9185802@1794006766.681511663', s: '0.01 USDC, mirror verified', tone: 'hedera', href: 'https://hashscan.io/testnet/transaction/0.0.9185802-1794006766-681511663' },
-  { k: 'HCS audit', v: 'topic 0.0.11342727', s: 'every payment and decision', tone: 'hedera', href: 'https://hashscan.io/testnet/topic/0.0.11342727' },
-  { k: 'Hyperliquid', v: 'mainnet order 597593593888', s: 'short 0.00014 BTC filled', tone: 'hl', href: 'https://app.hyperliquid.xyz/explorer/address/0x8b916003D0C8F1f468a720BA4Ab5EA9678bc6e61' },
-  { k: '0G Storage', v: 'root 0x0eeb8541…d5a6a04c', s: 'episode written', tone: 'og', href: 'https://storagescan-galileo.0g.ai/submission/0x0eeb854192f6003ae75c940cfcfa24ef7dab20ccfc687d7bd66b8e2cd5a6a04c' },
-  { k: 'Simulator', v: 'Israel/Iran 2025 replay, real 0G brain', s: '+0.19% vs −3.14% holding', tone: 'ghost' },
-];
-
 const STACK = [
   { name: '0G', role: 'Compute makes every trade decision. Storage keeps encrypted memory and an episode per decision.', tone: 'og' },
   { name: 'Hedera', role: 'The agent pays per signal over x402, in USDC or HBAR, with every step on an HCS audit topic.', tone: 'hedera' },
@@ -203,7 +194,6 @@ export default function Landing() {
           <nav className="ln-links" aria-label="Sections">
             <a href="#features">Features</a>
             <a href="#how">How it works</a>
-            <a href="#proof">Proof</a>
             <a href="#stack">Stack</a>
           </nav>
           <div className="ln-nav-cta">
@@ -337,35 +327,8 @@ export default function Landing() {
           </div>
         </section>
 
-        {/* ---------------- Proof ---------------- */}
-        <section className="ln-section" id="proof" aria-labelledby="ln-proof-title">
-          <div className="ln-section-head" data-reveal>
-            <p className="ln-kicker">Live, not mocked</p>
-            <h2 id="ln-proof-title" className="ln-h2">
-              What ran for real, <span className="ln-muted">6 November 2026.</span>
-            </h2>
-          </div>
-          <ul className="ln-proof">
-            {PROOF.map((p, k) => (
-              <li key={p.k} className="ln-proof-row" data-tone={p.tone} data-reveal style={{ transitionDelay: `${k * 60}ms` }}>
-                <span className="ln-proof-k">{p.k}</span>
-                <span className="ln-proof-v">
-                  {p.href ? (
-                    <a href={p.href} target="_blank" rel="noreferrer">
-                      {p.v} <span aria-hidden="true">↗</span>
-                    </a>
-                  ) : (
-                    p.v
-                  )}
-                </span>
-                <span className="ln-proof-s">{p.s}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-
         {/* ---------------- Stack ---------------- */}
-        <section className="ln-section ln-section-alt" id="stack" aria-labelledby="ln-stack-title">
+        <section className="ln-section" id="stack" aria-labelledby="ln-stack-title">
           <div className="ln-section-head" data-reveal>
             <p className="ln-kicker">The stack</p>
             <h2 id="ln-stack-title" className="ln-h2">
