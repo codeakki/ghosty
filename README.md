@@ -113,6 +113,7 @@ Every proof is listed in [docs/evidence.md](docs/evidence.md).
 | Akshay Sharma | Product, server and agent | [@codeakki](https://github.com/codeakki) |
 | Kenil Shah | Firmware and hardware | [@KENILSHAHH](https://github.com/KENILSHAHH) |
 | Akhil Nanavati | Onchain integrations and simulation | [@Akhil-2310](https://github.com/Akhil-2310) |
+| Kavish Shah | Hardware | [@kavishshahh](https://github.com/kavishshahh) |
 
 ## License
 
