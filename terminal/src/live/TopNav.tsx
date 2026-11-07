@@ -1,5 +1,6 @@
 import { memo } from 'react';
 import type { TerminalState } from '../state/reducer';
+import { GhostMark } from './brand/GhostMark';
 import { Link } from './Link';
 import { ROUTE_PATH, type AppRoute } from './router';
 
@@ -48,21 +49,6 @@ function GearIcon() {
   );
 }
 
-/**
- * The mark is the device itself, small: the ghost orb with its two eyes (same shapes as the Device page orb),
- * on a soft halo. Not a generic ghost icon.
- */
-function GhostMark() {
-  return (
-    <svg className="lv-mark" viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
-      <circle cx="12" cy="12" r="11" className="lv-mark-halo" />
-      <circle cx="12" cy="12" r="8" className="lv-mark-core" />
-      <ellipse cx="9.6" cy="11.4" rx="1.05" ry="1.6" className="lv-mark-eye" />
-      <ellipse cx="14.4" cy="11.4" rx="1.05" ry="1.6" className="lv-mark-eye" />
-    </svg>
-  );
-}
-
 export const TopNav = memo(function TopNav({ route, state, onSettings }: { route: AppRoute; state: TerminalState; onSettings: () => void }) {
   const status = connectionStatus(state);
   const network = state.market.data?.network ?? null;
@@ -70,7 +56,7 @@ export const TopNav = memo(function TopNav({ route, state, onSettings }: { route
   return (
     <header className="lv-nav">
       <Link to={ROUTE_PATH.home} className="lv-wordmark" translate="no" aria-label="ghosty, home">
-        <GhostMark />
+        <GhostMark size={26} className="lv-mark" />
         <span className="lv-wordmark-text">ghosty</span>
       </Link>
       <nav className="lv-tabs" aria-label="Views">

@@ -74,3 +74,26 @@ function safeSessionStorage(): Storage | undefined {
     return undefined;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Guest passes (POST /guest/token): questions only, stored in the same settings slot as the device token.
+// ---------------------------------------------------------------------------
+
+/** What a guest can and cannot do, in one line each. */
+export const GUEST_CAN = 'Ask Ghosty about markets and news, by voice or text.';
+export const GUEST_CANNOT = 'Trade, confirm alerts or pay for intel: that needs the owner’s pod.';
+
+/** Settings holding a fresh guest pass (keeps the server URL). */
+export function guestSettings(current: ClientSettings, pass: { token: string; expiresAt: string }): ClientSettings {
+  return { baseUrl: current.baseUrl, deviceToken: pass.token, scope: 'guest', guestExpiresAt: pass.expiresAt };
+}
+
+/** "Guest · questions only · expires in 24 h" (minutes under an hour; "expired" once past). */
+export function guestLabel(expiresAt: string | undefined, now = Date.now()): string {
+  const at = expiresAt ? Date.parse(expiresAt) : NaN;
+  if (!Number.isFinite(at)) return 'Guest · questions only';
+  const left = at - now;
+  if (left <= 0) return 'Guest · pass expired';
+  const hours = Math.round(left / 3_600_000);
+  return `Guest · questions only · expires in ${hours >= 1 ? `${hours} h` : `${Math.max(1, Math.round(left / 60_000))} min`}`;
+}

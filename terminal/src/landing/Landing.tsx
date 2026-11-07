@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import '../design/tokens.css';
+import { GhostMark } from '../live/brand/GhostMark';
 import { Link } from '../live/Link';
 import { ROUTE_PATH } from '../live/router';
 import './landing.css';
@@ -43,14 +44,7 @@ function useReveal() {
 }
 
 function Mark({ size = 28 }: { size?: number }) {
-  return (
-    <svg className="ln-mark" viewBox="0 0 24 24" width={size} height={size} aria-hidden="true">
-      <circle cx="12" cy="12" r="11" className="ln-mark-halo" />
-      <circle cx="12" cy="12" r="8" className="ln-mark-core" />
-      <ellipse cx="9.6" cy="11.4" rx="1.05" ry="1.6" className="ln-mark-eye" />
-      <ellipse cx="14.4" cy="11.4" rx="1.05" ry="1.6" className="ln-mark-eye" />
-    </svg>
-  );
+  return <GhostMark size={size} className="ln-mark" />;
 }
 
 // ---------------------------------------------------------------------------
@@ -89,8 +83,7 @@ function PodDemo() {
       <div className="ln-pod" data-mood={beat.mood}>
         <div className="ln-pod-cord" />
         <div className="ln-orb">
-          <span className="ln-eye" />
-          <span className="ln-eye" />
+          <GhostMark size={128} className="ln-orb-ghost" />
         </div>
         <div className="ln-grille">
           {Array.from({ length: 21 }, (_, k) => (

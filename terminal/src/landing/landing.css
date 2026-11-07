@@ -59,15 +59,14 @@ body:has(.ln) {
 }
 
 /* ---- Mark ----------------------------------------------------------------- */
-.ln-mark-halo {
-  fill: var(--color-ghost-tint);
+.ln-mark {
+  --ghost-eye: var(--color-ghost-ink);
+  flex: none;
+  color: var(--color-ghost);
 }
-.ln-mark-core {
-  fill: var(--color-ghost);
-}
-.ln-mark-eye {
-  fill: var(--color-ghost-ink);
-  transform-origin: center 11.4px;
+.ln-mark .ghost-mark-eye {
+  transform-box: fill-box;
+  transform-origin: center;
   animation: ln-blink 5s infinite;
 }
 
@@ -469,14 +468,23 @@ body:has(.ln) {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 18px;
   width: 128px;
   height: 128px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 34% 30%, color-mix(in oklab, var(--mood) 35%, white), var(--mood) 55%, color-mix(in oklab, var(--mood) 60%, black));
-  box-shadow: 0 0 60px -4px var(--mood);
   animation: ln-breathe 4.2s var(--ease-in-out) infinite;
-  transition: background 600ms var(--ease-out), box-shadow 600ms var(--ease-out);
+}
+
+/* The ghost from the brand mark, tinted by the demo's mood. */
+.ln-orb-ghost {
+  --ghost-eye: #06201a;
+  color: var(--mood);
+  filter: drop-shadow(0 0 22px color-mix(in oklab, var(--mood) 70%, transparent));
+  transition: color 600ms var(--ease-out);
+}
+
+.ln-orb-ghost .ghost-mark-eye {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: ln-blink 4.6s infinite;
 }
 
 .ln-pod[data-mood='alert'] .ln-orb::after,
@@ -489,17 +497,9 @@ body:has(.ln) {
   animation: ln-ripple 1.4s var(--ease-out) infinite;
 }
 
-.ln-eye {
-  width: 13px;
-  height: 22px;
-  border-radius: 50%;
-  background: #06201a;
-  animation: ln-blink 4.6s infinite;
-}
-
-.ln-pod[data-mood='think'] .ln-eye {
-  height: 10px;
-  translate: 0 -4px;
+.ln-pod[data-mood='think'] .ln-orb-ghost .ghost-mark-eye {
+  animation: none;
+  transform: translateY(-6px) scaleY(0.6);
 }
 
 .ln-grille {

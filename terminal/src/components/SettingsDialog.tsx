@@ -1,11 +1,20 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { normalizeBaseUrl, type ClientSettings } from '../api/client';
 
-/** Server URL + device token, kept in localStorage. Native <dialog> gives focus trapping and Escape for free. */
-export function SettingsDialog(props: { settings: ClientSettings; onSave: (s: ClientSettings) => void; onClose: () => void }) {
+/**
+ * Server URL + device token, kept in localStorage. Native <dialog> gives focus trapping and Escape for free.
+ * With `guest` (Live view, GUEST_ACCESS on the server), a primary "Try Ghosty as a guest" gets a question-only pass.
+ */
+export function SettingsDialog(props: {
+  settings: ClientSettings;
+  onSave: (s: ClientSettings) => void;
+  onClose: () => void;
+  guest?: { onGuest: () => void; busy: boolean; note: string | null; label: string | null; can: string; cannot: string };
+}) {
   const ref = useRef<HTMLDialogElement>(null);
   const [baseUrl, setBaseUrl] = useState(props.settings.baseUrl);
-  const [token, setToken] = useState(props.settings.deviceToken);
+  // A guest pass is not something to edit by hand: the field starts empty for an owner token.
+  const [token, setToken] = useState(props.settings.scope === 'guest' ? '' : props.settings.deviceToken);
   const [showToken, setShowToken] = useState(false);
   const id = useId();
   const { onClose } = props;
@@ -21,7 +30,10 @@ export function SettingsDialog(props: { settings: ClientSettings; onSave: (s: Cl
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    props.onSave({ baseUrl: normalizeBaseUrl(baseUrl), deviceToken: token.trim() });
+    const base = normalizeBaseUrl(baseUrl);
+    // Keep a guest pass when no owner token was typed; a typed token always replaces it (owner scope).
+    if (!token.trim() && props.settings.scope === 'guest') return props.onSave({ ...props.settings, baseUrl: base });
+    props.onSave({ baseUrl: base, deviceToken: token.trim() });
   };
 
   return (
@@ -30,6 +42,23 @@ export function SettingsDialog(props: { settings: ClientSettings; onSave: (s: Cl
         <h2 id={`${id}-title`} className="dialog-title">
           Settings
         </h2>
+        {props.guest ? (
+          <div className="field guest-pass">
+            <span className="field-label">Guest pass</span>
+            {props.guest.label ? <span className="guest-pass-status">{props.guest.label}</span> : null}
+            <span className="field-help">
+              {props.guest.can} {props.guest.cannot}
+            </span>
+            <button type="button" className="btn btn-primary" onClick={props.guest.onGuest} disabled={props.guest.busy} aria-busy={props.guest.busy}>
+              {props.guest.busy ? 'Starting…' : props.guest.label ? 'Get a fresh guest pass' : 'Try Ghosty as a guest'}
+            </button>
+            {props.guest.note ? (
+              <span className="field-help guest-pass-note" role="status">
+                {props.guest.note}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
         <label className="field">
           <span className="field-label">Server URL</span>
           <input
@@ -47,7 +76,7 @@ export function SettingsDialog(props: { settings: ClientSettings; onSave: (s: Cl
           </span>
         </label>
         <label className="field">
-          <span className="field-label">Device token</span>
+          <span className="field-label">{props.guest ? 'I have a device token' : 'Device token'}</span>
           <span className="field-row">
             <input
               name="device-token"

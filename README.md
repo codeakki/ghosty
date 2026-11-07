@@ -45,7 +45,13 @@ Built at ETHGlobal Mumbai, Nov 6 to 8, 2026.
 | Virtual pod without hardware, on a local server | `http://localhost:3000/sim` ([docs/simulator.md](docs/simulator.md)) |
 | Talk to the hosted server with curl | [docs/try-the-server.md](docs/try-the-server.md) |
 
-Action routes (voice, confirm, inject news) need the device token, which the app asks for under Settings.
+**Try Ghosty as a guest.** In the Live view, press **Try Ghosty as a guest** for a 24-hour pass that can ask Ghosty anything about markets and news, by voice or text. Guests never trade, confirm alerts or pay for intel; turns are rate-limited per guest and per day, and the pass expires. The server offers guest passes only with `GUEST_ACCESS=true`. Limits and the full safety model: [docs/api.md#guest-access](docs/api.md#guest-access).
+
+**Owners** press **I have a device token**: action routes (voice orders, confirm, inject news) need the owner's device token, which the app keeps in that browser.
+
+**Pod mirror.** When the physical pod is talking, the Device orb on the web follows it live (listening, thinking, speaking with the reply's loudness) and says "Live from the pod". See [docs/api.md#pod-mirror](docs/api.md#pod-mirror).
+
+The orb, header mark and favicon are the Ghosty ghost from the brand logo ([`ghost.ts`](terminal/src/live/brand/ghost.ts)).
 
 ## How it works
 
@@ -216,13 +222,14 @@ Execution venue: Hyperliquid (not a sponsor). A real Hyperliquid fill is **pendi
 | Guard | How it works |
 |---|---|
 | Device token | `DEVICE_TOKEN` guards every action route (voice, confirm, inject news, sim runs). Unset means no check, so set it on any shared server. |
+| Guest scope | With `GUEST_ACCESS=true`, guest tokens reach only Claude answers on `/voice` and `/voice/text`: never 0G decisions, orders, the button, payments or the owner's memory (`403 guest_forbidden` elsewhere). Rate-limited per guest (`GUEST_MAX_PER_HOUR`) and across all guests (`GUEST_MAX_PER_DAY`), and they expire after `GUEST_TTL_SEC`. Off by default. |
 | Confirm window | An alert trade needs a confirm within `PENDING_DECISION_TTL_SEC` (120 s), once. Two presses execute it at most once. |
 | Caps | Legs sized to `MAX_TRADE_USD` (default 25) and the $10 Hyperliquid minimum. x402 spend capped per call and per day, host allowlist, mirror verification. |
 | Safe-stop | No 0G brain means no alert decision and `503 brain_offline`, never a cached or local fallback. Spoken orders via Claude are not gated by safe-stop today. |
 | API wallet | Hyperliquid keys (server or Dabao) are approved API wallets: they trade but cannot withdraw. The master key never touches the server. |
 | Dabao limits | 5 assets, $15 per order, $50 per day, one signature per 10 s, mainnet only, increasing nonce. `AUTO_APPROVE=1` today, so it signs without a button press. |
 | Custody split | Hedera treasury key stays on the operator laptop; the server holds only the agent hot wallet and an HCS submit key. |
-| Web app | Vite inlines `VITE_*` into the bundle, so the app gets only the server URL from env. The device token is typed into Settings and kept in that browser. |
+| Web app | Vite inlines `VITE_*` into the bundle, so the app gets only the server URL from env. The device token (or a guest pass) is typed into Settings and kept in that browser. |
 
 Honest limit: the server sees audio, transcripts and trades. Ghosty is user-owned, not zero-knowledge.
 
@@ -279,7 +286,10 @@ Routes: `/` landing, `/live` device + feed, `/device`, `/feed`, `/simulate`, `/p
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| GET | `/health` | none | `{ok, version, safeStop}` |
+| GET | `/health` | none | `{ok, version, safeStop, guestAccess}` |
+| GET | `/access` | none (token optional) | Guest settings and the `scope` (`owner`, `guest` or `null`) of the token sent |
+| POST | `/guest/token` | none | Question-only guest token (`GUEST_ACCESS=true`, else `404 guest_access_off`) |
+| POST | `/pod/state` | token (owner) | The pod reports its button (`listening` / `idle`, optional `level`) for the web mirror, SSE `pod` |
 | POST | `/voice` | token | WAV in, PCM out (200); 204 no wake word; 202 + Dabao frame when an order needs a signature |
 | POST | `/sign` | token | Dabao reply frame for a 202 (`X-Sign-Id`); resumes the voice turn |
 | GET | `/announce` | token | Oldest queued alert as PCM, or 204 (pod polls every 15 s) |
@@ -290,12 +300,12 @@ Routes: `/` landing, `/live` device + feed, `/device`, `/feed`, `/simulate`, `/p
 | POST | `/sim/safe-stop`, `/sim/pay-signal` | token | Simulate 0G offline; buy one Signal Desk bundle |
 | GET, POST | `/sim/scenarios`, `/sim/run`, `/sim/control` | none / token | Scenario replay |
 | GET | `/episodes`, `/episodes/replay` | none | Episode list; walk the chain via `prevRoot` |
-| GET | `/state`, `/events` | none | Snapshot; Server-Sent Events stream |
+| GET | `/state`, `/events` | none | Snapshot; Server-Sent Events stream (incl. `pod`: the physical pod's idle, listening, thinking or speaking state) |
 | GET | `/zerog/status`, `/x402/status`, `/hedera/audit`, `/execution/markets` | none | Integration status and evidence |
 | GET | `/providers/status`, `/market/snapshot`, `/market/history` | none | Provider health; market data |
 | GET | `/intel` | x402 | On the Signal Desk process (port 3101) |
 
-Full contract: [docs/api.md](docs/api.md).
+A guest token works only on `/voice` and `/voice/text` (plus the public GETs); every other "token" route answers `403 guest_forbidden`. Full contract: [docs/api.md](docs/api.md).
 </details>
 
 <details>
@@ -315,6 +325,7 @@ Template: [`server/.env.example`](server/.env.example). `npm run doctor` prints 
 | Hyperliquid | `HL_MASTER_ADDRESS`, `HL_SIGNER` (`key` or `dabao`), `HL_AGENT_PRIVATE_KEY` or `HL_DABAO_ADDRESS`, `HL_TESTNET` | Confirm answers `503 not_configured` |
 | Uniswap | `UNISWAP_API_KEY`, `EVM_PRIVATE_KEY`, `UNISWAP_SPOT_LEG=true`, `EVM_RPC_URL`, `EVM_CHAIN_ID` | No spot leg |
 | Safety | `DEVICE_TOKEN`, `MAX_TRADE_USD`, `PENDING_DECISION_TTL_SEC` | No auth when the token is unset |
+| Guest access | `GUEST_ACCESS`, `GUEST_TTL_SEC` (86400), `GUEST_MAX_PER_HOUR` (10), `GUEST_MAX_PER_DAY` (300), `GUEST_ISSUE_PER_IP_PER_HOUR`, `GUEST_MAX_ACTIVE`, `GUEST_SIM` (paper sim runs for guests) | Off: no guest passes, owner token only |
 </details>
 
 ## Repo layout
