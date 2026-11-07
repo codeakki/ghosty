@@ -141,25 +141,16 @@ body:has(.lv-app) {
 }
 
 .lv-mark {
+  --ghost-eye: #07211b;
   flex: none;
-}
-
-.lv-mark-halo {
-  fill: var(--color-ghost);
-  opacity: 0.18;
-}
-
-.lv-mark-core {
-  fill: var(--color-ghost);
-}
-
-.lv-mark-eye {
-  fill: #07211b;
+  color: var(--color-ghost);
+  filter: drop-shadow(0 0 6px var(--color-ghost-glow));
 }
 
 @media (prefers-color-scheme: light) {
-  .lv-mark-eye {
-    fill: #ffffff;
+  .lv-mark {
+    --ghost-eye: #ffffff;
+    filter: none;
   }
 }
 
@@ -705,10 +696,12 @@ body:has(.lv-app) {
   color: var(--color-muted);
 }
 
-/* ---- The orb ------------------------------------------------------------ */
+/* ---- The orb: the Ghosty ghost ------------------------------------------- */
 
+/* Fixed square box (same size as the old round orb): no state changes the layout. */
 .orb {
   --level: 0;
+  --pulse-gain: 0.035;
   --orb: clamp(180px, 44vmin, 300px);
   --orb-hi: #f4fffb;
   --orb-core: #a6f4e0;
@@ -748,42 +741,33 @@ body:has(.lv-app) {
   }
 }
 
-.orb > *,
-.orb-breathe > *,
-.orb-core > * {
+.orb > * {
   position: absolute;
-  border-radius: 50%;
+  inset: 0;
 }
 
+.orb svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+/* Soft glow behind the ghost; brightens with the audio level. */
 .orb-halo {
-  inset: -14%;
-  background: radial-gradient(circle, var(--orb-glow) 0%, transparent 62%);
-  opacity: calc(0.55 + var(--level) * 0.45);
-  transform: scale(calc(1 + var(--level) * 0.3));
+  inset: -10%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 48%, var(--orb-glow) 0%, transparent 60%);
+  opacity: calc(0.5 + var(--level) * 0.5);
+  transform: scale(calc(1 + var(--level) * 0.25));
   transition:
     transform 90ms linear,
     opacity 400ms var(--ease-in-out);
   will-change: transform, opacity;
 }
 
-/* Listening: a ring that follows the mic level (opacity + scale only). */
-.orb-listen {
-  inset: 10%;
-  border: 2px solid var(--color-ghost);
-  opacity: 0;
-  transform: scale(calc(1 + var(--level) * 0.22));
-  transition:
-    transform 90ms linear,
-    opacity var(--dur-base) var(--ease-out);
-  will-change: transform, opacity;
-}
-
-.orb[data-mode='listening'] .orb-listen {
-  opacity: calc(0.45 + var(--level) * 0.55);
-}
-
 .orb-halo-alert {
-  background: radial-gradient(circle, rgb(245 184 74 / 0.55) 0%, transparent 62%);
+  background: radial-gradient(circle at 50% 48%, rgb(245 184 74 / 0.55) 0%, transparent 60%);
   opacity: 0;
 }
 
@@ -792,63 +776,115 @@ body:has(.lv-app) {
   opacity: 0;
 }
 
-.orb[data-mode='alert'] /* Listening: a ring that follows the mic level (opacity + scale only). */
-.orb-listen {
-  inset: 10%;
-  border: 2px solid var(--color-ghost);
-  opacity: 0;
-  transform: scale(calc(1 + var(--level) * 0.22));
-  transition:
-    transform 90ms linear,
-    opacity var(--dur-base) var(--ease-out);
-  will-change: transform, opacity;
-}
-
-.orb[data-mode='listening'] .orb-listen {
-  opacity: calc(0.45 + var(--level) * 0.55);
-}
-
-.orb-halo-alert {
+.orb[data-mode='alert'] .orb-halo-alert {
   opacity: calc(0.7 + var(--level) * 0.3);
 }
 
-.orb-breathe {
-  inset: 0;
+/* The pod is driving the orb: a touch more glow, nothing that moves the layout. */
+.orb[data-mirroring='true'] .orb-halo:not(.orb-halo-alert) {
+  opacity: calc(0.7 + var(--level) * 0.3);
 }
 
-.orb[data-mode='idle'] .orb-breathe {
-  animation: lv-breathe var(--dur-breathe) var(--ease-in-out) infinite;
+.orb[data-mode='offline'][data-mirroring='true'] .orb-halo {
+  opacity: 0;
 }
 
-.orb-core {
-  inset: 15%;
-  overflow: hidden;
-  background: radial-gradient(circle at 36% 30%, var(--orb-hi) 0%, var(--orb-core) 34%, var(--orb-deep) 100%);
-  box-shadow:
-    0 0 48px var(--orb-glow),
-    inset 0 -10px 30px rgb(0 0 0 / 0.18);
-  transform: scale(calc(1 + var(--level) * 0.14));
+/* Ghost-shaped rings: listening glow (teal) and alert ripples (amber). */
+.orb-ring {
+  opacity: 0;
+  transform-origin: 50% 52%;
+  will-change: transform, opacity;
+}
+
+.orb-ring path {
+  stroke-width: 2px;
+  stroke-linejoin: round;
+}
+
+.orb-listen path {
+  stroke: var(--color-ghost);
+}
+
+.orb-ripple path {
+  stroke: var(--color-warn);
+}
+
+/* Listening: one ring follows the mic level, a second one breathes outwards. */
+.orb-listen {
+  transform: scale(calc(1.06 + var(--level) * 0.2));
+  transition:
+    transform 90ms linear,
+    opacity var(--dur-base) var(--ease-out);
+}
+
+.orb[data-mode='listening'] .orb-listen {
+  opacity: calc(0.4 + var(--level) * 0.6);
+}
+
+.orb[data-mode='listening'] .orb-listen-2 {
+  opacity: 0;
+  transition: none;
+  animation: lv-ghost-ripple 1.8s var(--ease-out) infinite;
+}
+
+.orb[data-mode='alert'] .orb-ripple {
+  animation: lv-ghost-ripple var(--dur-ripple) var(--ease-out) infinite;
+}
+
+.orb[data-mode='alert'] .orb-ripple-2 {
+  animation-delay: calc(var(--dur-ripple) / 3);
+}
+
+.orb[data-mode='alert'] .orb-ripple-3 {
+  animation-delay: calc(var(--dur-ripple) * 2 / 3);
+}
+
+/* Idle: a gentle float. */
+.orb[data-mode='idle'] .orb-float {
+  animation: lv-ghost-float var(--dur-breathe) var(--ease-in-out) infinite;
+}
+
+/* Body pulse from the audio level; strongest while speaking. */
+.orb-pulse {
+  transform: scale(calc(1 + var(--level) * var(--pulse-gain)));
+  transform-origin: 50% 70%;
   transition: transform 90ms linear;
   will-change: transform;
 }
 
-/* State colours: whole layers that cross-fade by opacity. */
-.orb-tint {
-  inset: 0;
-  opacity: 0;
+.orb[data-mode='speaking'] {
+  --pulse-gain: 0.12;
+}
+
+/* The browser is reading an alert aloud (no amplitude available): a gentle speaking pulse. */
+.orb[data-local-speech='true'] .orb-pulse {
+  animation: lv-talk 0.9s var(--ease-in-out) infinite;
+}
+
+.orb-ghost {
   transition: opacity 400ms var(--ease-in-out);
 }
 
-.orb-tint-think {
-  background: radial-gradient(circle at 36% 30%, #f6f3ff 0%, #c9e9f0 30%, #4b3a85 100%);
+.orb[data-mode='offline'] .orb-ghost {
+  opacity: 0.72;
 }
 
-.orb-tint-alert {
-  background: radial-gradient(circle at 36% 30%, #fff6e3 0%, #f9cf7c 34%, #8a5208 100%);
+.orb-stop-hi {
+  stop-color: var(--orb-hi);
 }
 
-.orb-tint-off {
-  background: radial-gradient(circle at 36% 30%, #b5bdc8 0%, #6b7584 34%, #2a313b 100%);
+.orb-stop-core {
+  stop-color: var(--orb-core);
+}
+
+.orb-stop-deep {
+  stop-color: var(--orb-deep);
+}
+
+/* State colours: whole layers that cross-fade by opacity. */
+.orb-tint {
+  opacity: 0;
+  transition: opacity 400ms var(--ease-in-out);
 }
 
 .orb[data-mode='thinking'] .orb-tint-think,
@@ -857,29 +893,47 @@ body:has(.lv-app) {
   opacity: 1;
 }
 
+/* Speaking: the scalloped hem sways from where the sides end. */
+.orb-hem {
+  transform-box: view-box;
+  transform-origin: 100px 176px;
+}
+
+.orb[data-mode='speaking'] .orb-hem,
+.orb[data-local-speech='true'] .orb-hem {
+  animation: lv-ghost-hem 0.7s var(--ease-in-out) infinite;
+}
+
 .orb-sheen {
-  inset: 9% 30% 62% 18%;
-  background: radial-gradient(ellipse, rgb(255 255 255 / 0.55), transparent 70%);
+  fill: rgb(255 255 255 / 0.5);
+  transform-box: fill-box;
+  transform-origin: center;
   transform: rotate(-24deg);
 }
 
-.orb-face {
-  inset: 0;
-  border-radius: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 15%;
-  padding-bottom: 6%;
-  transition: transform var(--dur-base) var(--ease-out);
+.orb[data-mode='offline'] .orb-sheen {
+  opacity: 0.3;
+}
+
+/* Thinking: a light band sweeps across the body. */
+.orb-shimmer {
+  opacity: 0;
+  transition: opacity 400ms var(--ease-in-out);
+}
+
+.orb[data-mode='thinking'] .orb-shimmer {
+  opacity: 1;
+  animation: lv-ghost-shimmer 1.6s var(--ease-in-out) infinite;
 }
 
 .orb-eye {
-  width: 9%;
-  height: 14%;
-  border-radius: 50%;
-  background: var(--orb-eye);
+  fill: var(--orb-eye);
+  transform-box: fill-box;
   transform-origin: center;
+  transition: transform var(--dur-base) var(--ease-out);
+}
+
+.orb-eyes {
   transition: transform var(--dur-base) var(--ease-out);
 }
 
@@ -891,55 +945,74 @@ body:has(.lv-app) {
   transform: scale(1.12);
 }
 
-.orb[data-mode='thinking'] .orb-face {
-  transform: translate(6%, -8%);
+/* Thinking: eyes look up and side to side. */
+.orb[data-mode='thinking'] .orb-eyes {
+  animation: lv-ghost-look 2.4s var(--ease-in-out) infinite;
 }
 
 .orb[data-mode='alert'] .orb-eye {
   transform: scale(1.2);
 }
 
+/* Offline: eyes shut to short lines. */
 .orb[data-mode='offline'] .orb-eye {
-  transform: scaleY(0.16);
+  transform: scale(1.25, 0.14);
 }
 
-.orb-orbit {
-  inset: 6%;
-  opacity: 0;
-  background: conic-gradient(from 0deg, transparent 0 62%, rgb(198 155 255 / 0.05) 70%, var(--color-track-0g) 90%, #fff 94%, transparent 95%);
-  mask: radial-gradient(circle, transparent 63%, #000 64%, #000 69%, transparent 70%);
-  -webkit-mask: radial-gradient(circle, transparent 63%, #000 64%, #000 69%, transparent 70%);
-  transition: opacity 400ms var(--ease-in-out);
-  will-change: transform;
+@keyframes lv-ghost-float {
+  0%,
+  100% {
+    transform: translateY(1.5%);
+  }
+  50% {
+    transform: translateY(-2.5%);
+  }
 }
 
-.orb[data-mode='thinking'] .orb-orbit {
-  opacity: 1;
-  animation: lv-spin var(--dur-orbit) linear infinite;
+@keyframes lv-ghost-ripple {
+  0% {
+    transform: scale(1);
+    opacity: 0.75;
+  }
+  100% {
+    transform: scale(1.4);
+    opacity: 0;
+  }
 }
 
-.orb-ripple {
-  inset: 12%;
-  border: 2px solid var(--color-warn);
-  opacity: 0;
-  will-change: transform, opacity;
+@keyframes lv-ghost-hem {
+  0%,
+  100% {
+    transform: skewX(0deg) scaleY(1);
+  }
+  25% {
+    transform: skewX(14deg) scaleY(1.08);
+  }
+  75% {
+    transform: skewX(-14deg) scaleY(1.08);
+  }
 }
 
-.orb[data-mode='alert'] .orb-ripple {
-  animation: lv-ripple var(--dur-ripple) var(--ease-out) infinite;
+@keyframes lv-ghost-shimmer {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(260px);
+  }
 }
 
-.orb[data-mode='alert'] .orb-ripple-2 {
-  animation-delay: calc(var(--dur-ripple) / 3);
-}
-
-.orb[data-mode='alert'] .orb-ripple-3 {
-  animation-delay: calc(var(--dur-ripple) * 2 / 3);
-}
-
-/* The browser is reading an alert aloud (no amplitude available): a gentle speaking pulse. */
-.orb[data-local-speech='true'] .orb-core {
-  animation: lv-talk 0.9s var(--ease-in-out) infinite;
+@keyframes lv-ghost-look {
+  0%,
+  100% {
+    transform: translate(0, -4px);
+  }
+  30% {
+    transform: translate(-9px, -6px);
+  }
+  70% {
+    transform: translate(9px, -6px);
+  }
 }
 
 @keyframes lv-breathe {
@@ -2465,11 +2538,13 @@ body:has(.lv-app) {
 
 @media (prefers-reduced-motion: reduce) {
   .orb *,
-  .orb[data-mode] .orb-breathe,
+  .orb[data-mode] .orb-float,
   .orb[data-mode] .orb-eye,
-  .orb[data-mode] .orb-orbit,
-  .orb[data-mode] .orb-ripple,
-  .orb[data-local-speech='true'] .orb-core,
+  .orb[data-mode] .orb-eyes,
+  .orb[data-mode] .orb-hem,
+  .orb[data-mode] .orb-shimmer,
+  .orb[data-mode] .orb-ring,
+  .orb[data-local-speech='true'] .orb-pulse,
   .lv-thinking-dot,
   .lv-talk-dot,
   .lv-pulse-skel,
@@ -2480,13 +2555,24 @@ body:has(.lv-app) {
   }
 
   .orb-halo,
-  .orb-core {
+  .orb-pulse,
+  .orb-ring,
+  .orb-eye {
     transition: opacity 150ms linear !important;
   }
 
-  .orb[data-mode='alert'] .orb-ripple:first-child {
+  /* Static state cues instead of motion: one still ring, a centred shimmer band, eyes still. */
+  .orb[data-mode='alert'] .orb-ripple:not(.orb-ripple-2):not(.orb-ripple-3) {
     opacity: 0.7;
-    transform: scale(1.18);
+    transform: scale(1.12);
+  }
+
+  .orb[data-mode='listening'] .orb-listen:not(.orb-listen-2) {
+    opacity: 0.7;
+  }
+
+  .orb[data-mode='thinking'] .orb-shimmer {
+    transform: translateX(120px);
   }
 
   .lv-card-in,
