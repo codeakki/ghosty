@@ -2,6 +2,7 @@ import { memo, useEffect, useId, useRef, type RefObject } from 'react';
 import { GHOST_BODY_PATH, GHOST_EYES, GHOST_HEM_Y, GHOST_SQUARE_VIEWBOX } from '../brand/ghost';
 import type { DeviceMode } from './machine';
 import type { LevelSource } from './useDevice';
+import './orb.css';
 
 /**
  * The Device "orb" is the Ghosty ghost. Layers are animated with transform/opacity only (compositor-friendly) inside a
@@ -111,11 +112,6 @@ export const Orb = memo(function Orb({
                 <stop offset="0.38" stopColor="#6b7584" />
                 <stop offset="1" stopColor="#2a313b" />
               </radialGradient>
-              <linearGradient id={`${uid}-shimmer`} x1="0" x2="1" y1="0" y2="0">
-                <stop offset="0" stopColor="#fff" stopOpacity="0" />
-                <stop offset="0.5" stopColor="#fff" stopOpacity="0.55" />
-                <stop offset="1" stopColor="#fff" stopOpacity="0" />
-              </linearGradient>
               <clipPath id={`${uid}-body`}>
                 <path d={GHOST_BODY_PATH} />
               </clipPath>
@@ -132,7 +128,6 @@ export const Orb = memo(function Orb({
             </g>
             <g clipPath={`url(#${uid}-body)`}>
               <ellipse className="orb-sheen" cx="72" cy="58" rx="30" ry="16" />
-              <rect className="orb-shimmer" x="-40" y="0" width="70" height="220" fill={`url(#${uid}-shimmer)`} />
             </g>
             <g className="orb-eyes">
               {GHOST_EYES.map((e) => (
