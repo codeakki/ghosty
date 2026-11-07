@@ -6,7 +6,8 @@ Contract between the pod (ESP32) and the server. Base URL during development is 
 
 | Item | Value |
 |---|---|
-| Auth | `X-Device-Token: <shared secret>` on `/voice` and `/button`, checked only when `DEVICE_TOKEN` is set in `server/.env` (unset = local dev, no check). Must match the token in `firmware/libraries/GhostyBoard/src/secrets.h`. |
+| Auth | `X-Device-Token: <shared secret>` on `/voice` and `/button`, checked only when `DEVICE_TOKEN` is set in `server/.env` (unset = local dev, no check). Must match the token in `firmware/libraries/GhostyBoard/src/secrets.h`. With `GUEST_ACCESS=true` the header may instead carry a guest token (scope `guest`, questions only), see [Guest access](#guest-access). |
+| Client tag | `X-Ghosty-Client: pod` (firmware) or `web` (browser). Only owner requests tagged `pod` drive the web orb's [pod mirror](#pod-mirror). |
 | Errors | JSON `{ "error": "<code>" }`, sometimes with a `"message"`. A provider without keys in live mode answers `503 {"error":"not_configured","provider","missingEnv":[...],"message"}` (see [Run modes](#run-modes-and-not_configured)). When a `message` is present it is written for the wearer/operator and the terminal shows it as is (`HTTP 409: Nothing to confirm. …`); branch on `error`, display `message`. |
 | Audio in | `audio/wav` (also `audio/x-wav`, `audio/wave`, `application/octet-stream`): PCM WAV, 16-bit signed little-endian, mono, 16 000 Hz expected. Body limit 4 MB. |
 | Audio out | `application/octet-stream`, raw s16le, 16 000 Hz, mono, no header |
@@ -17,7 +18,10 @@ Contract between the pod (ESP32) and the server. Base URL during development is 
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| GET | `/health` | none | Liveness + safe-stop state |
+| GET | `/health` | none | Liveness + safe-stop state + `guestAccess` |
+| GET | `/access` | none (token optional) | `{guestAccess, guestSim, guestTtlSec, guestMaxPerHour, scope, expiresAt}`; `scope` is `owner`, `guest` or `null` for the token sent |
+| POST | `/guest/token` | none | A question-only guest token (`GUEST_ACCESS=true`, else `404 guest_access_off`) |
+| POST | `/pod/state` | device token (owner) | The pod reports its button: `{"state":"listening"\|"idle","level"?:0..1}` → SSE `pod` |
 | POST | `/voice` | device token | WAV in, spoken answer out. `X-Listen: always` = answer only speech with the wake word "Ghosty" (`204` otherwise). `202` + a Dabao frame when an order needs a signature |
 | POST | `/sign` | device token | The Dabao's reply frame for a `202` (header `X-Sign-Id`). Resumes the voice turn: `200` audio, or another `202` |
 | GET | `/announce` | device token | Oldest queued news signal (with its odds and price checks) as PCM, or `204`. The always-listening pod polls it every 15 s |
@@ -323,6 +327,7 @@ The virtual pod page, `text/html`. Open `http://localhost:3000/sim`. The microph
 | `providers` | Full `/providers/status` body, sent when any provider changes state (polled every 30 s by the running server) |
 | `market` | `{"ts", "mids": {"BTC": 75680.5, "xyz:GOLD": 4068.65, ...}}` for the watchlist, at most once per second |
 | `sim` | Simulation run status, same shape as `GET /sim/run`, on change, at most 2/s (an auto-pause is sent at once) |
+| `pod` | The physical pod's state for the web orb: `{"state":"idle"\|"listening"\|"thinking"\|"speaking","source":"pod","ts","level"?,"envelope"?,"durationMs"?}`. See [Pod mirror](#pod-mirror) |
 | `voice` | One conversation turn from `/voice` or `/voice/text`: `{"transcript", "reply", "answeredBy": "claude"\|"0g", "intent": "question"\|"trade"\|"confirm", "requestId"?, "trigger": "voice"\|"text", "at"}`. Not part of the `state` snapshot |
 
 Every event a simulation run produces (`sim`, and its `market`, `news`, `decision`, `alert`, `order`, `episode`) carries `"sim": true, "runId", "scenarioId"`. Sim `market` events carry historical mids with `ts` = sim time; never mix them into the live ticker. Sim events never change the `state` snapshot.
@@ -681,3 +686,48 @@ body (local log, or download from 0G Storage when `OG_PRIVATE_KEY` is set), foll
 `{rootHash, storage, requestId, seq, ts, outcome, sim, runId, prevRoot, storagescan, decision: {signal, confidence,
 rationale}, orders: [], episode}`. `stoppedAt` is null when the walk reached the chain start, else the next root
 (limit hit, or the root that could not be read; see `problems`). Live batch blobs expand to one entry per episode.
+
+## Guest access
+
+Off by default. With `GUEST_ACCESS=true` anyone can try Ghosty without the owner's device token, for questions only.
+
+`POST /guest/token` (no auth, no body) →
+
+```json
+{ "token": "9f2c…(32 hex)", "scope": "guest", "expiresAt": "2026-11-08T10:00:00.000Z", "ttlSec": 86400,
+  "limits": { "perHour": 10 }, "can": ["ask questions (voice or text)"], "cannot": ["trade", "confirm alerts", "pay for intel", "inject news", "run simulations"] }
+```
+
+The token goes in `X-Device-Token`, like the owner's. The server keeps only its sha256 (in memory, and in `<OG_DATA_DIR or server/.ghosty>/guests.json` in live mode, so a restart does not log guests out).
+
+| Scope | May call |
+|---|---|
+| owner (`DEVICE_TOKEN`) | Everything, unchanged. Never subject to guest limits |
+| guest | `POST /voice` and `POST /voice/text` only, plus the public GETs. `POST /sim/run` without `liveOrders` only when `GUEST_SIM=true` |
+
+What a guest turn does: the intent router sends questions and chit-chat to Claude, whose context leaves out the owner's stored memory. A trade request, a "yes/confirm", or anything else that would reach 0G or an order path is answered with *"Guests can ask questions; trading needs the owner's pod."* It never calls the 0G decider, the order agent, a venue, x402/Hedera, the pending decision, the owner's 0G journal, the public `voice` feed, or a Dabao sign relay.
+
+| Answer | When |
+|---|---|
+| `403 {"error":"guest_forbidden","message"}` | A guest token on any owner route: `/button`, `/news/inject`, `/sim/pay-signal`, `/sim/safe-stop`, `/sim/control`, `/alerts/*`, `/announce`, `/sign`, `/pod/state`, `/sim/run` (live, or `GUEST_SIM=false`) |
+| `401 {"error":"guest_expired"}` | The guest token has expired (get a new one) |
+| `429 {"error":"guest_rate_limited","retryAfterSec"}` | More than `GUEST_MAX_PER_HOUR` turns from this guest in the last hour |
+| `429 {"error":"guest_daily_cap","retryAfterSec"}` | All guests together used `GUEST_MAX_PER_DAY` turns today (UTC) |
+| `429 {"error":"guest_issue_limited"\|"guest_capacity","retryAfterSec"}` | `POST /guest/token`: `GUEST_ISSUE_PER_IP_PER_HOUR` reached for this IP (first `X-Forwarded-For` hop), or `GUEST_MAX_ACTIVE` unexpired tokens exist |
+
+Every 429 also sets `Retry-After`.
+
+## Pod mirror
+
+The web Device orb follows the physical pod. Events go out as SSE `pod`; browser turns never produce them.
+
+| Moment | Event |
+|---|---|
+| Button pressed / speech starts (firmware `POST /pod/state {"state":"listening"}`) | `listening` |
+| Level samples while listening (`{"state":"listening","level":0.4}`, at most 10/s; faster ones answer `{"dropped":true}`) | `listening` with `level` |
+| Cancelled or too short (`{"state":"idle"}`) | `idle` |
+| A `/voice` request tagged `X-Ghosty-Client: pod` arrives (hands-free `X-Listen: always`: once the wake word is heard) | `thinking` |
+| The reply audio is ready (also `/sign` and `/announce`) | `speaking` with `envelope` (RMS loudness per 50 ms, 0–1, normalised, at most 600 values) and `durationMs` = samples / 16 000 |
+| `durationMs` later, or a `204` / error | `idle` |
+
+A `202` Dabao sign request keeps the pod in `thinking` until `/sign` returns the audio.
