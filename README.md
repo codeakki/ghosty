@@ -16,7 +16,7 @@
   <a href="https://ghosty-sepia.vercel.app/device"><b>Device</b></a> ·
   <a href="docs/architecture.md"><b>Architecture</b></a> ·
   <a href="docs/evidence.md"><b>Evidence</b></a> ·
-  <b>Demo video</b> (TODO)
+  <a href="hardware/photos/ghosty-flow.mp4"><b>Demo video</b></a>
 </p>
 
 ---
@@ -367,15 +367,14 @@ Plan: [PLAN.md](PLAN.md) · Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)
 - Dabao signing end to end on real hardware, and `07_AlwaysListen` on the pod.
 - Button-confirmed trades with `HL_SIGNER=dabao` (see Flows).
 - Battery operation and the printed enclosure.
-- Demo video.
 
 ## Team
 
 | Name | Role | Contact |
 |---|---|---|
-| _TODO_ | Firmware + hardware | _TODO_ |
-| _TODO_ | Server + agent | _TODO_ |
-| _TODO_ | Onchain integrations | _TODO_ |
+| Akshay Sharma | Product, server and agent | [@codeakki](https://github.com/codeakki) |
+| Kenil Shah | Firmware and hardware | [@KENILSHAHH](https://github.com/KENILSHAHH) |
+| Akhil Nanavati | Onchain integrations and simulation | [@Akhil-2310](https://github.com/Akhil-2310) |
 
 ## License
 
