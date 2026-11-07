@@ -32,8 +32,8 @@ export function SimBanner({ sim, onSimulate }: { sim: SimState; onSimulate: bool
   return (
     <div className="lv-sim-banner" role="status" data-status={run.status} data-live={run.execution.liveOrders ? 'true' : undefined}>
       <p className="lv-sim-banner-text">
-        <span className="lv-sim-tag">SIM</span>
-        {run.execution.liveOrders ? <span className="lv-real-tag">REAL ORDERS</span> : null} {bannerText(run, scenario)}
+        <span className="lv-sim-tag">Sim</span>
+        {run.execution.liveOrders ? <span className="lv-real-tag">Real orders</span> : null} {bannerText(run, scenario)}
       </p>
       {onSimulate ? null : (
         <Link to="/simulate" className="lv-sim-banner-link">
@@ -240,7 +240,7 @@ function OrderModePicker({ execution, mode, onMode }: { execution: SimExecution 
         onClick={() => onMode('live')}
       >
         <span className="lv-sim-mode-title">
-          Paper + real orders <span className="lv-real-tag">MAINNET</span>
+          Paper + real orders <span className="lv-real-tag">Mainnet</span>
         </span>
         <span className="lv-sim-mode-desc">
           {available
@@ -275,10 +275,9 @@ function RunCard({
     <section className="lv-sim-card lv-sim-run" aria-label="Simulation run">
       <div className="lv-sim-run-top">
         <span className="lv-sim-pill" data-tone={st.tone}>
-          <span className="lv-sim-pill-dot" aria-hidden="true" />
           {st.label}
         </span>
-        {run.execution.liveOrders ? <span className="lv-real-tag">REAL ORDERS · MAINNET</span> : <span className="lv-sim-paper">Paper</span>}
+        {run.execution.liveOrders ? <span className="lv-real-tag">Real orders · mainnet</span> : <span className="lv-sim-paper">Paper</span>}
         <div className="lv-sim-run-actions">
           {run.status === 'paused' ? (
             <button type="button" className="lv-btn lv-btn-primary lv-btn-sm" disabled={busy} onClick={() => act(() => simControls.control('resume'))}>
@@ -449,7 +448,7 @@ function RealOrders({ execution, labels }: { execution: SimExecution; labels: Re
     <section className="lv-sim-card lv-sim-real" aria-labelledby="sim-real-title">
       <div className="lv-sim-card-head">
         <h3 id="sim-real-title" className="lv-sim-card-title">
-          Real orders <span className="lv-real-tag">MAINNET</span>
+          Real orders <span className="lv-real-tag">Mainnet</span>
         </h3>
         <span className="lv-sim-hint lv-num">
           {formatUsdAmount(execution.spentUsd)} of {formatUsdAmount(execution.maxRunUsd)} used

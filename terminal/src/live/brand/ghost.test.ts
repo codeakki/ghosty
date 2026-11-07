@@ -28,7 +28,10 @@ describe('Ghosty ghost: one shared shape', () => {
     const html = orb('idle');
     expect(html).toContain(`d="${GHOST_BODY_PATH}"`);
     expect(html).not.toContain('orb-core');
-    for (const layer of ['orb-halo', 'orb-halo-alert', 'orb-ripple', 'orb-listen', 'orb-float', 'orb-pulse', 'orb-hem', 'orb-shimmer', 'orb-tint-think', 'orb-tint-alert', 'orb-tint-off']) {
+    // No glow layers: depth comes from the ghost's own shading, not a halo or a shimmer sweep.
+    expect(html).not.toContain('orb-halo');
+    expect(html).not.toContain('orb-shimmer');
+    for (const layer of ['orb-ripple', 'orb-listen', 'orb-float', 'orb-pulse', 'orb-hem', 'orb-tint-think', 'orb-tint-alert', 'orb-tint-off']) {
       expect(html).toContain(layer);
     }
     expect(count(html, 'class="orb-eye"')).toBe(2);

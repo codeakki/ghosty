@@ -15,17 +15,17 @@ function isTypingTarget(t: EventTarget | null): boolean {
 function buttonLabel(s: DeviceState): string {
   switch (s.mode) {
     case 'idle':
-      return 'Hold to Talk';
+      return 'Hold to talk';
     case 'listening':
-      return 'Release to Send';
+      return 'Release to send';
     case 'thinking':
       return 'Thinking…';
     case 'speaking':
-      return 'Tap to Stop';
+      return 'Tap to stop';
     case 'alert':
-      return 'Tap to Confirm';
+      return 'Tap to confirm';
     case 'offline':
-      return 'Trading Paused';
+      return 'Trading paused';
   }
 }
 
@@ -126,7 +126,7 @@ export function DevicePage({ api, full = false }: { api: LiveApi; full?: boolean
         </p>
         {/* Always rendered (fixed height): fades in while mirroring, so nothing below moves. */}
         <p className="lv-pod-live" data-on={mirroring ? 'true' : undefined} aria-hidden={!mirroring}>
-          <span className="lv-pod-live-dot" aria-hidden="true" />
+          <span className="lv-standby" aria-hidden="true" />
           Live from the pod
         </p>
       </div>
@@ -169,14 +169,13 @@ export function DevicePage({ api, full = false }: { api: LiveApi; full?: boolean
           onContextMenu={(e) => e.preventDefault()}
           aria-describedby="talk-hint"
         >
-          <span className="lv-talk-dot" aria-hidden="true" />
           {buttonLabel(device)}
         </button>
         {/* One reserved slot: the hint normally, "Not Now" while an alert waits. Nothing below moves. */}
         <div className="lv-device-secondary">
           {device.mode === 'alert' ? (
             <button type="button" className="lv-btn-quiet" onClick={notNow} aria-describedby="talk-hint">
-              Not Now
+              Not now
             </button>
           ) : null}
           <p id="talk-hint" className={device.mode === 'alert' ? 'lv-sr-only' : 'lv-talk-hint'}>
@@ -229,7 +228,7 @@ export function DevicePage({ api, full = false }: { api: LiveApi; full?: boolean
         </form>
       ) : (
         <button type="button" className="lv-link-btn" onClick={() => setTyping(true)}>
-          Type Instead
+          Type instead
         </button>
       )}
     </section>
@@ -248,7 +247,7 @@ function AlertCard({ alert, labels, realUsd }: { alert: Alert; labels: Record<st
   return (
     <div className="lv-alert" role="alert" data-real={realUsd !== null ? 'true' : undefined}>
       <p className="lv-alert-kicker">
-        <span aria-hidden="true">●</span> {kicker} · confidence {formatConfidencePct(alert.confidence)}
+        {kicker} · confidence {formatConfidencePct(alert.confidence)}
       </p>
       <p className="lv-alert-leg">{legLine}</p>
       {alert.actions.length > 1 ? (

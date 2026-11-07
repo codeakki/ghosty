@@ -1,47 +1,53 @@
 /*
- * Ghosty design tokens for the Live view. Source of truth: docs/design/ghosty-design.md.
+ * Ghosty design tokens for the landing page and the Live view. Source of truth: docs/design/ghosty-design.md.
+ * Direction: a trading desk at 3 a.m. One cool "Ink" neutral ramp, one accent (the ghost's mint), amber only for
+ * alerts, green/red only for price direction. Depth from surface steps and hairlines, never glows.
  * Prefixed (--color-*, --space-*, ...) so they never collide with the /pro terminal's tokens.
  * Dark is the default; light follows prefers-color-scheme.
  */
 :root {
-  /* Surfaces */
-  --color-bg: #07090d;
-  --color-surface: #0f1319;
-  --color-raised: #161b23;
-  --color-line: #222a35;
-  --color-line-strong: #313b48;
+  /* Surfaces: the Ink ramp */
+  --color-deep: #07080d;
+  --color-bg: #0b0d14;
+  --color-surface: #11141c;
+  --color-raised: #1a1e28;
+  --color-line: rgb(238 240 245 / 0.08);
+  --color-line-strong: rgb(238 240 245 / 0.14);
 
-  /* Text (AA on bg / surface / raised) */
-  --color-text: #eef2f7;
-  --color-muted: #9ba6b5;
+  /* Text: three roles (AA on bg / surface / raised) */
+  --color-text: #eef0f5;
+  --color-muted: #a3a9b8;
+  --color-faint: #7a8296;
 
-  /* Brand: the ghost glow */
+  /* The one accent: the ghost's mint. Dark ink on mint fills. */
   --color-ghost: #a6f4e0;
   --color-ghost-ink: #06201a;
-  --color-ghost-tint: rgb(166 244 224 / 0.1);
-  --color-ghost-glow: rgb(166 244 224 / 0.55);
+  --color-ghost-tint: rgb(166 244 224 / 0.08);
+  /* Kept for old call sites; there are no glows any more. */
+  --color-ghost-glow: transparent;
 
-  /* Direction (always with ▲/▼ and a sign) */
-  --color-up: #3ddc97;
-  --color-down: #ff7a85;
-  --color-up-tint: rgb(61 220 151 / 0.12);
-  --color-down-tint: rgb(255 122 133 / 0.12);
+  /* Direction (always with ▲/▼ and a sign), toned to sit in the ramp */
+  --color-up: #4cc38a;
+  --color-down: #e5484d;
+  --color-up-tint: rgb(76 195 138 / 0.12);
+  --color-down-tint: rgb(229 72 77 / 0.12);
 
-  /* Status */
-  --color-warn: #f5b84a;
+  /* Alerts only */
+  --color-warn: #f0b44c;
   --color-warn-ink: #241500;
-  --color-warn-tint: rgb(245 184 74 / 0.13);
-  --color-warn-glow: rgb(245 184 74 / 0.55);
+  --color-warn-tint: rgb(240 180 76 / 0.1);
+  --color-warn-glow: transparent;
 
-  /* Sponsor tracks: 3px borders + text labels only */
-  --color-track-0g: #c69bff;
-  --color-track-hedera: #93a3ff;
-  --color-track-uniswap: #ff85c0;
-  --color-track-hyperliquid: #5fd4f4;
+  /* Sponsor tracks: a neutral 3px border + the text label. The label carries the name, not a hue. */
+  --color-track-0g: var(--color-line-strong);
+  --color-track-hedera: var(--color-line-strong);
+  --color-track-uniswap: var(--color-line-strong);
+  --color-track-hyperliquid: var(--color-line-strong);
 
   /* Type */
-  --font-sans: 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  --font-mono: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --font-sans: 'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  /* Figures and meta only (prices, ids, times), never labels. */
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
   --text-xs: 12px;
   --text-sm: 14px;
   --text-md: 16px;
@@ -83,29 +89,28 @@
 
   /* Radius */
   --radius-sm: 6px;
+  --radius-control: 10px;
   --radius-md: 12px;
-  --radius-lg: 20px;
-  --radius-pill: 999px;
+  --radius-lg: 16px;
+  --radius-pill: 999px; /* the standby light and other true circles only */
 
-  /* Elevation: dark mode leans on surface steps + hairlines */
+  /* Elevation: dark mode is surface steps + hairlines; a floating layer gets one soft neutral shadow */
   --shadow-1: inset 0 0 0 1px var(--color-line);
-  --shadow-2: 0 0 0 1px var(--color-line), 0 8px 24px rgb(0 0 0 / 0.35);
+  --shadow-2: inset 0 0 0 1px var(--color-line-strong), 0 8px 24px rgb(0 0 0 / 0.4);
+  --highlight: inset 0 1px 0 rgb(255 255 255 / 0.06);
 
-  /* Motion */
-  --dur-fast: 120ms;
+  /* Motion: one curve, a few durations. Loops only where something is live (listening, speaking, alert). */
+  --dur-fast: 140ms;
   --dur-base: 200ms;
-  --dur-enter: 320ms;
-  --dur-breathe: 4.2s;
-  --dur-orbit: 1.6s;
+  --dur-enter: 360ms;
   --dur-ripple: 1.4s;
-  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
-  --ease-pop: cubic-bezier(0.34, 1.4, 0.64, 1);
-  /* Spring-like settle (slight overshoot, no wobble). linear() where supported, cubic-bezier otherwise. */
-  --ease-spring: cubic-bezier(0.3, 1.3, 0.5, 1);
-  --dur-spring: 520ms;
+  /* Aliases kept for existing call sites: no overshoot anywhere. */
+  --ease-pop: var(--ease-out);
+  --ease-spring: var(--ease-out);
+  --dur-spring: 360ms;
   --dur-flash: 600ms;
-  --dur-glow: 4s;
   --stagger: 40ms;
   /* Price ticks repaint at most twice a second per ticker. */
   --tick-min-interval: 500ms;
@@ -115,12 +120,6 @@
   /* Nav row items (tab group, status pills, Settings) share one height: a 32px tab + the 2px group inset. */
   --size-nav-item: calc(var(--size-control-sm) + 2 * var(--space-0));
   --gutter: 16px;
-}
-
-@supports (transition-timing-function: linear(0, 1)) {
-  :root {
-    --ease-spring: linear(0, 0.08 4%, 0.3 9%, 0.62 16%, 0.88 24%, 1.02 32%, 1.05 38%, 1.04 46%, 1.01 60%, 1);
-  }
 }
 
 @media (min-width: 900px) {
@@ -133,31 +132,28 @@
 
 @media (prefers-color-scheme: light) {
   :root {
+    --color-deep: #eceff4;
     --color-bg: #f5f7fa;
     --color-surface: #ffffff;
-    --color-raised: #eef1f5;
-    --color-line: #dfe4ea;
-    --color-line-strong: #c9d1db;
-    --color-text: #0d1117;
-    --color-muted: #566170;
+    --color-raised: #eceff4;
+    --color-line: rgb(17 24 39 / 0.08);
+    --color-line-strong: rgb(17 24 39 / 0.16);
+    --color-text: #111827;
+    --color-muted: #4b5565;
+    --color-faint: #6b7487;
     --color-ghost: #0b7363;
     --color-ghost-ink: #ffffff;
-    --color-ghost-tint: rgb(11 115 99 / 0.09);
-    --color-ghost-glow: rgb(20 170 145 / 0.45);
-    --color-up: #047857;
-    --color-down: #c0263e;
-    --color-up-tint: rgb(4 120 87 / 0.1);
-    --color-down-tint: rgb(192 38 62 / 0.09);
+    --color-ghost-tint: rgb(11 115 99 / 0.08);
+    --color-up: #16a34a;
+    --color-down: #dc2626;
+    --color-up-tint: rgb(22 163 74 / 0.1);
+    --color-down-tint: rgb(220 38 38 / 0.08);
     --color-warn: #a35200;
     --color-warn-ink: #ffffff;
-    --color-warn-tint: rgb(163 82 0 / 0.1);
-    --color-warn-glow: rgb(230 150 40 / 0.5);
-    --color-track-0g: #7c2fd0;
-    --color-track-hedera: #4150d6;
-    --color-track-uniswap: #b8226a;
-    --color-track-hyperliquid: #0b6e8c;
-    --shadow-1: 0 0 0 1px var(--color-line), 0 1px 2px rgb(13 17 23 / 0.06);
-    --shadow-2: 0 0 0 1px var(--color-line), 0 1px 2px rgb(13 17 23 / 0.06), 0 4px 12px rgb(13 17 23 / 0.05);
+    --color-warn-tint: rgb(163 82 0 / 0.08);
+    --shadow-1: 0 0 0 1px var(--color-line), 0 1px 2px rgb(0 0 0 / 0.05);
+    --shadow-2: 0 0 0 1px var(--color-line), 0 8px 24px rgb(0 0 0 / 0.06);
+    --highlight: none;
   }
 }
 

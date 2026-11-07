@@ -19,7 +19,6 @@ export function TokenBanner(props: {
   if (props.guestLabel) {
     return (
       <div className="lv-token-banner" role="status" data-kind="guest">
-        <span className="lv-token-banner-dot" aria-hidden="true" />
         <p className="lv-token-banner-text" title={GUEST_CANNOT}>
           {props.guestLabel}
         </p>
@@ -31,7 +30,6 @@ export function TokenBanner(props: {
   }
   return (
     <div className="lv-token-banner" role="status">
-      <span className="lv-token-banner-dot" aria-hidden="true" />
       <p className="lv-token-banner-text">
         {props.guestNote ?? (props.guestAccess ? 'Ask Ghosty anything as a guest. Trading stays with the owner.' : 'Add your device token to talk to Ghosty')}
       </p>
