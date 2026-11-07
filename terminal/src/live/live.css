@@ -113,9 +113,11 @@ body:has(.lv-app) {
   position: sticky;
   top: 0;
   z-index: 20;
-  display: flex;
+  /* Logo left, tabs centred on the page, pills + Settings right. Side columns grow to fit before they overlap. */
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  gap: var(--space-3);
+  column-gap: var(--space-3);
   height: calc(var(--nav-h) + env(safe-area-inset-top));
   padding: env(safe-area-inset-top) max(var(--gutter), env(safe-area-inset-right)) 0 max(var(--gutter), env(safe-area-inset-left));
   background: color-mix(in oklab, var(--color-bg) 86%, transparent);
@@ -125,6 +127,7 @@ body:has(.lv-app) {
 }
 
 .lv-wordmark {
+  justify-self: start;
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
@@ -161,16 +164,30 @@ body:has(.lv-app) {
 }
 
 .lv-tabs {
+  justify-self: center;
   display: flex;
+  align-items: center;
   gap: var(--space-0);
-  margin: 0 auto;
+  min-width: 0;
+  max-width: 100%;
+  height: var(--size-nav-item);
   padding: var(--space-0);
+  box-sizing: border-box;
   border-radius: var(--radius-pill);
   background: var(--color-surface);
   box-shadow: var(--shadow-1);
+  /* Narrow screens: the group scrolls sideways instead of wrapping or squeezing the pills. */
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+.lv-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .lv-tab {
+  flex: none;
   display: inline-flex;
   align-items: center;
   height: var(--size-control-sm);
@@ -179,6 +196,7 @@ body:has(.lv-app) {
   color: var(--color-muted);
   font-weight: 500;
   text-decoration: none;
+  white-space: nowrap;
   transition:
     color var(--dur-fast) var(--ease-out),
     background-color var(--dur-fast) var(--ease-out);
@@ -200,94 +218,124 @@ body:has(.lv-app) {
   padding: 0 var(--space-3);
 }
 
-.lv-nav-status {
+.lv-nav-end {
+  justify-self: end;
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  flex: none;
 }
 
-/* Fixed width: "Connecting…" → "0G live" never re-centres the tabs. */
-.lv-status-dot {
+/* One pill for every header status: same height as the tab group, an 8px dot centred on the word. */
+.lv-pill {
+  flex: none;
   display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
   justify-content: center;
-  min-width: 7.5rem;
-  height: var(--size-control-sm);
+  gap: var(--space-2);
+  height: var(--size-nav-item);
   padding: 0 var(--space-3);
+  box-sizing: border-box;
   border-radius: var(--radius-pill);
   background: var(--color-surface);
   box-shadow: var(--shadow-1);
+  color: var(--color-text);
   font-size: var(--text-xs);
+  line-height: var(--leading-xs);
   font-weight: 500;
   white-space: nowrap;
 }
 
-.lv-status-icon {
-  position: relative;
-  display: inline-grid;
-  place-items: center;
-  width: var(--space-3);
-  height: var(--space-3);
-  font-size: 10px;
-}
-
-/* Heartbeat: one ring per SSE event. */
-.lv-beat {
-  position: absolute;
-  inset: 0;
+.lv-pill-dot {
+  flex: none;
+  width: var(--space-2);
+  height: var(--space-2);
   border-radius: 50%;
-  border: 1px solid currentColor;
-  opacity: 0;
-  animation: lv-beat 900ms var(--ease-out);
-  pointer-events: none;
+  background: var(--color-muted);
 }
 
-@keyframes lv-beat {
-  from {
-    transform: scale(0.6);
-    opacity: 0.9;
+.lv-tone-ok .lv-pill-dot {
+  background: var(--color-ghost);
+}
+
+.lv-tone-warn .lv-pill-dot {
+  background: var(--color-warn);
+}
+
+.lv-tone-bad .lv-pill-dot {
+  background: var(--color-down);
+}
+
+/* Live: a slow opacity breath on the dot. No ring, no scale. */
+.lv-pill[data-live='true'] .lv-pill-dot {
+  animation: lv-pill-pulse 2.4s var(--ease-in-out) infinite;
+}
+
+@keyframes lv-pill-pulse {
+  0%,
+  100% {
+    opacity: 1;
   }
-  to {
-    transform: scale(2.2);
-    opacity: 0;
+  50% {
+    opacity: 0.4;
   }
 }
 
-.lv-tone-ok .lv-status-icon {
-  color: var(--color-ghost);
-}
-
-.lv-tone-warn .lv-status-icon {
-  color: var(--color-warn);
-}
-
-.lv-tone-bad .lv-status-icon {
-  color: var(--color-down);
-}
-
-.lv-tone-muted .lv-status-icon {
+.lv-nav-btn {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  height: var(--size-nav-item);
+  padding: 0 var(--space-3);
+  box-sizing: border-box;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-1);
   color: var(--color-muted);
+  font: inherit;
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out);
 }
 
-/* Same quiet pill as the status; mainnet only adds a small amber diamond (real money), never a loud box. */
-.lv-status-dot.lv-network {
-  min-width: 0;
-  color: var(--color-muted);
+/* 44px hit area around the 36px pill. */
+.lv-nav-btn::before {
+  content: '';
+  position: absolute;
+  inset: calc(-1 * var(--space-1));
 }
 
-.lv-network .lv-status-icon {
-  color: var(--color-muted);
-  font-size: 9px;
+.lv-nav-btn:hover {
+  color: var(--color-text);
+  background: var(--color-raised);
 }
 
-.lv-network-main .lv-status-icon {
-  color: var(--color-warn);
+.lv-gear {
+  flex: none;
+  display: block;
 }
 
-@media (max-width: 640px) {
-  .lv-status-text {
+.lv-pill-text,
+.lv-nav-btn-text {
+  display: block;
+}
+
+/* Below 900px the pills shrink to their dots (the word stays for screen readers and in the title). */
+@media (max-width: 899px) {
+  .lv-pill {
+    width: var(--size-nav-item);
+    padding: 0;
+  }
+
+  .lv-pill-text {
     position: absolute;
     width: 1px;
     height: 1px;
@@ -295,10 +343,38 @@ body:has(.lv-app) {
     clip: rect(0 0 0 0);
     white-space: nowrap;
   }
+}
 
-  .lv-status-dot {
-    min-width: 0;
-    padding: 0 var(--space-2);
+/* Below 768px Settings is the gear alone; aria-label keeps its name. */
+@media (max-width: 767px) {
+  .lv-nav-btn {
+    width: var(--size-nav-item);
+    padding: 0;
+  }
+
+  .lv-nav-btn-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+}
+
+@media (max-width: 639px) {
+  /* Tabs take whatever is left and scroll; logo and controls keep their size. */
+  .lv-nav {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    column-gap: var(--space-2);
+  }
+
+  .lv-nav-end {
+    gap: var(--space-1);
+  }
+
+  .lv-pill {
+    width: var(--size-tag);
   }
 
   .lv-tab {
@@ -316,23 +392,189 @@ body:has(.lv-app) {
     display: none;
   }
 
-  /* Keep the word on the network pill: an icon-only pill reads as a stray dot. */
-  .lv-network .lv-status-text {
-    position: static;
-    width: auto;
-    height: auto;
-    overflow: visible;
-    clip: auto;
-  }
-
-  .lv-nav {
-    gap: var(--space-2);
-  }
-
   .lv-tab {
-    padding: 0 var(--space-3);
+    padding: 0 var(--space-2);
     font-size: 13px;
   }
+}
+
+/* After a 401: one calm band under the header. Fixed height from the scale; columns below subtract it. */
+.lv-app[data-auth='needed'] {
+  --auth-h: calc(var(--space-6) + var(--space-2));
+}
+
+.lv-token-banner {
+  position: sticky;
+  top: calc(var(--nav-h) + env(safe-area-inset-top) + var(--sim-h, 0px));
+  z-index: 18;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--auth-h);
+  padding: 0 var(--gutter);
+  box-sizing: border-box;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-line);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  animation: lv-token-fade var(--dur-base) var(--ease-out) both;
+}
+
+@keyframes lv-token-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+.lv-token-banner-dot {
+  flex: none;
+  width: var(--space-2);
+  height: var(--space-2);
+  border-radius: 50%;
+  background: var(--color-ghost);
+}
+
+.lv-token-banner-text {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lv-token-banner-btn {
+  flex: none;
+  height: var(--size-control-sm);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out);
+}
+
+.lv-token-banner-btn:hover {
+  border-color: var(--color-ghost);
+  background: var(--color-raised);
+}
+
+@media (max-width: 479px) {
+  .lv-token-banner {
+    font-size: var(--text-xs);
+  }
+}
+
+/* The shared SettingsDialog (server URL + device token), in Live tokens. /pro styles it in app.css. */
+.lv-app .dialog {
+  width: min(480px, calc(100vw - 2 * var(--space-4)));
+  padding: 0;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: 400 var(--text-sm) / var(--leading-sm) var(--font-sans);
+  overscroll-behavior: contain;
+}
+
+.lv-app .dialog::backdrop {
+  background: rgb(0 0 0 / 0.55);
+}
+
+.lv-app .dialog-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-5);
+}
+
+.lv-app .dialog-title {
+  margin: 0;
+  font-size: var(--text-md);
+  line-height: var(--leading-md);
+  font-weight: 600;
+}
+
+.lv-app .field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.lv-app .field-label {
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  font-weight: 500;
+}
+
+.lv-app .field-help {
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+}
+
+.lv-app .field-row {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.lv-app .field input {
+  flex: 1;
+  min-width: 0;
+  height: var(--size-control);
+  padding: 0 var(--space-3);
+  box-sizing: border-box;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-raised);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--text-md);
+}
+
+.lv-app .field input:focus-visible {
+  outline: 2px solid var(--color-ghost);
+  outline-offset: 2px;
+}
+
+.lv-app .dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.lv-app .dialog .btn {
+  flex: none;
+  height: var(--size-control);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.lv-app .dialog .btn:hover {
+  background: var(--color-raised);
+}
+
+.lv-app .dialog .btn-primary {
+  border-color: var(--color-ghost);
+  background: var(--color-ghost);
+  color: var(--color-ghost-ink);
+  font-weight: 600;
+}
+
+.lv-app .dialog .btn-primary:hover {
+  border-color: var(--color-text);
 }
 
 /* Overlays the top of the page (never pushes it): the server dropping out is not a layout change. */
@@ -362,14 +604,14 @@ body:has(.lv-app) {
 
 .lv-main-live > .lv-feed,
 .lv-main-feed > .lv-feed {
-  height: calc(100dvh - var(--nav-h) - var(--sim-h, 0px));
+  height: calc(100dvh - var(--nav-h) - var(--sim-h, 0px) - var(--auth-h, 0px));
 }
 
 .lv-main-feed {
   flex: none;
   display: flex;
   justify-content: center;
-  height: calc(100dvh - var(--nav-h) - var(--sim-h, 0px));
+  height: calc(100dvh - var(--nav-h) - var(--sim-h, 0px) - var(--auth-h, 0px));
 }
 
 @media (min-width: 900px) {
@@ -379,7 +621,7 @@ body:has(.lv-app) {
     display: grid;
     grid-template-columns: minmax(360px, 4fr) 6fr;
     grid-template-rows: minmax(0, 1fr);
-    height: calc(100dvh - var(--nav-h) - var(--sim-h, 0px));
+    height: calc(100dvh - var(--nav-h) - var(--sim-h, 0px) - var(--auth-h, 0px));
   }
 
   .lv-main-live > .lv-device {
@@ -438,7 +680,7 @@ body:has(.lv-app) {
 }
 
 .lv-device-full {
-  min-height: calc(100dvh - var(--nav-h) - var(--sim-h, 0px));
+  min-height: calc(100dvh - var(--nav-h) - var(--sim-h, 0px) - var(--auth-h, 0px));
   justify-content: center;
   margin: 0 auto;
   width: min(100%, 520px);
@@ -2241,7 +2483,7 @@ body:has(.lv-app) {
   .lv-talk-dot,
   .lv-pulse-skel,
   .lv-skeleton,
-  .lv-beat,
+  .lv-pill-dot,
   .lv-card[data-status='thinking']::after {
     animation: none !important;
   }

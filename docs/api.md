@@ -7,7 +7,7 @@ Contract between the pod (ESP32) and the server. Base URL during development is 
 | Item | Value |
 |---|---|
 | Auth | `X-Device-Token: <shared secret>` on `/voice` and `/button`, checked only when `DEVICE_TOKEN` is set in `server/.env` (unset = local dev, no check). Must match the token in `firmware/libraries/GhostyBoard/src/secrets.h`. |
-| Errors | JSON `{ "error": "<code>" }`, sometimes with a `"message"`. A provider without keys in live mode answers `503 {"error":"not_configured","provider","missingEnv":[...],"message"}` (see [Run modes](#run-modes-and-not_configured)). |
+| Errors | JSON `{ "error": "<code>" }`, sometimes with a `"message"`. A provider without keys in live mode answers `503 {"error":"not_configured","provider","missingEnv":[...],"message"}` (see [Run modes](#run-modes-and-not_configured)). When a `message` is present it is written for the wearer/operator and the terminal shows it as is (`HTTP 409: Nothing to confirm. …`); branch on `error`, display `message`. |
 | Audio in | `audio/wav` (also `audio/x-wav`, `audio/wave`, `application/octet-stream`): PCM WAV, 16-bit signed little-endian, mono, 16 000 Hz expected. Body limit 4 MB. |
 | Audio out | `application/octet-stream`, raw s16le, 16 000 Hz, mono, no header |
 | Safe-stop | When the brain (0G Compute) is unreachable, `/voice` and `/button` return `503 {"error":"brain_offline"}` and nothing is executed. A 0G call that fails mid-request (`BrainOfflineError`) gives the same 503, with `reason` and the router `requestId`. If the encrypted memory on 0G Storage cannot be loaded or decrypted (`MemoryUnavailableError`), the answer is `503 {"error":"memory_unavailable"}`. The server never falls back to a fake decision. |
@@ -18,8 +18,10 @@ Contract between the pod (ESP32) and the server. Base URL during development is 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | GET | `/health` | none | Liveness + safe-stop state |
-| POST | `/voice` | device token | Push-to-talk: WAV in, spoken answer out |
-| POST | `/button` | device token | Confirm or cancel the last suggested trade |
+| POST | `/voice` | device token | WAV in, spoken answer out. `X-Listen: always` = answer only speech with the wake word "Ghosty" (`204` otherwise). `202` + a Dabao frame when an order needs a signature |
+| POST | `/sign` | device token | The Dabao's reply frame for a `202` (header `X-Sign-Id`). Resumes the voice turn: `200` audio, or another `202` |
+| GET | `/announce` | device token | Oldest queued news signal (with its odds and price checks) as PCM, or `204`. The always-listening pod polls it every 15 s |
+| POST | `/button` | device token | Confirm or cancel the pending alert the wearer heard (409 when there is none) |
 | GET | `/hedera/audit` | none | HCS audit topic messages (payments, decisions, trades), decoded from the mirror node |
 
 Sim-only routes for the [virtual pod](simulator.md). The firmware does not call them; they do not change the device contract above.
@@ -180,11 +182,32 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST http://localhost:3000/voice \
   -H "Content-Type: audio/wav" --data-binary @sample.wav
 ```
 
+### Orders signed on the Dabao (`HL_SIGNER=dabao`)
+
+With `VOICE_ORDERS_ENABLED=true`, Claude (`ANTHROPIC_MODEL`) hears the exact words and calls `place_order`,
+`get_positions` or `close_positions`. With `HL_SIGNER=dabao` the server holds no trading key:
+
+1. `POST /voice` answers `202`, header `X-Sign-Id`, body = a sign request frame (order fields, not a hash).
+2. The pod sends the frame to the Dabao over UART and POSTs the Dabao's reply frame to `POST /sign`.
+3. The server checks that the signature recovers to `HL_DABAO_ADDRESS`, submits the order to Hyperliquid and
+   answers with the spoken result (`200`), or with the next `202` when one turn has several orders.
+
+Frame format, limits and error codes: [firmware/dabao/ghosty_signer/hl_signer.h](../firmware/dabao/ghosty_signer/hl_signer.h).
+A `POST /voice/text` turn has no pod to relay through, so an order there fails with "no pod is connected".
+
+### Memory and signal checks
+
+- Every voice turn, order (with the Hyperliquid tx hash), news snapshot and signal goes into the account's
+  encrypted memory on 0G Storage; the account is `HL_MASTER_ADDRESS`. The last 20 turns go to Claude each turn.
+  `OG_POINTER_STORE=ssm` keeps the newest root hash in AWS SSM (`OG_POINTER_PREFIX`) so a restart finds it.
+- Every news signal runs two checks before it is queued for `GET /announce`: related Polymarket markets (YES odds
+  now vs one minute ago) and the 1 and 5 minute price move on Hyperliquid and Binance.
+
 ---
 
 ## POST /button
 
-Confirms or cancels the last decision spoken by `/voice`.
+Confirms or cancels the **pending** decision: the last actionable decision the wearer was told about, either spoken by `/voice` (or `/voice/text`) or queued as an alert by the news poller or `/news/inject`. Only a decision with `signal` other than `none` and at least one leg becomes pending; its reply ends with "Press to confirm." A decision with nothing to act on never says that and never becomes pending (it also replaces an older pending one: the last thing the wearer heard was not a trade).
 
 **Request**
 
@@ -203,7 +226,7 @@ X-Device-Token: <secret>
 
 **Simulation:** when a simulation run has a pending decision (`GET /sim/run` → `pending` not null), the press goes to that run and fills on its PaperVenue at the historical price; no real venue is ever called, whatever keys are set. The answer then carries `"sim": true, "paper": true, "runId"`, order ids are `paper-<n>` with `status: "simulated"`, and `swaps` is always `[]`. Safe-stop still applies (503 `brain_offline`).
 
-There is no "nothing pending" error. If no decision is pending (for example a press right after boot), the server decides from the current news alone and acts on that. The fake news feed already contains a geopolitical headline, so a bare `confirm` produces a trade plan.
+**Ghosty only trades on an alert you've heard.** A press never asks 0G for a new decision. With nothing pending (a press right after boot, a second press, a press after a `none` answer) both `confirm` and `cancel` answer `409 nothing_pending` and nothing is decided, ordered or swapped. A pending decision expires `PENDING_DECISION_TTL_SEC` (default 120) seconds after it was presented; a later press answers `409 alert_expired` and drops it. The pending decision is consumed by the first press, so two quick presses execute it at most once. The same rule holds for a simulation press: once the sim decision is confirmed or cancelled, the next press is a `409`, not a live decision.
 
 **Response 200**
 
@@ -227,8 +250,11 @@ Values above are illustrative. With the default `MAX_TRADE_USD=25` and a balance
 |---|---|---|
 | 400 | Body is not JSON or `action` is not `confirm`/`cancel` | `{"error":"bad_request","message":"..."}` |
 | 401 | `DEVICE_TOKEN` is set and `X-Device-Token` is missing or wrong | `{"error":"unauthorized"}` |
+| 409 | No pending decision (nothing presented, already confirmed/cancelled, or replaced by a `none` decision). Nothing is decided or executed | `{"error":"nothing_pending","message":"Nothing to confirm. Ghosty only trades on an alert you've heard."}` |
+| 409 | The pending decision is older than `PENDING_DECISION_TTL_SEC` (default 120 s). It is dropped; nothing is executed | `{"error":"alert_expired","message":"Alert expired. Nothing was traded; wait for the next alert.","requestId":"<expired decision>"}` |
 | 503 | Safe-stop: brain (0G Compute) offline, no order is sent | `{"error":"brain_offline"}` |
 | 503 | 0G memory blob could not be loaded or decrypted | `{"error":"memory_unavailable","message":"..."}` |
+| 503 | `confirm` in live mode without Hyperliquid keys, checked before the pending decision is consumed | `{"error":"not_configured","provider":"hyperliquid",...}` |
 
 ```bash
 curl -s -X POST http://localhost:3000/button \
@@ -323,7 +349,7 @@ Errors: `400 bad_request`, `401`, `503 brain_offline` (trade path only when Clau
 
 ### POST /news/inject
 
-Body `{"title": string, "source"?: string, "url"?: string}`. `source` is the outlet or X handle (e.g. `Reuters`) and is used for credibility scoring. The headline joins the news feed and the decision loop runs with it first. An actionable decision (`signal` not `none`) is queued as an alert and becomes the pending trade for `/button`. **200**:
+Body `{"title": string, "source"?: string, "url"?: string}`. `source` is the outlet or X handle (e.g. `Reuters`) and is used for credibility scoring. The headline joins the news feed and the decision loop runs with it first. An actionable decision (`signal` not `none` and at least one leg) is queued as an alert and becomes the pending trade for `/button` for `PENDING_DECISION_TTL_SEC` seconds; anything else returns `"alert": null`. **200**:
 
 ```json
 { "item": { "id": "manual:1", "source": "manual", "title": "...", "url": "", "publishedAt": "...", "handle": "Reuters" },
@@ -487,7 +513,7 @@ Real probes, run in parallel with a 5 s budget each and cached 30 s. Details nev
 | `hedera-merchant` | hedera | Mirror node account for `X402_PAY_TO` (must differ from the payer) |
 | `x402-facilitator` | hedera | `GET <X402_FACILITATOR_URL>/supported` lists `hedera:<network>` |
 | `hcs-audit` | hedera | Topic from `HEDERA_HCS_TOPIC_ID` or `.ghosty/hcs.json`, checked on the mirror node |
-| `hyperliquid` | hyperliquid | `clearinghouseState` for `HL_MASTER_ADDRESS` on the main dex and each `HL_DEXES` dex (USDC margin per dex, degraded when `xyz` is 0) + `extraAgents` contains the agent address |
+| `hyperliquid` | hyperliquid | `userAbstraction` for `HL_MASTER_ADDRESS`. Unified account (`"unifiedAccount"`): `spotClearinghouseState` USDC is the collateral shared by the main dex and every `HL_DEXES` dex (`detail` like `unified account: 9.70 USDC shared across main + xyz`), degraded below $2 (margin for a $10 leg at 5x). Otherwise `clearinghouseState` on the main dex and each `HL_DEXES` dex (USDC margin per dex, degraded when `xyz` is 0). Both + `extraAgents` contains the agent address |
 | `uniswap` | uniswap | `UNISWAP_API_KEY` present + native balance of the EVM wallet on `EVM_CHAIN_ID` |
 | `rss` | data | Each feed fetched; `n/m feeds reachable` |
 | `polymarket` | data | Gamma `/events` reachable (offline on many Indian ISPs; the hint says so) |

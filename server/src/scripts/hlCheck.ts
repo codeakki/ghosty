@@ -13,6 +13,7 @@ import {
   tickerOf,
   UnknownMarketError,
 } from '../execution/hyperliquid.js';
+import { HL_UNIFIED_MIN_COLLATERAL_USD, spotUsdc } from '../providers/probes.js';
 import { isAddress, normalizePrivateKey } from '../wallet/account.js';
 
 const config = loadConfig();
@@ -87,6 +88,16 @@ if (!isAddress(config.HL_MASTER_ADDRESS)) {
   const abstraction = await info.userAbstraction({ user: config.HL_MASTER_ADDRESS });
   const autoCollateral = abstraction === 'unifiedAccount' || abstraction === 'portfolioMargin';
   console.log(`  abstraction: ${abstraction}${autoCollateral ? ' (HIP-3 collateral pulled automatically)' : ''}`);
+  if (abstraction === 'unifiedAccount') {
+    // Unified mode: one spot USDC balance backs the main dex and every HIP-3 dex. Per-dex accountValue reads ~0.
+    const usdc = spotUsdc(await info.spotClearinghouseState({ user: config.HL_MASTER_ADDRESS }));
+    const enough = usdc >= HL_UNIFIED_MIN_COLLATERAL_USD;
+    if (!enough) problems++;
+    console.log(
+      `  ${ok(enough)} unified account: ${usdc.toFixed(2)} USDC shared across ${['main', ...dexes].join(' + ')}` +
+        (enough ? '' : `  → deposit USDC (need at least $${HL_UNIFIED_MIN_COLLATERAL_USD} for a $10 leg at 5x)`),
+    );
+  }
   for (const dex of ['', ...dexes]) {
     const state = await info.clearinghouseState({ user: config.HL_MASTER_ADDRESS, ...(dex ? { dex } : {}) });
     const positions = state.assetPositions.map((p) => `${p.position.coin} ${p.position.szi}`).join(', ') || 'none';

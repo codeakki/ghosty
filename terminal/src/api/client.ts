@@ -25,6 +25,9 @@ import type {
   SafeStopResult,
   Signal,
   SimAction,
+  OrderStatus,
+  SimDecisionRow,
+  SimExecution,
   SimPosition,
   SimRun,
   SimScenario,
@@ -200,8 +203,10 @@ export function parseOrder(v: unknown): OrderEntry | null {
     url: optStr(v.url),
     error: optStr(v.error),
     requestId: str(v.requestId),
-    at: str(v.at),
+    at: str(v.at) || str(v.simTime),
     sim: parseSimTag(v),
+    live: v.live === true ? true : undefined,
+    network: v.network === 'mainnet' || v.network === 'testnet' ? v.network : undefined,
   };
 }
 
@@ -402,20 +407,36 @@ export function parseMarketTick(v: unknown): MarketTick | null {
 // Simulation
 // ---------------------------------------------------------------------------
 
+/** A scenario market: the server sends `{coin, source, symbol, proxy?}`; older builds and the fixture send the coin. */
+function scenarioMarket(m: unknown): { coin: string; proxy?: string } | null {
+  if (typeof m === 'string') return m ? { coin: m } : null;
+  if (!isRecord(m)) return null;
+  const coin = optStr(m.coin);
+  return coin ? { coin, proxy: optStr(m.proxy) } : null;
+}
+
 export function parseSimScenarios(v: unknown): SimScenario[] | null {
   const list = Array.isArray(v) ? v : isRecord(v) && Array.isArray(v.scenarios) ? v.scenarios : null;
   if (!list) return null;
   return records(list).flatMap((r) => {
     const id = optStr(r.id);
     if (!id) return [];
+    const markets = arr(r.markets).flatMap((m) => {
+      const x = scenarioMarket(m);
+      return x ? [x] : [];
+    });
+    const proxies: Record<string, string> = {};
+    for (const m of markets) if (m.proxy) proxies[m.coin] = m.proxy;
     return [
       {
         id,
         title: str(r.title, id),
         description: str(r.description),
+        category: optStr(r.category) ?? null,
         start: str(r.start),
         end: str(r.end),
-        markets: arr(r.markets).filter((x): x is string => typeof x === 'string'),
+        markets: markets.map((m) => m.coin),
+        proxies,
         headlines: records(r.headlines).map((h) => ({ ts: str(h.ts), title: str(h.title), source: str(h.source), url: str(h.url) })),
       },
     ];
@@ -429,35 +450,107 @@ function count(v: unknown): number {
   return Array.isArray(v) ? v.length : Math.max(0, num(v) ?? 0);
 }
 
+/**
+ * A sim position. The server sends `{coin, size (signed coin units), entryPx, markPx, unrealizedPnlUsd,
+ * realizedPnlUsd}`; the fixture sends `{market, side, sizeUsd, pnlUsd}`. Both become the UI shape.
+ */
+function simPosition(p: Record<string, unknown>): SimPosition | null {
+  const market = optStr(p.market) ?? optStr(p.coin);
+  if (!market) return null;
+  const entryPx = num(p.entryPx) ?? 0;
+  const markPx = num(p.markPx) ?? entryPx;
+  const units = num(p.size);
+  if (p.sizeUsd === undefined && units !== null) {
+    if (units === 0) return null; // closed out
+    return {
+      market,
+      side: units < 0 ? 'short' : 'long',
+      sizeUsd: Math.abs(units) * entryPx,
+      entryPx,
+      markPx,
+      pnlUsd: (num(p.unrealizedPnlUsd) ?? 0) + (num(p.realizedPnlUsd) ?? 0),
+    };
+  }
+  return { market, side: p.side === 'short' ? 'short' : 'long', sizeUsd: num(p.sizeUsd) ?? 0, entryPx, markPx, pnlUsd: num(p.pnlUsd) ?? 0 };
+}
+
+const SKIPS = ['no_shock', 'brain_offline', 'error'] as const;
+
+function simExecution(v: unknown): SimExecution {
+  const e = isRecord(v) ? v : {};
+  return {
+    liveOrders: e.liveOrders === true,
+    available: e.available === true,
+    unavailable: optStr(e.unavailable) ?? null,
+    orderUsd: num(e.orderUsd) ?? 0,
+    maxRunUsd: num(e.maxRunUsd) ?? 0,
+    spentUsd: num(e.spentUsd) ?? 0,
+    orders: records(e.orders).flatMap((o) => {
+      const coin = optStr(o.coin);
+      if (!coin) return [];
+      return [
+        {
+          orderId: str(o.orderId),
+          coin,
+          isBuy: o.isBuy === true,
+          sizeUsd: num(o.sizeUsd) ?? 0,
+          status: str(o.status, 'rejected') as OrderStatus,
+          avgPx: num(o.avgPx) ?? undefined,
+          url: optStr(o.url),
+          error: optStr(o.error),
+          requestId: str(o.requestId),
+          placedAt: str(o.placedAt),
+        },
+      ];
+    }),
+  };
+}
+
 export function parseSimRun(v: unknown): SimRun | null {
   if (!isRecord(v)) return null;
   const status = SIM_STATUSES.includes(v.status as SimStatus) ? (v.status as SimStatus) : null;
   if (!status) return null;
-  const positions: SimPosition[] = records(v.positions).flatMap((p) => {
-    const market = optStr(p.market);
-    if (!market) return [];
-    return [
-      {
-        market,
-        side: p.side === 'short' ? 'short' : 'long',
-        sizeUsd: num(p.sizeUsd) ?? 0,
-        entryPx: num(p.entryPx) ?? 0,
-        markPx: num(p.markPx) ?? 0,
-        pnlUsd: num(p.pnlUsd) ?? 0,
-      },
-    ];
+  const positions = records(v.positions).flatMap((p) => {
+    const x = simPosition(p);
+    return x ? [x] : [];
   });
+  const decisionList: SimDecisionRow[] = records(v.decisionList).map((d) => ({
+    simTime: str(d.simTime),
+    headline: str(d.headline),
+    requestId: optStr(d.requestId) ?? null,
+    signal: d.signal ? signal(d.signal) : null,
+    confidence: num(d.confidence),
+    skipped: SKIPS.includes(d.skipped as (typeof SKIPS)[number]) ? (d.skipped as (typeof SKIPS)[number]) : null,
+    error: optStr(d.error) ?? null,
+    actions: count(d.actions),
+  }));
+  const h = isRecord(v.headlines) ? v.headlines : {};
+  const pending = isRecord(v.pending) && optStr(v.pending.requestId)
+    ? { requestId: str(v.pending.requestId), headline: str(v.pending.headline), actions: parseActions(v.pending.actions) }
+    : null;
   return {
     runId: str(v.runId),
     scenarioId: str(v.scenarioId),
     status,
+    pauseReason: v.pauseReason === 'user' || v.pauseReason === 'awaiting_press' ? v.pauseReason : null,
     simTime: str(v.simTime),
+    start: str(v.start),
+    end: str(v.end),
     progress: Math.max(0, Math.min(1, num(v.progress) ?? 0)),
+    speed: num(v.speed) ?? 0,
+    notionalUsd: num(v.notionalUsd) ?? 0,
     pnlUsd: num(v.pnlUsd) ?? 0,
     baselinePnlUsd: num(v.baselinePnlUsd) ?? 0,
+    pnlPct: num(v.pnlPct),
+    baselinePct: num(v.baselinePct),
     positions,
     decisions: count(v.decisions),
+    decisionList,
     episodes: count(v.episodes),
+    headlines: { total: count(h.total), delivered: count(h.delivered) },
+    pending,
+    execution: simExecution(v.execution),
+    error: optStr(v.error) ?? null,
   };
 }
 
@@ -487,8 +580,21 @@ export function parseReplay(v: unknown): ReplayEpisode[] | null {
 // HTTP
 // ---------------------------------------------------------------------------
 
+/** A guarded route answered 401: the device token is missing or wrong. Never carries the token itself. */
+export interface UnauthorizedInfo {
+  method: 'GET' | 'POST';
+  path: string;
+}
+
+export interface ClientHooks {
+  onUnauthorized?: (info: UnauthorizedInfo) => void;
+}
+
 export class GhostyClient {
-  constructor(private settings: ClientSettings = DEFAULT_SETTINGS) {}
+  constructor(
+    private settings: ClientSettings = DEFAULT_SETTINGS,
+    private hooks: ClientHooks = {},
+  ) {}
 
   configure(settings: ClientSettings): void {
     this.settings = { ...settings, baseUrl: normalizeBaseUrl(settings.baseUrl) };
@@ -520,7 +626,12 @@ export class GhostyClient {
     } catch (err) {
       return { ok: false, kind: 'network', status: 0, message: errorText(err) };
     }
-    return toResult(res, parse);
+    return this.observe(method, path, await toResult(res, parse));
+  }
+
+  private observe<T>(method: UnauthorizedInfo['method'], path: string, r: ApiResult<T>): ApiResult<T> {
+    if (!r.ok && r.kind === 'unauthorized') this.hooks.onUnauthorized?.({ method, path });
+    return r;
   }
 
   health() {
@@ -606,12 +717,18 @@ export class GhostyClient {
   simRun() {
     return this.request('GET', '/sim/run', parseSimRun);
   }
-  simStart(scenarioId: string, speed?: number, autoPauseOnAlert?: boolean) {
+  /** `liveOrders`: also place REAL Hyperliquid mainnet orders on confirm (the server must allow it). */
+  simStart(scenarioId: string, speed?: number, autoPauseOnAlert?: boolean, liveOrders?: boolean) {
     return this.request<{ runId: string }>(
       'POST',
       '/sim/run',
       (b) => (isRecord(b) && typeof b.runId === 'string' ? { runId: b.runId } : null),
-      { scenarioId, ...(speed !== undefined ? { speed } : {}), ...(autoPauseOnAlert !== undefined ? { autoPauseOnAlert } : {}) },
+      {
+        scenarioId,
+        ...(speed !== undefined ? { speed } : {}),
+        ...(autoPauseOnAlert !== undefined ? { autoPauseOnAlert } : {}),
+        ...(liveOrders ? { liveOrders: true } : {}),
+      },
     );
   }
   simControl(action: SimAction) {
@@ -636,7 +753,7 @@ export class GhostyClient {
     } catch (err) {
       return { ok: false, kind: 'network', status: 0, message: errorText(err) };
     }
-    if (!res.ok) return toResult<VoiceReply>(res, () => null);
+    if (!res.ok) return this.observe('POST', '/voice', await toResult<VoiceReply>(res, () => null));
     const pcm = await res.arrayBuffer();
     return {
       ok: true,

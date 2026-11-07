@@ -68,8 +68,11 @@ describe('HTTP API', () => {
     assert.equal((await req('s3cret')).statusCode, 200);
   });
 
-  it('POST /button confirm executes the planned actions', async () => {
+  it('POST /button confirm executes the planned actions of the decision just spoken', async () => {
     const app = buildApp({ config: loadConfig({ MAX_TRADE_USD: '100' }) });
+    // The wearer hears the decision first (voice turn); only then can the button trade on it.
+    const voice = await app.inject({ method: 'POST', url: '/voice', headers: { 'content-type': 'audio/wav' }, payload: silentWav() });
+    assert.equal(voice.headers['x-signal'], 'geopolitical_shock');
     const res = await app.inject({ method: 'POST', url: '/button', payload: { action: 'confirm' } });
     assert.equal(res.statusCode, 200);
     const body = res.json();
