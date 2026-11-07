@@ -133,9 +133,8 @@ body:has(.lv-app) {
   gap: var(--space-2);
   min-height: var(--size-control);
   color: var(--color-text);
-  font-weight: 600;
-  font-size: 17px;
-  letter-spacing: -0.01em;
+  font-weight: 500;
+  font-size: var(--text-md);
   text-decoration: none;
   border-radius: var(--radius-sm);
 }
@@ -208,7 +207,7 @@ body:has(.lv-app) {
   justify-self: end;
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-4);
 }
 
 /* One pill for every header status: same height as the tab group, an 8px dot centred on the word. */
@@ -376,7 +375,7 @@ body:has(.lv-app) {
 
   .lv-tab {
     padding: 0 var(--space-2);
-    font-size: 13px;
+    font-size: var(--text-xs);
   }
 }
 
@@ -1556,7 +1555,7 @@ body:has(.lv-app) {
 }
 
 .lv-delta > span[aria-hidden] {
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .lv-setup {
