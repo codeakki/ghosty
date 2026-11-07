@@ -21,6 +21,12 @@
 
 ---
 
+## Demo
+
+![How a headline becomes a trade](hardware/photos/ghosty-flow.gif)
+
+Headlines and market odds stream in all day. Ghosty keeps the one headline that matters, decides what to do and writes that decision down before it says a word. The pod tells you in plain words, and nothing trades until you press the button. No press, no trade. Narrated version: [hardware/photos/ghosty-flow.mp4](hardware/photos/ghosty-flow.mp4).
+
 ## What it is
 
 Ghosty is a small voice pod you wear, plus a server that does the heavy lifting. It reads market news for you, scores how credible each headline is, and speaks up when something moves gold, oil, crypto or stocks. Alert decisions come from **0G Compute**, every decision is logged to **0G Storage** and a public **Hedera** topic, and before each shock decision the agent pays an independent merchant for a second opinion over **x402**. Trades go to **Hyperliquid** perps, with an optional **Uniswap** spot leg. The trading key lives in a separate signer chip, the **Dabao** (Baochip-1x), which checks every order against its own limits before it signs.
