@@ -59,7 +59,7 @@ More: [docs/architecture.md](docs/architecture.md)
 - **Compute is the decision brain.** Every alert decision is a 0G Compute call with its own request ID. If 0G is unreachable, the pod says so and refuses alert trades (safe-stop).
 - **Storage is the memory.** Your memory is encrypted (AES-256-GCM) on 0G Storage, and each decision is an episode chained to the previous one by `prevRoot`, so the history can be replayed and checked.
 - **Why it matters:** the brain and the record of what it decided do not live on our server alone.
-- **Evidence:** decision `bb6d851f-34c9-41f5-8a83-b7f755059320` (made with paid intel) in [HCS topic 0.0.11342727](https://hashscan.io/testnet/topic/0.0.11342727), message #3. On-chain Storage episode root: pending.
+- **Evidence:** decision `bb6d851f-34c9-41f5-8a83-b7f755059320` (made with paid intel) in [HCS topic 0.0.11342727](https://hashscan.io/testnet/topic/0.0.11342727), message #3. On-chain Storage episode root: [`0x6ca544de…2cadccdb`](https://chainscan-galileo.0g.ai/tx/0xd3cab7c2ba0509b37f82ee714c4c97a3ae6b703c2ee50a0723b364f340d219f7) for decision `7ae68660-4acb-4ee8-8499-1ebdf2343897` (2026-11-07 run, see [docs/evidence.md](docs/evidence.md#0g-compute-and-storage)).
 
 ### Hedera
 
@@ -102,8 +102,8 @@ Live mode has no fakes: a missing key makes that provider answer `503 not_config
 
 ## Status
 
-Hedera x402 payments are settled, mirror-verified and logged, and a 0G decision with paid intel is on the audit topic.
-A real Hyperliquid fill, a Uniswap swap, a 0G Storage root and Dabao signing on hardware are still pending.
+Hedera x402 payments are settled, mirror-verified and logged, a 0G decision with paid intel is on the audit topic, and a decision episode root is on 0G Storage.
+A real Hyperliquid fill, a Uniswap swap and Dabao signing on hardware are still pending.
 Every proof is listed in [docs/evidence.md](docs/evidence.md).
 
 ## Team
