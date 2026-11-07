@@ -275,10 +275,9 @@ function RunCard({
     <section className="lv-sim-card lv-sim-run" aria-label="Simulation run">
       <div className="lv-sim-run-top">
         <span className="lv-sim-pill" data-tone={st.tone}>
-          <span className="lv-sim-pill-dot" aria-hidden="true" />
           {st.label}
         </span>
-        {run.execution.liveOrders ? <span className="lv-real-tag">REAL ORDERS · MAINNET</span> : <span className="lv-sim-paper">Paper</span>}
+        {run.execution.liveOrders ? <span className="lv-real-tag">Real orders · mainnet</span> : <span className="lv-sim-paper">Paper</span>}
         <div className="lv-sim-run-actions">
           {run.status === 'paused' ? (
             <button type="button" className="lv-btn lv-btn-primary lv-btn-sm" disabled={busy} onClick={() => act(() => simControls.control('resume'))}>

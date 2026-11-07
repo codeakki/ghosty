@@ -7,9 +7,9 @@ import type { LevelSource } from './useDevice';
  * The Device "orb" is the Ghosty ghost. Layers are animated with transform/opacity only (compositor-friendly) inside a
  * fixed square box, so no state ever shifts the layout. The live audio level (mic while listening, reply audio or the
  * pod's envelope while speaking) is written to `--level` from rAF, so React never re-renders per frame.
- *   idle      gentle float + soft glow, a blink now and then
- *   listening ghost-shaped glow rings that follow the mic level
- *   thinking  violet tint, a shimmer sweep, eyes looking side to side
+ *   idle      still: no float, no glow, no blink (nothing is happening, so nothing moves)
+ *   listening ghost-shaped rings that follow the mic level
+ *   thinking  a cooler tint, eyes looking side to side
  *   speaking  body pulse driven by --level, the hem sways
  *   alert     amber tint, amber ghost-shaped ripples
  *   offline   dimmed grey, eyes shut to short lines
@@ -24,7 +24,7 @@ export const Orb = memo(function Orb({
   mode: DeviceMode;
   levelRef: RefObject<LevelSource>;
   localSpeech: boolean;
-  /** The orb is following the physical pod (SSE `pod`): a subtle extra glow. */
+  /** The orb is following the physical pod (SSE `pod`); the page shows the standby light next to it. */
   mirroring?: boolean;
 }) {
   const root = useRef<HTMLDivElement>(null);
@@ -82,8 +82,6 @@ export const Orb = memo(function Orb({
       data-mirroring={mirroring ? 'true' : undefined}
       aria-hidden="true"
     >
-      <div className="orb-halo" />
-      <div className="orb-halo orb-halo-alert" />
       {ring('orb-ripple')}
       {ring('orb-ripple orb-ripple-2')}
       {ring('orb-ripple orb-ripple-3')}
@@ -99,9 +97,9 @@ export const Orb = memo(function Orb({
                 <stop offset="1" className="orb-stop-deep" />
               </radialGradient>
               <radialGradient id={`${uid}-think`} cx="0.36" cy="0.28" r="0.9">
-                <stop offset="0" stopColor="#f6f3ff" />
-                <stop offset="0.34" stopColor="#c9e9f0" />
-                <stop offset="1" stopColor="#4b3a85" />
+                <stop offset="0" stopColor="#f2f6f8" />
+                <stop offset="0.38" stopColor="#bcd0d6" />
+                <stop offset="1" stopColor="#334452" />
               </radialGradient>
               <radialGradient id={`${uid}-alert`} cx="0.36" cy="0.28" r="0.9">
                 <stop offset="0" stopColor="#fff6e3" />

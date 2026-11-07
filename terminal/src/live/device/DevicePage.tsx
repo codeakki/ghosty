@@ -126,7 +126,7 @@ export function DevicePage({ api, full = false }: { api: LiveApi; full?: boolean
         </p>
         {/* Always rendered (fixed height): fades in while mirroring, so nothing below moves. */}
         <p className="lv-pod-live" data-on={mirroring ? 'true' : undefined} aria-hidden={!mirroring}>
-          <span className="lv-pod-live-dot" aria-hidden="true" />
+          <span className="lv-standby" aria-hidden="true" />
           Live from the pod
         </p>
       </div>
@@ -169,7 +169,6 @@ export function DevicePage({ api, full = false }: { api: LiveApi; full?: boolean
           onContextMenu={(e) => e.preventDefault()}
           aria-describedby="talk-hint"
         >
-          <span className="lv-talk-dot" aria-hidden="true" />
           {buttonLabel(device)}
         </button>
         {/* One reserved slot: the hint normally, "Not Now" while an alert waits. Nothing below moves. */}

@@ -143,13 +143,11 @@ body:has(.lv-app) {
   --ghost-eye: #07211b;
   flex: none;
   color: var(--color-ghost);
-  filter: drop-shadow(0 0 6px var(--color-ghost-glow));
 }
 
 @media (prefers-color-scheme: light) {
   .lv-mark {
     --ghost-eye: #ffffff;
-    filter: none;
   }
 }
 
@@ -210,59 +208,40 @@ body:has(.lv-app) {
   gap: var(--space-4);
 }
 
-/* One pill for every header status: same height as the tab group, an 8px dot centred on the word. */
-.lv-pill {
+/* Header status: quiet text, no pill. The standby light is the only dot, and only while the stream is live. */
+.lv-status {
   flex: none;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
   gap: var(--space-2);
   height: var(--size-nav-item);
-  padding: 0 var(--space-3);
-  box-sizing: border-box;
-  border-radius: var(--radius-pill);
-  background: var(--color-surface);
-  box-shadow: var(--shadow-1);
-  color: var(--color-text);
+  color: var(--color-muted);
   font-size: var(--text-xs);
   line-height: var(--leading-xs);
-  font-weight: 500;
   white-space: nowrap;
 }
 
-.lv-pill-dot {
+.lv-status[data-live='true'] {
+  color: var(--color-text);
+}
+
+.lv-status.lv-tone-warn {
+  color: var(--color-warn);
+}
+
+.lv-status.lv-tone-bad {
+  color: var(--color-down);
+}
+
+/* The signature: one small steady mint light meaning "Ghosty is live and listening". Used only where a real live
+ * connection exists (the event stream in the header, the pod mirror on Device). */
+.lv-standby {
   flex: none;
+  display: inline-block;
   width: var(--space-2);
   height: var(--space-2);
   border-radius: 50%;
-  background: var(--color-muted);
-}
-
-.lv-tone-ok .lv-pill-dot {
   background: var(--color-ghost);
-}
-
-.lv-tone-warn .lv-pill-dot {
-  background: var(--color-warn);
-}
-
-.lv-tone-bad .lv-pill-dot {
-  background: var(--color-down);
-}
-
-/* Live: a slow opacity breath on the dot. No ring, no scale. */
-.lv-pill[data-live='true'] .lv-pill-dot {
-  animation: lv-pill-pulse 2.4s var(--ease-in-out) infinite;
-}
-
-@keyframes lv-pill-pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.4;
-  }
 }
 
 .lv-nav-btn {
@@ -308,19 +287,18 @@ body:has(.lv-app) {
   display: block;
 }
 
-.lv-pill-text,
+.lv-status-text,
 .lv-nav-btn-text {
   display: block;
 }
 
-/* Below 900px the pills shrink to their dots (the word stays for screen readers and in the title). */
+/* Below 900px the network word goes (it stays in the title); a live status shrinks to its standby light. */
 @media (max-width: 899px) {
-  .lv-pill {
-    width: var(--size-nav-item);
-    padding: 0;
+  .lv-status[data-kind='network'] {
+    display: none;
   }
 
-  .lv-pill-text {
+  .lv-status[data-live='true'] .lv-status-text {
     position: absolute;
     width: 1px;
     height: 1px;
@@ -356,10 +334,6 @@ body:has(.lv-app) {
 
   .lv-nav-end {
     gap: var(--space-1);
-  }
-
-  .lv-pill {
-    width: var(--size-tag);
   }
 
   .lv-tab {
@@ -407,14 +381,6 @@ body:has(.lv-app) {
   }
 }
 
-.lv-token-banner-dot {
-  flex: none;
-  width: var(--space-2);
-  height: var(--space-2);
-  border-radius: 50%;
-  background: var(--color-ghost);
-}
-
 .lv-token-banner-text {
   flex: 1;
   min-width: 0;
@@ -442,7 +408,7 @@ body:has(.lv-app) {
 }
 
 .lv-token-banner-btn:hover {
-  border-color: var(--color-ghost);
+  border-color: var(--color-muted);
   background: var(--color-raised);
 }
 
@@ -631,35 +597,6 @@ body:has(.lv-app) {
   isolation: isolate;
 }
 
-/* Static ambient light behind the orb; state tints cross-fade on top of it. */
-.lv-device::before,
-.lv-device::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  transition: opacity 400ms var(--ease-in-out);
-}
-
-.lv-device::before {
-  background: radial-gradient(60% 40% at 50% 26%, var(--color-ghost-tint), transparent 70%);
-}
-
-.lv-device::after {
-  background: radial-gradient(60% 40% at 50% 26%, var(--color-warn-tint), transparent 70%);
-  opacity: 0;
-}
-
-.lv-device[data-mode='alert']::before,
-.lv-device[data-mode='offline']::before {
-  opacity: 0;
-}
-
-.lv-device[data-mode='alert']::after {
-  opacity: 1;
-}
-
 .lv-device-full {
   min-height: calc(100dvh - var(--nav-h) - var(--sim-h, 0px) - var(--auth-h, 0px));
   justify-content: center;
@@ -705,8 +642,7 @@ body:has(.lv-app) {
   --orb-hi: #f4fffb;
   --orb-core: #a6f4e0;
   --orb-deep: #1c6f60;
-  --orb-glow: rgb(166 244 224 / 0.5);
-  --orb-eye: #07211b;
+    --orb-eye: #07211b;
   position: relative;
   width: var(--orb);
   height: var(--orb);
@@ -736,7 +672,6 @@ body:has(.lv-app) {
     --orb-hi: #ffffff;
     --orb-core: #8ee8d2;
     --orb-deep: #0b7363;
-    --orb-glow: rgb(20 170 145 / 0.35);
   }
 }
 
@@ -750,42 +685,6 @@ body:has(.lv-app) {
   width: 100%;
   height: 100%;
   overflow: visible;
-}
-
-/* Soft glow behind the ghost; brightens with the audio level. */
-.orb-halo {
-  inset: -10%;
-  border-radius: 50%;
-  background: radial-gradient(circle at 50% 48%, var(--orb-glow) 0%, transparent 60%);
-  opacity: calc(0.5 + var(--level) * 0.5);
-  transform: scale(calc(1 + var(--level) * 0.25));
-  transition:
-    transform 90ms linear,
-    opacity 400ms var(--ease-in-out);
-  will-change: transform, opacity;
-}
-
-.orb-halo-alert {
-  background: radial-gradient(circle at 50% 48%, rgb(245 184 74 / 0.55) 0%, transparent 60%);
-  opacity: 0;
-}
-
-.orb[data-mode='alert'] .orb-halo:not(.orb-halo-alert),
-.orb[data-mode='offline'] .orb-halo {
-  opacity: 0;
-}
-
-.orb[data-mode='alert'] .orb-halo-alert {
-  opacity: calc(0.7 + var(--level) * 0.3);
-}
-
-/* The pod is driving the orb: a touch more glow, nothing that moves the layout. */
-.orb[data-mirroring='true'] .orb-halo:not(.orb-halo-alert) {
-  opacity: calc(0.7 + var(--level) * 0.3);
-}
-
-.orb[data-mode='offline'][data-mirroring='true'] .orb-halo {
-  opacity: 0;
 }
 
 /* Ghost-shaped rings: listening glow (teal) and alert ripples (amber). */
@@ -1157,11 +1056,10 @@ body:has(.lv-app) {
   -webkit-user-select: none;
   -webkit-touch-callout: none;
   touch-action: none;
-  box-shadow: 0 0 0 0 var(--color-ghost-glow);
+  box-shadow: var(--highlight);
   transition:
     transform var(--dur-fast) var(--ease-out),
-    background-color var(--dur-base) var(--ease-out),
-    box-shadow var(--dur-base) var(--ease-out);
+    background-color var(--dur-base) var(--ease-out);
 }
 
 .lv-device-full .lv-talk {
@@ -1175,14 +1073,12 @@ body:has(.lv-app) {
 
 .lv-talk:active:not(:disabled),
 .lv-talk[data-mode='listening'] {
-  transform: scale(0.97);
-  box-shadow: 0 0 0 var(--space-2) var(--color-ghost-tint);
+  transform: scale(0.98);
 }
 
 .lv-talk[data-mode='alert'] {
   background: var(--color-warn);
   color: var(--color-warn-ink);
-  box-shadow: 0 0 0 var(--space-2) var(--color-warn-tint);
 }
 
 .lv-talk[data-mode='alert']:hover {
@@ -1194,19 +1090,6 @@ body:has(.lv-app) {
   color: var(--color-muted);
   cursor: not-allowed;
   box-shadow: inset 0 0 0 1px var(--color-line-strong);
-}
-
-.lv-talk-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: currentColor;
-  opacity: 0.55;
-}
-
-.lv-talk[data-mode='listening'] .lv-talk-dot {
-  opacity: 1;
-  animation: lv-talk 0.8s var(--ease-in-out) infinite;
 }
 
 /* Reserved for "Not Now", so the hint below never jumps when an alert arrives. */
@@ -1726,8 +1609,9 @@ body:has(.lv-app) {
 
 .lv-chip[aria-pressed='true'] {
   color: var(--color-text);
-  background: var(--color-ghost-tint);
-  border-color: var(--color-ghost);
+  background: var(--color-raised);
+  border-color: var(--color-line-strong);
+  box-shadow: var(--highlight);
 }
 
 /* ---- Scroller, "N New" rail, cards ---------------------------------------- */
@@ -1808,9 +1692,7 @@ body:has(.lv-app) {
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  box-shadow:
-    inset 0 0 0 1px var(--color-ghost),
-    inset 0 0 24px var(--color-ghost-tint);
+  box-shadow: inset 0 0 0 1px var(--color-line-strong);
   opacity: 0;
   animation: lv-glow var(--dur-glow) var(--ease-out);
   animation-delay: calc(var(--i, 0) * var(--stagger));
@@ -1887,12 +1769,12 @@ body:has(.lv-app) {
 
 .lv-card-alert {
   border-left-color: var(--color-warn);
-  background: linear-gradient(90deg, var(--color-warn-tint), transparent 70%), var(--color-surface);
+  background: var(--color-surface);
 }
 
 /* Reserved height: "thinking" resolves into the decision without pushing the list. */
 .lv-card-brain {
-  border-left-color: var(--color-ghost);
+  border-left-color: var(--color-line-strong);
   min-height: var(--size-card-brain);
 }
 
@@ -1913,50 +1795,6 @@ body:has(.lv-app) {
   color: var(--color-text);
   font-weight: 500;
   white-space: nowrap;
-}
-
-.lv-kind::before {
-  content: '';
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--color-muted);
-}
-
-.lv-kind-brain::before {
-  background: var(--color-ghost);
-}
-
-.lv-kind-alert::before {
-  background: var(--color-warn);
-}
-
-.lv-card[data-dir='up'] .lv-kind::before {
-  background: var(--color-up);
-}
-
-.lv-card[data-dir='down'] .lv-kind::before {
-  background: var(--color-down);
-}
-
-.lv-card[data-track] .lv-kind::before {
-  display: none;
-}
-
-.lv-card[data-track='0g'] .lv-kind {
-  color: var(--color-track-0g);
-}
-
-.lv-card[data-track='hedera'] .lv-kind {
-  color: var(--color-track-hedera);
-}
-
-.lv-card[data-track='uniswap'] .lv-kind {
-  color: var(--color-track-uniswap);
-}
-
-.lv-card[data-track='hyperliquid'] .lv-kind {
-  color: var(--color-track-hyperliquid);
 }
 
 .lv-card-source {
@@ -2410,7 +2248,7 @@ body:has(.lv-app) {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: linear-gradient(135deg, var(--color-ghost), var(--color-track-0g));
+  background: var(--color-muted);
   animation: lv-talk 0.9s var(--ease-in-out) infinite;
 }
 
@@ -2418,7 +2256,7 @@ body:has(.lv-app) {
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(90deg, transparent, color-mix(in oklab, var(--color-track-0g) 12%, transparent), transparent);
+  background: linear-gradient(90deg, transparent, var(--color-ghost-tint), transparent);
   transform: translateX(-100%);
   animation: lv-shimmer 1.6s var(--ease-in-out) infinite;
   pointer-events: none;
@@ -2545,15 +2383,13 @@ body:has(.lv-app) {
   .orb[data-mode] .orb-ring,
   .orb[data-local-speech='true'] .orb-pulse,
   .lv-thinking-dot,
-  .lv-talk-dot,
   .lv-pulse-skel,
   .lv-skeleton,
-  .lv-pill-dot,
   .lv-card[data-status='thinking']::after {
     animation: none !important;
   }
 
-  .orb-halo,
+  .orb-ghost,
   .orb-pulse,
   .orb-ring,
   .orb-eye {
@@ -2648,9 +2484,8 @@ body:has(.lv-app) {
   gap: var(--space-2);
   height: 1.5em;
   margin: 0;
-  color: var(--color-ghost);
+  color: var(--color-muted);
   font-size: var(--text-xs);
-  letter-spacing: 0.02em;
   opacity: 0;
   visibility: hidden;
   transition:
@@ -2664,26 +2499,9 @@ body:has(.lv-app) {
   transition: opacity 240ms ease;
 }
 
-.lv-pod-live-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--color-ghost);
-  animation: lv-pod-live-blink 1.6s ease-in-out infinite;
-}
-
-@keyframes lv-pod-live-blink {
-  50% {
-    opacity: 0.35;
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .lv-pod-live,
   .lv-pod-live[data-on='true'] {
     transition: none;
-  }
-  .lv-pod-live-dot {
-    animation: none;
   }
 }
