@@ -51,7 +51,7 @@
  * 0 = also wait for a press on PB3 before every signature.
  */
 #define AUTO_APPROVE 1
-#define DAILY_LIMIT_MICRO_USD 50000000ULL   /* 50 USD of orders per UTC day */
+#define DAILY_LIMIT_MICRO_USD 100000000ULL  /* 100 USD of orders per UTC day */
 #define MIN_SIGN_INTERVAL_MS 10000          /* at most one signature per 10 s */
 
 /* 0 = Hyperliquid mainnet ("a"), 1 = testnet ("b"). Orders for the other network are refused. */

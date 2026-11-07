@@ -30,7 +30,7 @@ export const DABAO_ERRORS: Record<number, string> = {
   8: 'nobody pressed the signer button in time',
   9: 'the signer has no key',
   10: 'the signer failed to sign',
-  11: 'the order would pass the signer daily limit of 50 dollars',
+  11: 'the order would pass the signer daily limit of 100 dollars',
   12: 'the signer allows one order every 10 seconds',
 };
 
