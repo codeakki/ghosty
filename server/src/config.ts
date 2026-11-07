@@ -45,8 +45,12 @@ const ConfigSchema = z.object({
   GROQ_STT_MODEL: z.string().default('whisper-large-v3-turbo'),
   ELEVENLABS_API_KEY: optional,
   // "George", the voice used throughout the ElevenLabs API reference examples.
-  ELEVENLABS_VOICE_ID: z.string().default('JBFqnCBsd6RMkjVDRZzb'),
+  ELEVENLABS_VOICE_ID: z.string().default('EXAVITQu4vr4xnSDxMaL'),
   ELEVENLABS_MODEL_ID: z.string().default('eleven_flash_v2_5'),
+  /** Speaking speed, 0.7-1.2 (1.0 = normal). Default 0.9: a little slower and clearer on the pod speaker. */
+  ELEVENLABS_SPEED: z.coerce.number().min(0.7).max(1.2).default(0.9).catch(0.9),
+  /** 0-1: higher is steadier and clearer, lower more expressive. */
+  ELEVENLABS_STABILITY: z.coerce.number().min(0).max(1).default(0.6).catch(0.6),
   // TTS fallback only (gpt-4o-mini-tts, 24 kHz PCM resampled to 16 kHz). Used when ELEVENLABS_API_KEY is unset.
   OPENAI_API_KEY: optional,
 
