@@ -235,9 +235,10 @@ export class Pipeline {
    * Always-listening pod: the same as handleVoice, but only for speech addressed to Ghosty. Without the wake word
    * (room talk, a TV, Whisper's "Thank you." on noise) it returns undefined after STT: no Claude, no 0G, no order.
    */
-  async handleListening(wav: WavAudio): Promise<{ transcript: string; result?: VoiceResult }> {
+  async handleListening(wav: WavAudio, onWake?: () => void): Promise<{ transcript: string; result?: VoiceResult }> {
     const { text } = await this.deps.stt.transcribe(wav);
     if (!hasWakeWord(text)) return { transcript: text };
+    onWake?.();
     return { transcript: text, result: await this.answer(text, 'voice') };
   }
 

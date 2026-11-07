@@ -721,12 +721,14 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
       return sendTurn(result, req, reply);
     }
     const pod = mirrorsPod(req);
-    if (pod) podMirror.set('thinking');
+    const always = req.headers['x-listen'] === 'always';
+    // Hands-free pod: room noise also posts here, so "thinking" waits for the wake word (204 → idle).
+    if (pod && !always) podMirror.set('thinking');
 
     // X-Listen: always = the pod records on its own, so only speech that says "Ghosty" gets an answer (204 otherwise).
     const turn: Promise<VoiceResult | undefined> =
-      req.headers['x-listen'] === 'always'
-        ? pipeline.handleListening(wav).then((heard) => {
+      always
+        ? pipeline.handleListening(wav, pod ? () => podMirror.set('thinking') : undefined).then((heard) => {
             if (!heard.result) req.log.info({ transcript: heard.transcript }, 'no wake word, ignored');
             return heard.result;
           })

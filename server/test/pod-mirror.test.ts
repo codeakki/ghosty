@@ -123,6 +123,45 @@ describe('POST /pod/state and the pod mirror', () => {
     assert.equal(pod.length, 0);
   });
 
+  it('hands-free pod audio without the wake word never shows thinking: 204 → idle', async () => {
+    const app = buildApp({
+      config: loadConfig({ DEVICE_TOKEN: 'owner-secret' }),
+      deps: { stt: { transcribe: async () => ({ text: 'the TV is on in the next room', provider: 'fake' }) } },
+    });
+    const pod: PodMirrorEvent[] = [];
+    app.ghosty.state.subscribe((e) => {
+      if (e.type === 'pod') pod.push(e.data as PodMirrorEvent);
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/voice',
+      headers: { ...OWNER, 'content-type': 'audio/wav', 'x-ghosty-client': 'pod', 'x-listen': 'always' },
+      payload: silentWav(),
+    });
+    assert.equal(res.statusCode, 204);
+    assert.deepEqual(pod.map((e) => e.state), ['idle']);
+  });
+
+  it('hands-free pod audio with the wake word: thinking → speaking', async () => {
+    const app = buildApp({
+      config: loadConfig({ DEVICE_TOKEN: 'owner-secret' }),
+      deps: { stt: { transcribe: async () => ({ text: 'Ghosty, what is gold at?', provider: 'fake' }) } },
+    });
+    const pod: PodMirrorEvent[] = [];
+    app.ghosty.state.subscribe((e) => {
+      if (e.type === 'pod') pod.push(e.data as PodMirrorEvent);
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/voice',
+      headers: { ...OWNER, 'content-type': 'audio/wav', 'x-ghosty-client': 'pod', 'x-listen': 'always' },
+      payload: silentWav(),
+    });
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(pod.map((e) => e.state), ['thinking', 'speaking']);
+    await app.close();
+  });
+
   it('a guest claiming to be the pod does not drive the mirror', async () => {
     const { app, pod } = setup();
     const guest = (await app.inject({ method: 'POST', url: '/guest/token' })).json().token as string;
