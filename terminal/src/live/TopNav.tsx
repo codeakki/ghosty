@@ -1,9 +1,9 @@
 import { memo } from 'react';
 import type { TerminalState } from '../state/reducer';
 import { Link } from './Link';
-import { ROUTE_PATH, type Route } from './router';
+import { ROUTE_PATH, type AppRoute } from './router';
 
-const TABS: Array<{ route: Exclude<Route, 'pro'>; label: string }> = [
+const TABS: Array<{ route: AppRoute; label: string }> = [
   { route: 'live', label: 'Live' },
   { route: 'device', label: 'Device' },
   { route: 'feed', label: 'Feed' },
@@ -63,13 +63,13 @@ function GhostMark() {
   );
 }
 
-export const TopNav = memo(function TopNav({ route, state, onSettings }: { route: Route; state: TerminalState; onSettings: () => void }) {
+export const TopNav = memo(function TopNav({ route, state, onSettings }: { route: AppRoute; state: TerminalState; onSettings: () => void }) {
   const status = connectionStatus(state);
   const network = state.market.data?.network ?? null;
   const networkText = network === 'mainnet' ? 'Mainnet' : network === 'testnet' ? 'Testnet' : 'Network…';
   return (
     <header className="lv-nav">
-      <Link to="/" className="lv-wordmark" translate="no" aria-label="ghosty, Live view">
+      <Link to={ROUTE_PATH.home} className="lv-wordmark" translate="no" aria-label="ghosty, home">
         <GhostMark />
         <span className="lv-wordmark-text">ghosty</span>
       </Link>
@@ -79,10 +79,6 @@ export const TopNav = memo(function TopNav({ route, state, onSettings }: { route
             {t.label}
           </Link>
         ))}
-        {/* Plain link: /pro is a separate app with its own stylesheet. */}
-        <a href="/pro" className="lv-tab lv-tab-pro" title="The dense terminal: every panel at once">
-          Pro
-        </a>
       </nav>
       <div className="lv-nav-end">
         <Pill tone={status.tone} text={status.text} title={status.title} live={status.live} role="status" />

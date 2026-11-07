@@ -157,10 +157,12 @@ No hardware yet, so the web UI stands in for the pod. Open it and you see two th
 
 | Route | What it is |
 |---|---|
-| `/` | Split view: Device (left) + Feed (right). Stacks on phones, device first |
+| `/` | Landing page: what Ghosty is, features, how it works, live proof, the sponsor stack. "Open the app" goes to `/live` |
+| `/live` | Split view: Device (left) + Feed (right). Stacks on phones, device first |
 | `/device` | The pod, full screen. Open it on a phone as the pod stand-in |
 | `/feed` | The feed only |
-| `/pro` | The dense terminal (every panel at once, described below) |
+| `/simulate` | Replay a real past shock through the real 0G brain (paper, or opt-in real Hyperliquid mainnet orders) |
+| `/pro` | The dense terminal (every panel at once, described below). Not in the navbar; open it by URL |
 
 ```bash
 # terminal 1: the server (port 3000)

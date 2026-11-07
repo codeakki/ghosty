@@ -10,11 +10,11 @@ import { SimBanner, SimPanel } from './sim/SimPage';
 import { TokenBanner } from './settings/TokenBanner';
 import { commitSettings, initialTokenPrompt, rememberAutoOpened, tokenPromptReducer } from './settings/tokenPrompt';
 import { isActive } from './sim/simState';
-import type { Route } from './router';
+import type { AppRoute } from './router';
 import { TopNav } from './TopNav';
 import { useLive } from './useLive';
 
-const TITLES: Record<Exclude<Route, 'pro'>, string> = {
+const TITLES: Record<AppRoute, string> = {
   live: 'Ghosty · Live',
   device: 'Ghosty · Device',
   feed: 'Ghosty · Feed',
@@ -22,7 +22,7 @@ const TITLES: Record<Exclude<Route, 'pro'>, string> = {
 };
 
 /** The simple Live view: the device (pod stand-in) and the live feed, side by side or one at a time. */
-export function LiveApp({ route }: { route: Exclude<Route, 'pro'> }) {
+export function LiveApp({ route }: { route: AppRoute }) {
   const [settings, setSettings] = useState<ClientSettings>(loadSettings);
   const [prompt, promptDispatch] = useReducer(tokenPromptReducer, undefined, () => initialTokenPrompt());
   const onUnauthorized = useCallback((info: UnauthorizedInfo) => promptDispatch({ type: 'unauthorized', info }), []);
