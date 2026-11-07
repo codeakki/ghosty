@@ -14,6 +14,7 @@ import { ProviderNotConfiguredError, type NotConfiguredInfo } from './mode.js';
 import { classifyIntent, hasWakeWord, type VoiceIntent } from './claude/intent.js';
 import { ASSISTANT_FALLBACK_REPLY, type VoiceAssistant } from './claude/voice.js';
 import type { OrderAgentReply } from './claude/orderAgent.js';
+import { GUEST_NO_ASSISTANT_REPLY, GUEST_TRADE_REPLY } from './guest/access.js';
 
 /** What started a decision. `text` and `inject` come from the virtual pod, never from the firmware. */
 export type DecisionTrigger = 'voice' | 'text' | 'button' | 'inject';
@@ -234,15 +235,46 @@ export class Pipeline {
    * Always-listening pod: the same as handleVoice, but only for speech addressed to Ghosty. Without the wake word
    * (room talk, a TV, Whisper's "Thank you." on noise) it returns undefined after STT: no Claude, no 0G, no order.
    */
-  async handleListening(wav: WavAudio): Promise<{ transcript: string; result?: VoiceResult }> {
+  async handleListening(wav: WavAudio, onWake?: () => void): Promise<{ transcript: string; result?: VoiceResult }> {
     const { text } = await this.deps.stt.transcribe(wav);
     if (!hasWakeWord(text)) return { transcript: text };
+    onWake?.();
     return { transcript: text, result: await this.answer(text, 'voice') };
   }
 
   /** Same as handleVoice without STT: the text is the transcript. Used by the virtual pod. */
   async handleText(text: string): Promise<VoiceResult> {
     return this.answer(text, 'text');
+  }
+
+  /**
+   * Guest turn (scope "guest"): Claude answers questions with `assistant`; trade requests, confirmations and
+   * everything else get GUEST_TRADE_REPLY. Never the 0G decider, the order agent, a payment, the pending decision,
+   * the owner's journal or the public feed. `listen` = always-listening audio: wake word required, like the pod.
+   */
+  async handleGuestVoice(wav: WavAudio, assistant: VoiceAssistant | undefined, listen = false): Promise<VoiceResult | undefined> {
+    const { text } = await this.deps.stt.transcribe(wav);
+    if (listen && !hasWakeWord(text)) return undefined;
+    return this.answerGuest(text, 'voice', assistant);
+  }
+
+  async handleGuestText(text: string, assistant: VoiceAssistant | undefined): Promise<VoiceResult> {
+    return this.answerGuest(text, 'text', assistant);
+  }
+
+  private async answerGuest(transcript: string, trigger: DecisionTrigger, assistant: VoiceAssistant | undefined): Promise<VoiceResult> {
+    const intent = classifyIntent(transcript);
+    const turn: Omit<VoiceResult, 'audio'> =
+      intent === 'question' && assistant
+        ? await this.ask(assistant, transcript, intent)
+        : {
+            transcript,
+            answeredBy: 'claude',
+            intent,
+            reply: intent === 'question' ? GUEST_NO_ASSISTANT_REPLY : GUEST_TRADE_REPLY,
+            requestId: `guest-${randomUUID()}`,
+          };
+    return this.speak(turn, trigger);
   }
 
   /**
@@ -342,6 +374,11 @@ export class Pipeline {
       trigger,
       at: new Date().toISOString(),
     });
+    return this.speak(turn, trigger);
+  }
+
+  /** TTS for a decided turn. A text turn keeps its real reply when TTS is missing or fails; /voice needs the audio. */
+  private async speak(turn: Omit<VoiceResult, 'audio' | 'ttsNotConfigured'>, trigger: DecisionTrigger): Promise<VoiceResult> {
     try {
       const audio = await this.deps.tts.synthesize(turn.reply);
       return { ...turn, audio };

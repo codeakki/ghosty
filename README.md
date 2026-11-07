@@ -149,6 +149,12 @@ Status endpoints show which mode each integration is in: `GET /zerog/status`, `G
 
 No pod yet? Open http://localhost:3000/sim for the virtual pod (hold-to-talk, inject headlines, confirm trades, live state), or use `npm run pod -- help`. See [docs/simulator.md](docs/simulator.md).
 
+## Try Ghosty
+
+Open the Live view and press **Try Ghosty as a guest**. You get a 24-hour guest pass that can ask Ghosty anything about markets and news, by voice or text. Guests never trade, confirm alerts or pay for intel: that stays with the owner's pod and device token. Owners keep using **I have a device token**. The server offers guest passes only with `GUEST_ACCESS=true` (limits and the full safety model: [docs/api.md#guest-access](docs/api.md#guest-access)).
+
+When the physical pod is talking, the Device orb on the web mirrors it live (listening, thinking, speaking with the reply's loudness) and says "Live from the pod".
+
 ## Live view (web UI)
 
 No hardware yet, so the web UI stands in for the pod. Open it and you see two things: **the device** (a ghost orb that listens, thinks on 0G, speaks and alerts, with one big button) and **the feed** (cards that keep popping in: market moves, headlines, the agent's decisions, transactions). Everything comes from the running server; nothing is made up.
