@@ -15,17 +15,17 @@ function isTypingTarget(t: EventTarget | null): boolean {
 function buttonLabel(s: DeviceState): string {
   switch (s.mode) {
     case 'idle':
-      return 'Hold to Talk';
+      return 'Hold to talk';
     case 'listening':
-      return 'Release to Send';
+      return 'Release to send';
     case 'thinking':
       return 'Thinking…';
     case 'speaking':
-      return 'Tap to Stop';
+      return 'Tap to stop';
     case 'alert':
-      return 'Tap to Confirm';
+      return 'Tap to confirm';
     case 'offline':
-      return 'Trading Paused';
+      return 'Trading paused';
   }
 }
 
@@ -175,7 +175,7 @@ export function DevicePage({ api, full = false }: { api: LiveApi; full?: boolean
         <div className="lv-device-secondary">
           {device.mode === 'alert' ? (
             <button type="button" className="lv-btn-quiet" onClick={notNow} aria-describedby="talk-hint">
-              Not Now
+              Not now
             </button>
           ) : null}
           <p id="talk-hint" className={device.mode === 'alert' ? 'lv-sr-only' : 'lv-talk-hint'}>
@@ -228,7 +228,7 @@ export function DevicePage({ api, full = false }: { api: LiveApi; full?: boolean
         </form>
       ) : (
         <button type="button" className="lv-link-btn" onClick={() => setTyping(true)}>
-          Type Instead
+          Type instead
         </button>
       )}
     </section>

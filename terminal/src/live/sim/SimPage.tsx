@@ -32,8 +32,8 @@ export function SimBanner({ sim, onSimulate }: { sim: SimState; onSimulate: bool
   return (
     <div className="lv-sim-banner" role="status" data-status={run.status} data-live={run.execution.liveOrders ? 'true' : undefined}>
       <p className="lv-sim-banner-text">
-        <span className="lv-sim-tag">SIM</span>
-        {run.execution.liveOrders ? <span className="lv-real-tag">REAL ORDERS</span> : null} {bannerText(run, scenario)}
+        <span className="lv-sim-tag">Sim</span>
+        {run.execution.liveOrders ? <span className="lv-real-tag">Real orders</span> : null} {bannerText(run, scenario)}
       </p>
       {onSimulate ? null : (
         <Link to="/simulate" className="lv-sim-banner-link">
@@ -240,7 +240,7 @@ function OrderModePicker({ execution, mode, onMode }: { execution: SimExecution 
         onClick={() => onMode('live')}
       >
         <span className="lv-sim-mode-title">
-          Paper + real orders <span className="lv-real-tag">MAINNET</span>
+          Paper + real orders <span className="lv-real-tag">Mainnet</span>
         </span>
         <span className="lv-sim-mode-desc">
           {available
@@ -448,7 +448,7 @@ function RealOrders({ execution, labels }: { execution: SimExecution; labels: Re
     <section className="lv-sim-card lv-sim-real" aria-labelledby="sim-real-title">
       <div className="lv-sim-card-head">
         <h3 id="sim-real-title" className="lv-sim-card-title">
-          Real orders <span className="lv-real-tag">MAINNET</span>
+          Real orders <span className="lv-real-tag">Mainnet</span>
         </h3>
         <span className="lv-sim-hint lv-num">
           {formatUsdAmount(execution.spentUsd)} of {formatUsdAmount(execution.maxRunUsd)} used

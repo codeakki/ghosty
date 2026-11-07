@@ -71,7 +71,6 @@
   box-shadow: inset 0 0 0 1px var(--color-line-strong);
   color: var(--color-text);
   font: 500 var(--text-xs) / 1 var(--font-sans);
-  letter-spacing: 0.06em;
 }
 
 .lv-sim-time {
@@ -143,7 +142,7 @@
   margin: 0;
   font-size: var(--text-lg);
   line-height: var(--leading-lg);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .lv-sim-sub,
@@ -190,8 +189,7 @@
   color: var(--color-muted);
   font-size: var(--text-xs);
   line-height: var(--leading-xs);
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  font-weight: 500;
 }
 
 .lv-sim-step-n {
@@ -270,7 +268,7 @@
   min-width: 0;
   font-size: var(--text-sm);
   line-height: var(--leading-sm);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .lv-sim-cat {
@@ -421,7 +419,6 @@
   box-shadow: inset 0 0 0 1px var(--color-warn);
   color: var(--color-text);
   font: 500 var(--text-xs) / 1 var(--font-sans);
-  letter-spacing: 0.06em;
   white-space: nowrap;
 }
 
@@ -456,7 +453,7 @@
   margin: 0;
   font-size: var(--text-md);
   line-height: var(--leading-md);
-  font-weight: 600;
+  font-weight: 500;
   text-wrap: balance;
 }
 
@@ -529,7 +526,7 @@
 .lv-sim-clock-time {
   font-size: var(--text-xl);
   line-height: var(--leading-xl);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .lv-sim-track {
@@ -574,7 +571,7 @@
 .lv-sim-callout-title {
   margin: 0;
   font-size: var(--text-sm);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .lv-sim-callout-list {
@@ -614,7 +611,7 @@
   margin: 0;
   font-size: var(--text-md);
   line-height: var(--leading-md);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .lv-sim-stat .lv-sim-stat-sub {
@@ -698,7 +695,7 @@
 }
 
 .lv-sim-side {
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .lv-sim-side-long {
@@ -759,7 +756,7 @@
 
 .lv-sim-order-status {
   font-size: var(--text-xs);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .lv-sim-order-filled,

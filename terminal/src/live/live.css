@@ -96,7 +96,7 @@ body:has(.lv-app) {
   border-radius: var(--radius-sm);
   background: var(--color-ghost);
   color: var(--color-ghost-ink);
-  font-weight: 600;
+  font-weight: 500;
   text-decoration: none;
   transition: transform var(--dur-fast) var(--ease-out);
 }
@@ -445,7 +445,7 @@ body:has(.lv-app) {
   margin: 0;
   font-size: var(--text-md);
   line-height: var(--leading-md);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .lv-app .field {
@@ -517,7 +517,7 @@ body:has(.lv-app) {
   border-color: var(--color-ghost);
   background: var(--color-ghost);
   color: var(--color-ghost-ink);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .lv-app .dialog .btn-primary:hover {
@@ -618,8 +618,7 @@ body:has(.lv-app) {
   height: var(--leading-lg);
   font-size: var(--text-lg);
   line-height: var(--leading-lg);
-  font-weight: 500;
-  letter-spacing: -0.01em;
+  font-weight: 400;
   white-space: nowrap;
   transition: color var(--dur-base) var(--ease-out);
 }
@@ -993,7 +992,7 @@ body:has(.lv-app) {
   margin-top: var(--space-1);
   font-size: var(--text-md);
   line-height: var(--leading-md);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .lv-alert-more,
@@ -1050,7 +1049,7 @@ body:has(.lv-app) {
   background: var(--color-ghost);
   color: var(--color-ghost-ink);
   font-size: var(--text-md);
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   user-select: none;
   -webkit-user-select: none;
@@ -1158,7 +1157,7 @@ body:has(.lv-app) {
   display: inline-grid;
   place-items: center;
   border-radius: 50%;
-  font: 700 var(--text-xs) / 1 var(--font-sans);
+  font: 500 var(--text-xs) / 1 var(--font-sans);
 }
 
 .lv-note-text {
@@ -1473,7 +1472,7 @@ body:has(.lv-app) {
   background: var(--color-raised);
   color: var(--color-muted);
   font-size: var(--text-xs);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .lv-setup-text {
@@ -1498,7 +1497,7 @@ body:has(.lv-app) {
   margin-top: var(--space-3);
   color: var(--color-text);
   font-size: var(--text-xs);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .lv-setup-list {
@@ -1529,7 +1528,7 @@ body:has(.lv-app) {
 .lv-intro-title {
   font-size: var(--text-md);
   line-height: var(--leading-md);
-  font-weight: 600;
+  font-weight: 500;
   text-wrap: pretty;
 }
 
@@ -1545,7 +1544,7 @@ body:has(.lv-app) {
 
 .lv-intro-n {
   color: var(--color-text);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .lv-intro-body {
@@ -1559,7 +1558,7 @@ body:has(.lv-app) {
 .lv-feed-title {
   font-size: var(--text-md);
   line-height: var(--leading-md);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .lv-chips {
@@ -1647,7 +1646,7 @@ body:has(.lv-app) {
   color: var(--color-ghost-ink);
   box-shadow: var(--shadow-2);
   font-size: var(--text-xs);
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   animation: lv-fade-down var(--dur-spring) var(--ease-spring) both;
 }
@@ -1821,7 +1820,7 @@ body:has(.lv-app) {
   margin-top: var(--space-2);
   font-size: var(--text-md);
   line-height: var(--leading-md);
-  font-weight: 600;
+  font-weight: 500;
   text-wrap: pretty;
 }
 
@@ -1845,7 +1844,7 @@ body:has(.lv-app) {
 
 .lv-card-meta strong {
   color: var(--color-text);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .lv-card-body {
@@ -1881,7 +1880,7 @@ body:has(.lv-app) {
 }
 
 .lv-legs strong {
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .lv-card-proof {
@@ -1955,7 +1954,7 @@ body:has(.lv-app) {
   width: var(--size-icon);
   height: var(--size-icon);
   border-radius: 50%;
-  font: 700 var(--text-xs) / 1 var(--font-sans);
+  font: 500 var(--text-xs) / 1 var(--font-sans);
   vertical-align: 2px;
 }
 
@@ -2197,9 +2196,7 @@ body:has(.lv-app) {
 }
 
 .lv-tag-shock {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
+  font-weight: 500;
 }
 
 .lv-tag-war {
