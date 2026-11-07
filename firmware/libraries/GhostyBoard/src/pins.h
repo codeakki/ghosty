@@ -33,6 +33,13 @@
 #ifndef PIN_BUTTON
 #define PIN_BUTTON 15     // to GND, INPUT_PULLUP, pressed = LOW
 #endif
+// Dabao signer link, UART 115200 8N1 (Dabao UART2). 1k in series on each line.
+#ifndef PIN_DABAO_TX
+#define PIN_DABAO_TX 17   // ESP32 -> Dabao PB13 (UART2 RX)
+#endif
+#ifndef PIN_DABAO_RX
+#define PIN_DABAO_RX 18   // Dabao PB14 (UART2 TX) -> ESP32
+#endif
 #ifndef PIN_LED_RED
 #define PIN_LED_RED -1    // no plain red LED on this board
 #endif
