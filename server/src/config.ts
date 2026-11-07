@@ -206,6 +206,15 @@ const ConfigSchema = z.object({
   SAFE_STOP_ENABLED: bool(true),
   SIMULATE_BRAIN_OFFLINE: bool(false),
   MAX_TRADE_USD: z.coerce.number().positive().default(25).catch(25),
+  /**
+   * Let a simulation run also place REAL orders on Hyperliquid MAINNET when a sim trade is confirmed (opt-in per run
+   * too). Always mainnet, whatever HL_TESTNET says. Off by default.
+   */
+  SIM_LIVE_ORDERS: bool(false),
+  /** Notional of each real sim leg. Hyperliquid's minimum is $10, so anything lower is raised to 10. */
+  SIM_LIVE_ORDER_USD: z.coerce.number().positive().default(11).catch(11),
+  /** Most real notional one simulation run may place in total; later legs are refused. */
+  SIM_LIVE_MAX_RUN_USD: z.coerce.number().positive().default(50).catch(50),
   /** A presented decision (spoken reply or alert) can be confirmed for this long; later presses answer 409 alert_expired. */
   PENDING_DECISION_TTL_SEC: posInt(120),
 

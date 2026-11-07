@@ -8,6 +8,7 @@
  * ============================================================================================================
  */
 import type { ApiResult, ReplayEpisode, SimRun, SimScenario, SseEventType } from '../../api/types';
+import { emptySimRun } from './simState';
 import type { SimApi } from './useSim';
 
 const SCENARIOS: SimScenario[] = [
@@ -17,7 +18,9 @@ const SCENARIOS: SimScenario[] = [
     description: 'Strikes reported over a weekend; oil and gold gap on the Sunday open.',
     start: '2026-06-13T00:00:00Z',
     end: '2026-06-15T06:00:00Z',
+    category: 'geopolitical shock',
     markets: ['xyz:CL', 'xyz:GOLD', 'BTC'],
+    proxies: { 'xyz:GOLD': 'PAXG (gold-backed token) as the gold price' },
     headlines: Array.from({ length: 14 }, (_, i) => ({ ts: `2026-06-13T0${i % 10}:00:00Z`, title: `Fixture headline ${i + 1}`, source: 'fixture', url: '' })),
   },
   {
@@ -26,7 +29,9 @@ const SCENARIOS: SimScenario[] = [
     description: 'A regulator sues a major exchange; crypto sells off into the US close.',
     start: '2026-03-05T13:00:00Z',
     end: '2026-03-05T22:00:00Z',
+    category: 'regulatory',
     markets: ['BTC', 'ETH'],
+    proxies: {},
     headlines: Array.from({ length: 9 }, (_, i) => ({ ts: `2026-03-05T1${i}:00:00Z`, title: `Fixture headline ${i + 1}`, source: 'fixture', url: '' })),
   },
 ];
@@ -34,7 +39,8 @@ const SCENARIOS: SimScenario[] = [
 const ok = <T,>(data: T): ApiResult<T> => ({ ok: true, status: 200, data });
 
 export function createFixtureSimApi(emit: (event: SseEventType, data: unknown) => void): SimApi {
-  let run: SimRun = { runId: '', scenarioId: '', status: 'idle', simTime: '', progress: 0, pnlUsd: 0, baselinePnlUsd: 0, positions: [], decisions: 0, episodes: 0 };
+  const EXECUTION = { available: true, unavailable: null, orderUsd: 11, maxRunUsd: 50 };
+  let run: SimRun = emptySimRun({ execution: { ...emptySimRun().execution, ...EXECUTION } });
   let timer: ReturnType<typeof setInterval> | null = null;
   let step = 0;
 
@@ -79,7 +85,36 @@ export function createFixtureSimApi(emit: (event: SseEventType, data: unknown) =
     if (step === 6) emit('episode', { ...tag, seq: 1, at: simTime, requestId: 'fx-req-0001-aaaa', outcome: 'executed', actions: [] });
     const positions = step >= 5 ? [{ market: 'xyz:CL', side: 'long' as const, sizeUsd: 25, entryPx: 81.4, markPx: 81.4 + progress * 3, pnlUsd: (25 * progress * 3) / 81.4 }] : [];
     const pnlUsd = positions.reduce((s, p) => s + p.pnlUsd, 0);
-    run = { ...run, progress, simTime, positions, pnlUsd, baselinePnlUsd: -0.35 * progress, decisions: step >= 3 ? 1 : 0, episodes: step >= 6 ? 1 : 0, status: progress >= 1 ? 'done' : 'running' };
+    const delivered = Math.min(sc.headlines.length, Math.floor(progress * sc.headlines.length));
+    const decisionList = sc.headlines.slice(0, Math.max(delivered, step >= 3 ? 1 : 0)).map((h, i) =>
+      i === 0
+        ? { simTime: simAt(sc.start, sc.end, 0.04), headline: 'Reports of strikes near a Gulf shipping lane', requestId: 'fx-req-0001-aaaa', signal: 'geopolitical_shock' as const, confidence: 0.78, skipped: null, error: null, actions: 1 }
+        : { simTime: h.ts, headline: `Follow-up: ${h.title.toLowerCase()}`, requestId: i % 3 === 0 ? `fx-req-000${i + 1}` : null, signal: i % 3 === 0 ? ('none' as const) : null, confidence: i % 3 === 0 ? 0.3 : null, skipped: i % 3 === 0 ? null : ('no_shock' as const), error: null, actions: 0 },
+    );
+    const pending = step === 4 ? { requestId: 'fx-req-0001-aaaa', headline: 'Reports of strikes near a Gulf shipping lane', actions: [{ venue: 'hyperliquid' as const, kind: 'perp' as const, coin: 'xyz:CL', side: 'long' as const, sizeUsd: 25, reason: 'supply shock' }] } : step < 4 ? null : run.pending && null;
+    let execution = run.execution;
+    if (step === 5 && execution.liveOrders) {
+      const order = { orderId: '48211907733', coin: 'xyz:CL', isBuy: true, sizeUsd: 11, status: 'filled' as const, avgPx: 62.41, url: 'https://app.hyperliquid.xyz/explorer', requestId: 'fx-req-0001-aaaa', placedAt: new Date().toISOString() };
+      execution = { ...execution, spentUsd: 11, orders: [order] };
+      emit('order', { ...tag, ...order, live: true, network: 'mainnet', paper: false, simTime });
+    }
+    run = {
+      ...run,
+      progress,
+      simTime,
+      positions,
+      pnlUsd,
+      baselinePnlUsd: -0.35 * progress,
+      pnlPct: (pnlUsd / 25) * 100,
+      baselinePct: (-0.35 * progress * 100) / 25,
+      decisions: decisionList.length,
+      decisionList,
+      episodes: step >= 6 ? 1 : 0,
+      headlines: { total: sc.headlines.length, delivered: Math.max(delivered, step >= 1 ? 1 : 0) },
+      pending,
+      execution,
+      status: progress >= 1 ? 'done' : 'running',
+    };
     emit('sim', run);
     if (run.status === 'done' && timer) clearInterval(timer);
   };
@@ -87,11 +122,22 @@ export function createFixtureSimApi(emit: (event: SseEventType, data: unknown) =
   return {
     scenarios: () => Promise.resolve(ok(SCENARIOS)),
     run: () => Promise.resolve(ok(run)),
-    start: (scenarioId) => {
+    start: (scenarioId, speed, liveOrders) => {
       if (timer) clearInterval(timer);
       step = 0;
       const sc = SCENARIOS.find((s) => s.id === scenarioId) ?? SCENARIOS[0]!;
-      run = { ...run, runId: `fx-run-${Date.now()}`, scenarioId, status: 'running', simTime: sc.start, progress: 0, positions: [], pnlUsd: 0, baselinePnlUsd: 0, decisions: 0, episodes: 0 };
+      run = emptySimRun({
+        runId: `fx-run-${Date.now()}`,
+        scenarioId,
+        status: 'running',
+        simTime: sc.start,
+        start: sc.start,
+        end: sc.end,
+        speed,
+        notionalUsd: 25,
+        headlines: { total: sc.headlines.length, delivered: 0 },
+        execution: { ...emptySimRun().execution, ...EXECUTION, liveOrders },
+      });
       timer = setInterval(tick, 500);
       emit('sim', run);
       return Promise.resolve(ok({ runId: run.runId }));
@@ -101,7 +147,7 @@ export function createFixtureSimApi(emit: (event: SseEventType, data: unknown) =
       if (action === 'resume' && run.status === 'paused') run = { ...run, status: 'running' };
       if (action === 'stop') {
         if (timer) clearInterval(timer);
-        run = { ...run, status: 'idle' };
+        run = { ...run, status: 'done' };
       }
       emit('sim', run);
       return Promise.resolve(ok(true as const));

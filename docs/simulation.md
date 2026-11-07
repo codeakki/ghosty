@@ -13,7 +13,7 @@ you can replay.
 | Headlines | **Real past headlines**, verbatim or close paraphrase, with the real date and a source URL each. Most outlets do not publish the minute, so `ts` is approximate; each headline's `tsNote` says how it was placed. |
 | Prices | **Real historical candles** from keyless public APIs (Binance public klines via `data-api.binance.vision`, or Hyperliquid `candleSnapshot`). The mid at a sim time is interpolated between the candle's open and close. Cached in `server/.ghosty/candles/`. |
 | Clock | **Simulated.** `speed` = market seconds per real second (default 360, so one market hour takes 10 s). The clock stops at each headline while the brain thinks, and (by default) while an alert waits for a press. |
-| Execution | **Paper only.** Sim decisions are tagged `sim: true, runId` and always fill on the run's PaperVenue at the historical mid ± slippage (default 5 bps). The Hyperliquid and Uniswap executors are never called, whatever keys are set (covered by a test). |
+| Execution | **Paper by default.** Sim decisions are tagged `sim: true, runId` and always fill on the run's PaperVenue at the historical mid ± slippage (default 5 bps). The live Hyperliquid and Uniswap executors are never called. **Optional real orders:** see [Real orders on Hyperliquid mainnet](#real-orders-on-hyperliquid-mainnet). |
 | Memory | Your 0G memory, read-only, when `OG_PRIVATE_KEY` is set. Without it the run uses the default memory snapshot and says so in `memory`. The watchlist is narrowed to the scenario's markets, the only ones we can price. A sim never saves memory. |
 | Episodes | 0G Storage when `OG_PRIVATE_KEY` is set (`storage: "0g"`, real merkle root). Otherwise an append-only local log `server/.ghosty/sim-episodes.jsonl` with `storage: "local"` and root `local:<sha256>`. Each episode links to the previous one (`prevRoot`). Sim episodes never join the live episode chain. |
 
@@ -23,6 +23,27 @@ episodes.
 What a run measures: the paper P&L of the trades you confirmed (`pnlUsd`, `pnlPct`), against a **hold** baseline
 (`baselinePnlUsd`, `baselinePct`): `MAX_TRADE_USD` split equally long across the scenario markets from the run
 start. Both are marked to the same historical prices.
+
+## Real orders on Hyperliquid mainnet
+
+A run can also place **real** orders. Every confirmed sim trade still fills on paper at the historical price (that is
+what the P&L and the hold baseline measure); with real orders on, each leg is ALSO sent to Hyperliquid **mainnet** at
+today's price, as an IOC order of a fixed small size.
+
+| Setting (`server/.env`) | Default | What |
+|---|---|---|
+| `SIM_LIVE_ORDERS` | `false` | Server switch. Off = `liveOrders: true` answers `409 live_unavailable`. |
+| `SIM_LIVE_ORDER_USD` | `11` | Notional of each real leg. Raised to $10, Hyperliquid's minimum. |
+| `SIM_LIVE_MAX_RUN_USD` | `50` | Most real notional one run may place; later legs come back `rejected` ("run cap"). |
+| `HL_MASTER_ADDRESS`, `HL_AGENT_PRIVATE_KEY` | | A **mainnet** API wallet approved at app.hyperliquid.xyz/API. |
+
+- Always mainnet, whatever `HL_TESTNET` says. The sim builds its own mainnet venue; the live executor is untouched.
+- Opt-in per run: `POST /sim/run {"scenarioId": "...", "liveOrders": true}`. The Simulate tab has a "Paper + real orders"
+  choice and a confirmation checkbox before the start button unlocks.
+- Only a confirm places anything; cancel and stop place nothing.
+- `GET /sim/run` → `execution: {liveOrders, available, unavailable, orderUsd, maxRunUsd, spentUsd, orders[]}`. Each
+  real order is also an SSE `order` event with `live: true, network: "mainnet", paper: false`, and is written to the
+  run's episode next to the paper fills.
 
 ## Scenarios
 

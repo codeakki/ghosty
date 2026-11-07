@@ -1,5 +1,5 @@
 import { describeError, parseSimRun } from '../../api/client';
-import type { ApiResult, SimRun, SimScenario } from '../../api/types';
+import type { ApiResult, SimExecution, SimRun, SimScenario } from '../../api/types';
 import type { Action as TerminalAction } from '../../state/reducer';
 
 /**
@@ -23,6 +23,37 @@ export interface SimState {
   /** One sentence for the last failed action (start, pause, replay…). */
   error: string | null;
   replay: { status: ReplayStatus; shown: number; total: number };
+  /** Whether the server allows real Hyperliquid mainnet orders, from the last /sim/run (idle runs included). */
+  execution: SimExecution | null;
+}
+
+/** Every SimRun field at its empty value; the fixture and tests spread over it. */
+export function emptySimRun(over: Partial<SimRun> = {}): SimRun {
+  return {
+    runId: '',
+    scenarioId: '',
+    status: 'idle',
+    pauseReason: null,
+    simTime: '',
+    start: '',
+    end: '',
+    progress: 0,
+    speed: 0,
+    notionalUsd: 0,
+    pnlUsd: 0,
+    baselinePnlUsd: 0,
+    pnlPct: null,
+    baselinePct: null,
+    positions: [],
+    decisions: 0,
+    decisionList: [],
+    episodes: 0,
+    headlines: { total: 0, delivered: 0 },
+    pending: null,
+    execution: { liveOrders: false, available: false, unavailable: null, orderUsd: 0, maxRunUsd: 0, spentUsd: 0, orders: [] },
+    error: null,
+    ...over,
+  };
 }
 
 export const initialSim: SimState = {
@@ -32,6 +63,7 @@ export const initialSim: SimState = {
   finished: null,
   error: null,
   replay: { status: 'idle', shown: 0, total: 0 },
+  execution: null,
 };
 
 export type SimLocalAction =
@@ -65,7 +97,8 @@ export function isActive(run: SimRun | null): run is SimRun {
   return run !== null && (run.status === 'running' || run.status === 'paused');
 }
 
-function foldRun(state: SimState, run: SimRun): SimState {
+function foldRun(prev: SimState, run: SimRun): SimState {
+  const state = { ...prev, execution: run.execution };
   if (run.status === 'done') return { ...state, server: 'ready', run: null, finished: run };
   if (run.status === 'idle') return { ...state, server: 'ready', run: null };
   // A different run starting replaces the last summary.
@@ -131,12 +164,19 @@ export function direction(v: number): 'up' | 'down' | 'flat' {
   return r > 0 ? 'up' : r < 0 ? 'down' : 'flat';
 }
 
-/** Total paper notional of the run's positions (the base for "% vs hold"). */
+/** Capital base for the percentages: the server's notional (MAX_TRADE_USD), else the open paper positions. */
 export function notionalUsd(run: SimRun): number {
+  if (run.notionalUsd > 0) return run.notionalUsd;
   return run.positions.reduce((sum, p) => sum + Math.abs(p.sizeUsd), 0);
 }
 
-/** Ghosty's edge over simply holding: in % of the paper notional when there is one ("+2.1%"), in dollars otherwise. */
+/** "+2.1%" of the notional, or null when there is no base. */
+export function pctOf(run: SimRun, usd: number): string | null {
+  const base = notionalUsd(run);
+  return base > 0 ? formatSignedPct1((usd / base) * 100) : null;
+}
+
+/** Ghosty's edge over simply holding: in % of the notional when there is one ("+2.1%"), in dollars otherwise. */
 export function vsHold(run: SimRun): { text: string; dir: 'up' | 'down' | 'flat' } {
   const edge = run.pnlUsd - run.baselinePnlUsd;
   const base = notionalUsd(run);
@@ -148,6 +188,21 @@ export function vsHold(run: SimRun): { text: string; dir: 'up' | 'down' | 'flat'
 export function summaryLine(run: SimRun): string {
   const calls = `${run.decisions} ${run.decisions === 1 ? 'call' : 'calls'}`;
   return `${calls} · ${vsHold(run).text} vs hold · every decision logged with its 0G request id`;
+}
+
+/** "Sat Jun 14" from an ISO time; "" when unknown. */
+export function formatSimDay(at: string): string {
+  const t = Date.parse(at);
+  if (!Number.isFinite(t)) return '';
+  const d = new Date(t);
+  return `${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getUTCDay()]} ${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}`;
+}
+
+/** Plain words for how a run is doing right now. */
+export function runStatusText(run: SimRun): { label: string; tone: 'running' | 'waiting' | 'paused' } {
+  if (run.status === 'paused' && (run.pauseReason === 'awaiting_press' || run.pending)) return { label: 'Waiting for you', tone: 'waiting' };
+  if (run.status === 'paused') return { label: 'Paused', tone: 'paused' };
+  return { label: 'Running', tone: 'running' };
 }
 
 /** "03:12 UTC" from an ISO time or ms epoch; "—" when unknown. */
@@ -188,5 +243,6 @@ export function formatDateRange(startIso: string, endIso: string): string {
 export function bannerText(run: SimRun, scenario: SimScenario | undefined): string {
   const name = scenario ? `${scenario.title}${scenario.start ? `, ${formatScenarioMonth(scenario.start)}` : ''}` : 'Scenario';
   const paused = run.status === 'paused' ? ' · paused' : '';
-  return `Simulation · ${name} · sim time ${formatSimClock(run.simTime)}${paused} · paper trades only`;
+  const money = run.execution.liveOrders ? 'paper + REAL Hyperliquid mainnet orders' : 'paper trades only';
+  return `Simulation · ${name} · sim time ${formatSimClock(run.simTime)}${paused} · ${money}`;
 }

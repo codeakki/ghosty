@@ -10,7 +10,8 @@ import { isActive, simMissing, type SimAction, type SimState } from './simState'
 export interface SimApi {
   scenarios(): Promise<ApiResult<SimScenario[]>>;
   run(): Promise<ApiResult<SimRun>>;
-  start(scenarioId: string, speed: number): Promise<ApiResult<{ runId: string }>>;
+  /** `liveOrders`: also place REAL Hyperliquid mainnet orders on confirm. */
+  start(scenarioId: string, speed: number, liveOrders: boolean): Promise<ApiResult<{ runId: string }>>;
   control(action: ControlAction): Promise<ApiResult<true>>;
   replay(from?: string): Promise<ApiResult<ReplayEpisode[]>>;
 }
@@ -20,7 +21,7 @@ function clientSimApi(client: GhostyClient): SimApi {
     scenarios: () => client.simScenarios(),
     run: () => client.simRun(),
     // Auto-pause on an alert, so a confirm on the device happens at the sim time it was asked.
-    start: (id, speed) => client.simStart(id, speed, true),
+    start: (id, speed, liveOrders) => client.simStart(id, speed, true, liveOrders),
     control: (a) => client.simControl(a),
     replay: (from) => client.episodesReplay(from, 20),
   };
@@ -99,11 +100,11 @@ export function useSim({ client, sim, simDispatch, dispatch, feedDispatch, banne
   }, [api, simDispatch]);
 
   const start = useCallback(
-    async (scenarioId: string, speed: number) => {
+    async (scenarioId: string, speed: number, liveOrders = false) => {
       if (!api) return;
       // A fresh run starts from a clean feed: no cards left over from the last one.
       feedDispatch({ type: 'feed/sim-clear' });
-      const r = await api.start(scenarioId, speed);
+      const r = await api.start(scenarioId, speed, liveOrders);
       if (!r.ok) {
         if (simMissing(r)) simDispatch({ type: 'sim/scenarios', result: r });
         fail(r);

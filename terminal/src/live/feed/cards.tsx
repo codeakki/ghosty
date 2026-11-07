@@ -260,7 +260,13 @@ function TxView({ card, ctx }: { card: TxCard; ctx: CardContext }) {
             </span>
           </h3>
           <p className="lv-card-meta">
-            Hyperliquid perp order
+            {o.live ? (
+              <>
+                <span className="lv-real-tag">REAL</span> Hyperliquid {o.network === 'testnet' ? 'testnet' : 'mainnet'} order from the simulation
+              </>
+            ) : (
+              'Hyperliquid perp order'
+            )}
             {o.avgPx ? (
               <>
                 {' '}
@@ -268,7 +274,7 @@ function TxView({ card, ctx }: { card: TxCard; ctx: CardContext }) {
               </>
             ) : null}
             {o.error ? ` · ${o.error}` : ''}
-            {simulated ? ' · simulated, not on chain' : ''}
+            {simulated ? (o.sim ? ' · paper fill at the historical price' : ' · simulated, not on chain') : ''}
           </p>
           {o.url && !simulated ? (
             <p className="lv-card-meta">

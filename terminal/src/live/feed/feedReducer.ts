@@ -204,7 +204,7 @@ function episodeCard(ep: EpisodeRecord, at: number): TxCard {
 }
 
 function orderCard(order: OrderEntry, at: number): TxCard {
-  const key = order.orderId || `${order.requestId}:${order.coin}:${order.at}`;
+  const key = `${order.live ? 'live:' : ''}${order.orderId || `${order.requestId}:${order.coin}:${order.at}`}`;
   return { kind: 'tx', track: 'hyperliquid', tx: 'order', id: `order:${key}`, at, order };
 }
 
