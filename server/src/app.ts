@@ -11,6 +11,11 @@ import { DEFAULT_DATA_DIR } from './agent/storage.js';
 import type { Decision } from './agent/decide.js';
 import { createStt } from './audio/stt.js';
 import { ClaudeVoiceAssistant, type VoiceAssistant, type VoiceContext } from './claude/voice.js';
+import { ClaudeOrderAgent } from './claude/orderAgent.js';
+import { SIGN_TIMEOUT_MS, signerHub } from './execution/signerHub.js';
+import { lookupFillHash } from './execution/hyperliquid.js';
+import { ClaudeMarketPicker, runSignalChecks } from './signals/checks.js';
+import { isAddress } from './wallet/account.js';
 import { createTts, OUTPUT_SAMPLE_RATE } from './audio/tts.js';
 import { parseWav, WavFormatError } from './audio/wav.js';
 import { loadConfig, type Config } from './config.js';
@@ -26,7 +31,7 @@ import { createNewsAggregator, createNewsProviders } from './news/factory.js';
 import { shockDetector, type ShockResult } from './news/shock.js';
 import type { NewsItem } from './news/types.js';
 import { createPayments, type Payments } from './payments/index.js';
-import { Pipeline, SafeStopEngagedError, type BoughtIntel, type PipelineDeps } from './pipeline.js';
+import { Pipeline, SafeStopEngagedError, type BoughtIntel, type PipelineDeps, type VoiceResult } from './pipeline.js';
 import { BrainSwitch, isBrainOnline } from './safety/safeStop.js';
 import { createCandleLoader, type CandleLoader } from './sim/candles.js';
 import { SimEngine } from './sim/engine.js';
@@ -75,6 +80,8 @@ export interface BuildAppOptions {
    * null turns routing off (every turn is a 0G decision). Tests pass a mock.
    */
   assistant?: VoiceAssistant | null;
+  /** Spoken orders. Default: ClaudeOrderAgent when VOICE_ORDERS_ENABLED and ANTHROPIC_API_KEY are set. null = off. Tests pass a mock. */
+  orderAgent?: PipelineDeps['orderAgent'] | null;
   logger?: FastifyServerOptions['logger'];
   /** Simulation runs: candle loader (tests pass a fake), scenarios, 0G store for sim episodes (null = local only). */
   sim?: { loadCandles?: CandleLoader; scenarios?: () => Scenario[]; store?: BlobStore | null; autoTick?: boolean; slippageBps?: number };
@@ -237,6 +244,21 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
       : config.CLAUDE_VOICE_ENABLED && config.ANTHROPIC_API_KEY
         ? new ClaudeVoiceAssistant({ apiKey: config.ANTHROPIC_API_KEY, model: config.ANTHROPIC_MODEL, context: () => voiceContext() })
         : undefined;
+  // Memory, journal and trades are kept per Hyperliquid account (the master address), not per device.
+  const accountId = isAddress(config.HL_MASTER_ADDRESS) ? config.HL_MASTER_ADDRESS.toLowerCase() : 'device-0';
+  // Spoken orders: Claude hears every turn and places explicit orders on the venue, capped at MAX_TRADE_USD.
+  const orderAgent: PipelineDeps['orderAgent'] =
+    opts.orderAgent !== undefined
+      ? (opts.orderAgent ?? undefined)
+      : config.VOICE_ORDERS_ENABLED && config.ANTHROPIC_API_KEY
+        ? new ClaudeOrderAgent({
+            apiKey: config.ANTHROPIC_API_KEY,
+            model: config.ANTHROPIC_MODEL,
+            context: () => voiceContext(),
+            venue: deps.venue,
+            maxTradeUsd: config.MAX_TRADE_USD,
+          })
+        : undefined;
   // Only the live decision loop pays. The SimEngine below gets the bare decider, never buyIntel: sim decisions are paper-only.
   const pipeline = new Pipeline({
     buyIntel,
@@ -247,6 +269,11 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
     observer: state,
     assistant,
     brainOnline,
+    orderAgent,
+    userId: accountId,
+    recentNews: () => state.snapshot().news.slice(0, 3).map((n) => ({ title: n.title, source: n.source })),
+    lookupFillHash: (orderId) => lookupFillHash(config, orderId),
+    onMemoryError: (err) => app.log.warn({ err: String(err) }, '0G journal write failed'),
   });
 
   // 0G failures never become a fake decision: map them to 503 so the pod says "brain offline".
@@ -288,6 +315,7 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
       const decision = await pipeline.decideOnHeadline(top.item);
       const alert = state.enqueueAlert(decision, top.item);
       app.log.info({ requestId: decision.requestId, signal: decision.signal, alert: alert?.id, headline: top.item.title }, 'news shock decision');
+      if (decision.signal !== 'none') void announceSignal(top.item.title, decision);
       return { shock, decision, alert };
     } catch (err) {
       if (err instanceof BrainOfflineError) return { shock, decision: null, alert: null, skipped: 'brain_offline' };
@@ -296,6 +324,29 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
       throw err;
     }
   };
+
+  /**
+   * Every signal gets both checks (prediction-market odds now vs a minute ago, and the 1-5 minute price move on
+   * Hyperliquid and Binance) before the pod speaks it. The result is queued for GET /announce and kept in the
+   * wearer's 0G journal.
+   */
+  const marketPicker = config.ANTHROPIC_API_KEY ? new ClaudeMarketPicker({ apiKey: config.ANTHROPIC_API_KEY, model: config.ANTHROPIC_MODEL }) : undefined;
+  async function announceSignal(headline: string, decision: Decision): Promise<void> {
+    const checks = await within(
+      runSignalChecks({ headline, actions: decision.suggestedActions }, { picker: marketPicker, testnet: config.HL_TESTNET }),
+      15_000,
+      null,
+    );
+    const text = [decision.rationale, ...(checks?.spoken ?? [])].join(' ');
+    announcements.push({ id: decision.requestId, text, at: Date.now() });
+    app.log.info({ requestId: decision.requestId, spoken: checks?.spoken, errors: checks?.errors }, 'signal checks');
+    await pipeline.rememberSignal(headline, text, {
+      signal: decision.signal,
+      confidence: decision.confidence,
+      actions: decision.suggestedActions.map((a) => ({ coin: a.coin, side: a.side, sizeUsd: a.sizeUsd })),
+      checks: checks ?? { error: 'checks timed out' },
+    });
+  }
 
   // Simulation: real decider (0G in live mode), historical world, PaperVenue only. Sim episodes go to 0G Storage
   // when OG_PRIVATE_KEY is set, else to <dataDir>/sim-episodes.jsonl labelled storage "local".
@@ -324,9 +375,11 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
   // alert and trade, recent orders, mode. Slow sources fall back to "unknown" instead of stalling the turn.
   const voiceContext = async (): Promise<VoiceContext> => {
     const snap = state.snapshot();
-    const [online, marketSnap] = await Promise.all([
+    const [online, marketSnap, stored] = await Promise.all([
       within(brainOnline(), 2_000, !snap.safeStop),
       within(market.snapshot().then((m) => m as typeof m | null), 3_000, null),
+      // The wearer's memory from 0G (cached in this process after the first download).
+      within(deps.memory.load(accountId).then((m) => m as typeof m | null), 4_000, null),
     ]);
     const simStatus = sim.status().status;
     const pendingAlert = snap.alerts.find((a) => a.status !== 'acked') ?? null;
@@ -356,6 +409,7 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
         : null,
       pendingTrade: snap.plannedActions,
       recentOrders: snap.orders.slice(0, 5).map((o) => ({ coin: o.coin, isBuy: o.isBuy, sizeUsd: o.sizeUsd, status: o.status, at: o.at })),
+      memory: stored ? { riskProfile: stored.riskProfile, journal: stored.journal ?? [] } : null,
     };
   };
 
@@ -435,6 +489,26 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
 
   // With Claude on, questions do not need 0G: the pipeline checks safe-stop on the trade path only.
   const voicePreHandlers = assistant ? [requireDevice, requireVoice] : [requireDevice, requireVoice, requireBrain];
+  /** Signals waiting for the pod to fetch and speak (GET /announce). Old ones expire unspoken. */
+  const announcements: Array<{ id: string; text: string; at: number }> = [];
+  const ANNOUNCE_TTL_MS = 10 * 60_000;
+
+  // The pod polls this while idle: 200 + PCM for the oldest fresh announcement, 204 when there is none.
+  app.get('/announce', { preHandler: [requireDevice] }, async (req, reply) => {
+    while (announcements.length && Date.now() - announcements[0]!.at > ANNOUNCE_TTL_MS) announcements.shift();
+    const next = announcements.shift();
+    if (!next) return reply.code(204).send();
+    const audio = await deps.tts.synthesize(next.text);
+    req.log.info({ id: next.id, text: next.text }, 'announcement sent to the pod');
+    return reply
+      .header('content-type', 'application/octet-stream')
+      .header('x-sample-rate', String(OUTPUT_SAMPLE_RATE))
+      .header('x-announce-id', next.id)
+      .send(audio);
+  });
+
+  /** Voice turns paused on a Dabao signature, by sign request id. */
+  const openTurns = new Map<string, Promise<VoiceResult | undefined>>();
   app.post('/voice', { preHandler: voicePreHandlers }, async (req, reply) => {
     if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
       return reply.code(400).send({ error: 'expected_wav_body' });
@@ -448,13 +522,55 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
     }
     if (wav.sampleRate !== 16000) req.log.warn({ sampleRate: wav.sampleRate }, 'expected 16 kHz input');
 
-    const result = await pipeline.handleVoice(wav);
+    // X-Listen: always = the pod records on its own, so only speech that says "Ghosty" gets an answer (204 otherwise).
+    const turn: Promise<VoiceResult | undefined> =
+      req.headers['x-listen'] === 'always'
+        ? pipeline.handleListening(wav).then((heard) => {
+            if (!heard.result) req.log.info({ transcript: heard.transcript }, 'no wake word, ignored');
+            return heard.result;
+          })
+        : pipeline.handleVoice(wav);
+    return relayTurn(turn, req, reply);
+  });
+
+  // The Dabao's reply to a 202 sign request (the frame, byte for byte). Resumes the voice turn that asked for it.
+  app.post('/sign', { preHandler: [requireDevice] }, async (req, reply) => {
+    const id = req.headers['x-sign-id'];
+    const turn = typeof id === 'string' ? openTurns.get(id) : undefined;
+    if (!turn || typeof id !== 'string') return reply.code(404).send({ error: 'unknown_sign_id' });
+    if (!Buffer.isBuffer(req.body) || req.body.length === 0) return reply.code(400).send({ error: 'expected_signer_frame' });
+    openTurns.delete(id);
+    if (!signerHub.deliver(id, req.body)) req.log.warn({ signId: id }, 'sign reply after the request expired');
+    return relayTurn(turn, req, reply);
+  });
+
+  /**
+   * Answer the pod for a running voice turn: 202 + a Dabao frame when the turn needs a signature (the pod relays it and
+   * POSTs the reply to /sign), else the turn's audio (200) or 204 when it was not for us.
+   */
+  async function relayTurn(turn: Promise<VoiceResult | undefined>, req: FastifyRequest, reply: FastifyReply) {
+    turn.catch(() => undefined);  // awaited below or by /sign; never an unhandled rejection meanwhile
+    const next = signerHub.nextRequest();
+    const outcome = await Promise.race([
+      turn.then((result) => ({ kind: 'done' as const, result })),
+      next.promise.then((request) => ({ kind: 'sign' as const, request })),
+    ]).finally(next.cancel);
+    if (outcome.kind === 'sign') {
+      const { id, frame } = outcome.request;
+      openTurns.set(id, turn);
+      setTimeout(() => openTurns.delete(id), 2 * SIGN_TIMEOUT_MS).unref();
+      req.log.info({ signId: id }, 'order needs the Dabao: sign request sent to the pod');
+      return reply.code(202).header('content-type', 'application/octet-stream').header('x-sign-id', id).send(frame);
+    }
+    const result = outcome.result;
+    if (!result) return reply.code(204).send();
     req.log.info(
       {
         answeredBy: result.answeredBy,
         intent: result.intent,
         requestId: result.requestId,
         signal: result.decision?.signal,
+        orders: result.orders?.map((o) => ({ coin: o.coin, status: o.status, orderId: o.orderId, error: o.error })),
         confidence: result.decision?.confidence,
         assistantError: result.assistantError,
       },
@@ -467,7 +583,7 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
       .header('x-signal', result.decision?.signal ?? 'none')
       .header('x-answered-by', result.answeredBy)
       .send(result.audio);
-  });
+  }
 
   app.post('/button', { preHandler: [requireDevice, requireBrain] }, async (req, reply) => {
     const parsed = ButtonBody.safeParse(req.body);

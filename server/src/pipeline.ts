@@ -4,15 +4,16 @@ import type { TextToSpeech } from './audio/tts.js';
 import type { WavAudio } from './audio/wav.js';
 import type { Decider, Decision } from './agent/decide.js';
 import type { EpisodeInput, EpisodeLog, EpisodeRecord } from './agent/episode.js';
-import type { MemoryStore } from './agent/memory.js';
+import type { JournalOrder, MemoryStore } from './agent/memory.js';
 import { executePlan, type SpotOutcome } from './execution/executor.js';
 import type { OrderResult, PerpVenue } from './execution/hyperliquid.js';
 import { planSteps, type PlannedAction, type PlanStep, type SpotLegSpec } from './execution/playbook.js';
 import { FakeSpotLeg, type SpotLeg } from './wallet/uniswap.js';
 import { fetchAll, type NewsItem, type NewsProvider } from './news/types.js';
 import { ProviderNotConfiguredError, type NotConfiguredInfo } from './mode.js';
-import { classifyIntent, type VoiceIntent } from './claude/intent.js';
+import { classifyIntent, hasWakeWord, type VoiceIntent } from './claude/intent.js';
 import { ASSISTANT_FALLBACK_REPLY, type VoiceAssistant } from './claude/voice.js';
+import type { OrderAgentReply } from './claude/orderAgent.js';
 
 /** What started a decision. `text` and `inject` come from the virtual pod, never from the firmware. */
 export type DecisionTrigger = 'voice' | 'text' | 'button' | 'inject';
@@ -91,10 +92,21 @@ export interface PipelineDeps {
   assistant?: VoiceAssistant;
   /** Safe-stop check for the 0G path when the assistant is on (the route's preHandler no longer does it). */
   brainOnline?: () => Promise<boolean>;
+  /**
+   * VOICE_ORDERS_ENABLED: Claude hears every turn's exact words and places explicit orders itself
+   * (claude/orderAgent.ts). Replaces the question / trade / confirm routing.
+   */
+  orderAgent?: { handle(utterance: string): Promise<OrderAgentReply> };
+  /** Top headlines right now, saved with each voice turn in the wearer's journal. */
+  recentNews?: () => Array<{ title: string; source: string }>;
+  /** Hyperliquid tx hash of a filled order, saved in the journal. Best effort. */
+  lookupFillHash?: (orderId: string) => Promise<string | undefined>;
+  /** Journal write failures (the turn itself never fails because of memory). */
+  onMemoryError?: (err: unknown) => void;
 }
 
-/** Who produced the spoken reply: Claude (research, chit-chat) or the 0G trade path. */
-export type AnsweredBy = 'claude' | '0g';
+/** Who produced the spoken reply: Claude (research, chit-chat), the 0G trade path, or a direct spoken order. */
+export type AnsweredBy = 'claude' | '0g' | 'order';
 
 /** One voice/text turn as shown in the Live feed (SSE `voice`). */
 export interface VoiceTurn {
@@ -126,6 +138,8 @@ export interface VoiceResult {
   requestId: string;
   /** Present on 0G decision turns only. Claude never produces a decision. */
   decision?: Decision;
+  /** Orders a spoken-order turn sent to the venue. */
+  orders?: OrderResult[];
   /** Claude failed or timed out; `reply` is the honest fallback line. */
   assistantError?: string;
   /** PCM s16le mono 16 kHz. Empty when TTS is not configured (live mode, text turns only). */
@@ -162,6 +176,16 @@ export class Pipeline {
   async handleVoice(wav: WavAudio): Promise<VoiceResult> {
     const { text } = await this.deps.stt.transcribe(wav);
     return this.answer(text, 'voice');
+  }
+
+  /**
+   * Always-listening pod: the same as handleVoice, but only for speech addressed to Ghosty. Without the wake word
+   * (room talk, a TV, Whisper's "Thank you." on noise) it returns undefined after STT: no Claude, no 0G, no order.
+   */
+  async handleListening(wav: WavAudio): Promise<{ transcript: string; result?: VoiceResult }> {
+    const { text } = await this.deps.stt.transcribe(wav);
+    if (!hasWakeWord(text)) return { transcript: text };
+    return { transcript: text, result: await this.answer(text, 'voice') };
   }
 
   /** Same as handleVoice without STT: the text is the transcript. Used by the virtual pod. */
@@ -240,7 +264,9 @@ export class Pipeline {
     const intent = classifyIntent(transcript);
     const { assistant } = this.deps;
     let turn: Omit<VoiceResult, 'audio' | 'ttsNotConfigured'>;
-    if (assistant && intent === 'question') {
+    if (this.deps.orderAgent) {
+      turn = await this.order(this.deps.orderAgent, transcript, intent);
+    } else if (assistant && intent === 'question') {
       turn = await this.ask(assistant, transcript, intent);
     } else if (assistant && intent === 'confirm') {
       turn = this.confirmHint(transcript, intent);
@@ -250,6 +276,7 @@ export class Pipeline {
       const decision = await this.decide(transcript, trigger);
       turn = { transcript, answeredBy: '0g', intent, reply: decision.rationale, requestId: decision.requestId, decision };
     }
+    void this.remember(transcript, turn);
     this.deps.observer?.onVoice?.({
       transcript,
       reply: turn.reply,
@@ -278,6 +305,88 @@ export class Pipeline {
     try {
       const reply = await assistant.answer(transcript);
       return { transcript, answeredBy: 'claude', intent, reply: reply.text, requestId: reply.id };
+    } catch (err) {
+      return {
+        transcript,
+        answeredBy: 'claude',
+        intent,
+        reply: ASSISTANT_FALLBACK_REPLY,
+        requestId: `claude-error-${randomUUID()}`,
+        assistantError: err instanceof Error ? err.name : 'unknown error',
+      };
+    }
+  }
+
+  /**
+   * Journal on 0G: what the wearer said, the reply, any orders (with the fill's tx hash) and the news of the moment.
+   * Runs after the reply is decided, in the background; a memory failure never changes the turn.
+   */
+  private async remember(said: string, turn: Omit<VoiceResult, 'audio' | 'ttsNotConfigured'>): Promise<void> {
+    try {
+      const orders: JournalOrder[] = [];
+      for (const o of turn.orders ?? []) {
+        const txHash =
+          o.status === 'filled' && o.orderId && this.deps.lookupFillHash
+            ? await this.deps.lookupFillHash(o.orderId).catch(() => undefined)
+            : undefined;
+        orders.push({
+          coin: o.coin,
+          side: o.isBuy ? 'buy' : 'sell',
+          sizeUsd: o.sizeUsd,
+          status: o.status,
+          ...(o.orderId ? { orderId: o.orderId } : {}),
+          ...(o.avgPx === undefined ? {} : { avgPx: o.avgPx }),
+          ...(o.filled === undefined ? {} : { filled: o.filled }),
+          ...(txHash ? { txHash } : {}),
+          ...(o.error ? { error: o.error } : {}),
+        });
+      }
+      const news = (this.deps.recentNews?.() ?? []).slice(0, 3);
+      const memory = await this.deps.memory.load(this.userId);
+      memory.journal = [
+        ...(memory.journal ?? []),
+        {
+          at: new Date().toISOString(),
+          said,
+          reply: turn.reply,
+          answeredBy: turn.answeredBy,
+          ...(orders.length ? { orders } : {}),
+          ...(news.length ? { news } : {}),
+        },
+      ];
+      await this.deps.memory.save(this.userId, memory);
+    } catch (err) {
+      this.deps.onMemoryError?.(err);
+    }
+  }
+
+  /** A news signal and its checks, as spoken, in the wearer's 0G journal. */
+  async rememberSignal(headline: string, spoken: string, signal: Record<string, unknown>): Promise<void> {
+    try {
+      const memory = await this.deps.memory.load(this.userId);
+      memory.journal = [
+        ...(memory.journal ?? []),
+        { at: new Date().toISOString(), said: `News: ${headline}`, reply: spoken, answeredBy: '0g', signal },
+      ];
+      await this.deps.memory.save(this.userId, memory);
+    } catch (err) {
+      this.deps.onMemoryError?.(err);
+    }
+  }
+
+  /** Claude hears the words and may place orders. A failure before any order becomes the honest fallback line. */
+  private async order(
+    agent: NonNullable<PipelineDeps['orderAgent']>,
+    transcript: string,
+    intent: VoiceIntent,
+  ): Promise<Omit<VoiceResult, 'audio'>> {
+    try {
+      const reply = await agent.handle(transcript);
+      for (const o of reply.orders) {
+        if (o.orderId) this.deps.audit?.({ kind: 'trade', requestId: reply.id, signal: 'voice-order', txId: o.orderId });
+      }
+      const answeredBy: AnsweredBy = reply.orders.length > 0 ? 'order' : 'claude';
+      return { transcript, answeredBy, intent: reply.orders.length > 0 ? 'trade' : intent, reply: reply.text, requestId: reply.id, orders: reply.orders };
     } catch (err) {
       return {
         transcript,

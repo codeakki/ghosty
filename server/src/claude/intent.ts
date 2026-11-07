@@ -25,6 +25,18 @@ const TRADE_PATTERNS: RegExp[] = [
   /\b(?:hedge|protect)\s+(?:me|my|our)\b/i,
 ];
 
+/**
+ * "Ghosty" as Whisper tends to write it ("Ghostie", "Ghost E", "Goshty", or Devanagari "गोस्टी" / "गोश्टी"),
+ * anywhere in the utterance. The always-listening pod acts only on speech that contains it.
+ */
+const WAKE_WORD = /\b(?:gh?o+s?h?t[\s-]?(?:y|ie|i|ee|e)|gho?sti)\b/i;
+// \b is ASCII-only, so the Devanagari forms get their own pattern: गो/घो + स/श + optional virama + टी/ती.
+const WAKE_WORD_DEVANAGARI = /[गघ]ो[सश]्?[टत]ी/u;
+
+export function hasWakeWord(utterance: string): boolean {
+  return WAKE_WORD.test(utterance) || WAKE_WORD_DEVANAGARI.test(utterance);
+}
+
 /** Pure keyword routing: same text in, same intent out. */
 export function classifyIntent(utterance: string): VoiceIntent {
   const text = utterance.trim().replace(/\s+/g, ' ');
