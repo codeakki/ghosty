@@ -42,7 +42,7 @@ only the two pieces that explain the product.
 
 - **Calm.** Dark, quiet surfaces. Motion is slow unless something is actually happening.
 - **Private.** The pod talks to one person. No leaderboards, no confetti, no flashing PnL. Mic state is always visible.
-- **A bit ghostly.** A pale mint glow on near-black, soft edges, a small ghost face in the orb.
+- **A bit ghostly.** A pale mint ghost on ink, soft edges, a small face. No glow.
 - **Quiet confidence.** Numbers are precise and tabular. Copy is short. When something is not configured, we say so
   plainly and say what to set.
 - **Not a casino.** Green and red only mean price direction, always next to a sign or arrow. No pulsing red buttons, no
@@ -50,46 +50,47 @@ only the two pieces that explain the product.
 
 ---
 
-## 3. Color
+## 3. Direction and tokens (unslop pass, Nov 2026)
 
-Dark is the default (`color-scheme: dark`). Light follows `prefers-color-scheme: light`. Every text token below passes
-WCAG AA (4.5:1) on `bg`, `surface` and `raised` in its theme; the ratios were computed, not eyeballed.
+- **Product.** A voice pod and web app that watches world news and markets for a crypto trader, says what a shock
+  means for their positions, and trades only when they press.
+- **Character.** Watchful, unhurried, exact.
+- **World.** A trading desk at 3 a.m.: a dark room, one standby light, a ticker printing quietly.
+- **Moments.** The landing hero is the real Device screen built in code (the ghost plus a pending-trade card and a
+  quiet proof line); in the app, the ghost on Device and the price rows in the feed. Nothing else gets colour.
+- **Signature.** The standby light: one small steady mint dot meaning "Ghosty is live and listening". It appears only
+  where a real live connection exists (the event stream in the header, the pod mirror on Device). No other dots.
+
+### Color
+
+One cool "Ink" ramp for every surface, three text roles, one accent. Dark is the default; light follows
+`prefers-color-scheme: light`.
 
 | Token | Dark | Light | Use |
 |-------|------|-------|-----|
-| `--color-bg` | `#07090d` | `#f5f7fa` | Page |
-| `--color-surface` | `#0f1319` | `#ffffff` | Cards, nav |
-| `--color-raised` | `#161b23` | `#eef1f5` | Chips, inputs, pressed states |
-| `--color-line` | `#222a35` | `#dfe4ea` | Hairlines (1px) |
-| `--color-text` | `#eef2f7` (16.6:1) | `#0d1117` (18.9:1) | Body text |
-| `--color-muted` | `#9ba6b5` (7.6:1) | `#566170` (6.3:1) | Meta text: source, age, labels |
-| `--color-ghost` | `#a6f4e0` (14.8:1) | `#0b7363` (5.8:1) | Brand accent: orb glow, focus ring, active tab, primary button |
-| `--color-ghost-ink` | `#06201a` | `#ffffff` | Text on a ghost fill (13.5:1) |
-| `--color-up` | `#3ddc97` | `#047857` | Price up (always with ▲ and a + sign) |
-| `--color-down` | `#ff7a85` | `#c0263e` | Price down (always with ▼ and a − sign) |
-| `--color-warn` | `#f5b84a` | `#a35200` | Alerts, safe-stop, "needs a key" |
-| `--color-track-0g` | `#c69bff` | `#7c2fd0` | 0G (compute + storage) |
-| `--color-track-hedera` | `#93a3ff` | `#4150d6` | Hedera x402 |
-| `--color-track-uniswap` | `#ff85c0` | `#b8226a` | Uniswap |
-| `--color-track-hyperliquid` | `#5fd4f4` | `#0b6e8c` | Hyperliquid |
+| `--color-deep` | `#07080d` | `#eceff4` | Deepest layer: device frame, tape, footer |
+| `--color-bg` | `#0b0d14` | `#f5f7fa` | Page |
+| `--color-surface` | `#11141c` | `#ffffff` | Cards |
+| `--color-raised` | `#1a1e28` | `#eceff4` | Active tab, chips, inputs, secondary buttons |
+| `--color-line` / `-strong` | text at 8% / 14% | text at 8% / 16% | Hairlines |
+| `--color-text` | `#eef0f5` | `#111827` | Primary text |
+| `--color-muted` | `#a3a9b8` | `#4b5565` | Secondary text |
+| `--color-faint` | `#7a8296` | `#6b7487` | Meta and captions only |
+| `--color-ghost` | `#a6f4e0` | `#0b7363` | The one accent: the ghost, the standby light, focus ring, the talk button. Dark ink (`#06201a`) on mint fills; the darker shade is used for mint text on light |
+| `--color-up` / `--color-down` | `#4cc38a` / `#e5484d` | `#16a34a` / `#dc2626` | Price direction only, always with ▲/▼ and a sign |
+| `--color-warn` | `#f0b44c` | `#a35200` | Alerts only (pending trade, safe-stop, mainnet orders) |
 
-Rules:
+Rules: no hue gradients, gradient text, glows, coloured shadows or washes. Depth on dark comes from surface steps and
+hairlines (a floating layer may carry one soft neutral shadow). Sponsor tracks are a neutral 3px border plus their text
+label, never a hue. On the landing, the primary button is off-white from the ramp so the ghost stays the one bright thing.
 
-- **Track accents are used sparingly**: a 3px left border on a transaction card and the text label next to it ("0G",
-  "Hedera", "Uniswap", "Hyperliquid"). No logos. Never a fill.
-- **Ghost** is the only brand colour. It marks the one thing to look at: the orb, the active tab, the focus ring.
-- **Status colours are reserved.** Warn means "needs your attention or a key". It is never reused for a category.
-- Tinted backgrounds are the token at 10–14% alpha (`--color-*-tint`), only behind text that is in `--color-text`.
+### Type
 
----
-
-## 4. Typography
-
-- **UI sans: Geist** (Google Fonts), fallback `ui-sans-serif, system-ui`. Clean, neutral, slightly technical.
-- **Numbers: Geist Mono** with `font-variant-numeric: tabular-nums`, so prices and percentages line up and do not jitter
-  as they tick.
-- Loaded with `<link rel="preconnect">` + the Google Fonts stylesheet, `display=swap`. The UI is fully usable on the
-  fallback fonts if the CDN is blocked.
+- **IBM Plex Sans** for the interface, **IBM Plex Mono** for figures and meta only (prices, ids, clocks, step
+  numbers), with `tabular-nums`. Never mono for labels.
+- Weights 400 and 500 (600 rare). No 700+. Hierarchy from size and colour.
+- Sentence case everywhere, including shock tags ("Nuclear", "Strike") and status words ("Mainnet", "Sim").
+- Landing: headline 40 → 60px at 500 with -0.02/-0.03em tracking, subhead 18–20px in `--color-muted`.
 
 | Token | Size / line | Use |
 |-------|-------------|-----|
@@ -99,10 +100,14 @@ Rules:
 | `--text-lg` | 20 / 28 | Orb state label |
 | `--text-xl` | 28 / 34 | Price on a market card |
 
-Weights: 400 body, 500 labels, 600 titles. Headings use `text-wrap: balance`. No all-caps except shock tags (WAR,
-SANCTION, HACK), which are short and set in mono at 11px with letter-spacing.
+### Radius and motion
 
----
+Radius: `--radius-sm` 6 (tags), `--radius-control` 10 (buttons, inputs, chips, tab group; tabs inside it 8),
+`--radius-md` 12 (cards), `--radius-lg` 16 (talk button, panels). `--radius-pill` only for true circles (the standby
+light, progress bars). One easing curve, `cubic-bezier(0.22, 1, 0.36, 1)`, no overshoot. Loops only where something is
+live: listening, speaking, alert ripples, the thinking glance and dot while a 0G request is in flight. Idle is still.
+
+Design pass: unslop by @heydamir (CC BY 4.0).
 
 ## 5. Space, radius, elevation
 
@@ -128,11 +133,9 @@ the scale: `--card-pad-y` 16, `--card-pad-x` 16 → 24 at ≥ 900px, `--card-gap
 Sizes are tokens too: `--size-control` 44 (minimum touch target), `--size-control-sm` 32, `--size-control-lg` 72 /
 `--size-control-xl` 88 (the talk button), `--size-tag` 24, `--size-icon` 20, `--size-card-min` 104 (skeleton),
 `--size-card-brain` 152 (reserved brain card), `--size-ticker` 8.5rem (pulse tile minimum).
-- **Radii:** `--radius-sm` 6 (chips, inputs) · `--radius-md` 12 (cards) · `--radius-lg` 20 (device frame) ·
-  `--radius-pill` 999 (button, pills).
+- **Radii:** see "Radius and motion" in section 3.
 - **Elevation:** dark mode uses surface steps and a hairline, not shadows (`--shadow-1` is a 1px inset line). Light
-  mode adds a soft shadow (`0 1px 2px rgb(13 17 23 / 0.06), 0 4px 12px rgb(13 17 23 / 0.05)`). The only "glow" in the
-  product is the orb.
+  mode adds a soft neutral shadow. Nothing glows, the ghost included.
 
 ---
 
@@ -140,20 +143,18 @@ Sizes are tokens too: `--size-control` 44 (minimum touch target), `--size-contro
 
 | Token | Value | Use |
 |-------|-------|-----|
-| `--dur-fast` | 120ms | Hover, press feedback |
+| `--dur-fast` | 140ms | Hover, press feedback |
 | `--dur-base` | 200ms | State label cross-fade, chip changes |
-| `--dur-enter` | 320ms | Card enter |
-| `--dur-breathe` | 4.2s | Idle orb breathing loop |
-| `--dur-orbit` | 1.6s | Thinking shimmer orbit |
+| `--dur-enter` | 360ms | Card enter, landing fade on load |
 | `--dur-ripple` | 1.4s | Alert ripple |
-| `--ease-out` | `cubic-bezier(0.2, 0.8, 0.2, 1)` | Things arriving |
+| `--ease-out` | `cubic-bezier(0.22, 1, 0.36, 1)` | Everything: the one curve |
 | `--ease-in-out` | `cubic-bezier(0.65, 0, 0.35, 1)` | Loops |
-| `--ease-pop` | `cubic-bezier(0.34, 1.4, 0.64, 1)` | Small pops |
-| `--ease-spring` | `linear(…)` spring (cubic-bezier fallback) | Card entrance, pill, check mark |
-| `--dur-spring` | 520ms | Spring settle |
+| `--ease-pop` | alias of `--ease-out` | Small pops |
+| `--ease-spring` | alias of `--ease-out` (no overshoot) | Card entrance, pill, check mark |
+| `--dur-spring` | 360ms | Settle (no overshoot) |
 | `--stagger` | 40ms | Delay between cards of one batch |
 | `--dur-flash` | 600ms | Price tick tint fade |
-| `--dur-glow` | 4s | "New" glow on the latest batch |
+| (2.4s) | | "New" hairline on the latest batch fades out |
 | `--tick-min-interval` | 500ms | A price repaints at most twice a second |
 
 ### Orb states
@@ -163,9 +164,9 @@ CSS variable from `requestAnimationFrame`, so React does not re-render 60 times 
 
 | State | Look | Label |
 |-------|------|-------|
-| **idle** | Slow breathing glow (scale 1 → 1.04, 4.2s), eyes blink every few seconds | "Hold to talk" |
+| **idle** | Still: no float, no glow, no blink. Nothing is happening, so nothing moves | "Hold to talk" |
 | **listening** | Brighter core; scale and halo follow the mic level from an `AnalyserNode` | "Listening…" |
-| **thinking** | A shimmer arc orbits the core (1.6s), eyes glance up | "Thinking on 0G…" |
+| **thinking** | A cooler tint, eyes glance side to side while the 0G request is in flight | "Thinking on 0G…" |
 | **speaking** | Core pulses with the playback amplitude of the TTS PCM | "Speaking" |
 | **alert** | Amber ripples expand outward; soft two-note chime; `navigator.vibrate` where available | "Heads up" + what it is |
 | **offline** | Dim, steady, eyes closed. No loop. | "Brain offline: trading paused" |
@@ -173,13 +174,13 @@ CSS variable from `requestAnimationFrame`, so React does not re-render 60 times 
 ### Card enter
 
 A new card fades in and settles from 8px above (`--dur-spring`, `--ease-spring`), staggered by `--stagger` within its
-batch, with a soft inset glow that fades over `--dur-glow`. The list itself never jumps: see "Motion & stability".
+batch, with a hairline ring that fades out over 2.4s (no glow). The list itself never jumps: see "Motion & stability".
 The View Transitions API is used for one thing, the in-place morph of a "Thinking on 0G…" card into its decision (same
 element, same `view-transition-name`); every other change is a plain CSS animation on transform/opacity.
 
 ### Reduced motion
 
-`prefers-reduced-motion: reduce` turns off the breathing loop, orbit, ripples, shimmer, heartbeat and every transform.
+`prefers-reduced-motion: reduce` turns off the eye glance, ripples, the thinking dot and every transform.
 New cards, the pill and notes appear with a 150ms opacity fade only; reveal scrolls are instant. The orb still changes
 colour (opacity cross-fade), brightness and label per state, and view transitions get `animation-duration: 0s`.
 
@@ -218,7 +219,7 @@ over a 60-second live session (1440×900, `?moveThreshold=0.05`, so a card lands
 - Relative timestamps tick on one shared 1s clock ("just now" → "12s ago" → "3m ago"); only the timestamps re-render.
 - A heartbeat ring on the nav status dot pulses on every SSE event.
 - Sparklines draw in (a surface-coloured cover scales away, transform only).
-- "Thinking on 0G…" shimmers, then morphs into the decision in the same card.
+- "Thinking on 0G…" shows a small pulsing dot, then morphs into the decision in the same card.
 - Transactions that settle get a check mark that pops in once.
 - Orb states cross-fade: each state colour is a full layer whose opacity changes; the orb box has fixed dimensions.
 

@@ -161,7 +161,7 @@ body:has(.lv-app) {
   height: var(--size-nav-item);
   padding: var(--space-0);
   box-sizing: border-box;
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-control);
   background: var(--color-surface);
   box-shadow: var(--shadow-1);
   /* Narrow screens: the group scrolls sideways instead of wrapping or squeezing the pills. */
@@ -180,7 +180,7 @@ body:has(.lv-app) {
   align-items: center;
   height: var(--size-control-sm);
   padding: 0 var(--space-4);
-  border-radius: var(--radius-pill);
+  border-radius: 8px;
   color: var(--color-muted);
   font-weight: 500;
   text-decoration: none;
@@ -255,7 +255,7 @@ body:has(.lv-app) {
   padding: 0 var(--space-3);
   box-sizing: border-box;
   border: 0;
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-control);
   background: var(--color-surface);
   box-shadow: var(--shadow-1);
   color: var(--color-muted);
@@ -395,7 +395,7 @@ body:has(.lv-app) {
   height: var(--size-control-sm);
   padding: 0 var(--space-3);
   border: 1px solid var(--color-line-strong);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-control);
   background: transparent;
   color: var(--color-text);
   font: inherit;
@@ -501,7 +501,7 @@ body:has(.lv-app) {
   height: var(--size-control);
   padding: 0 var(--space-4);
   border: 1px solid var(--color-line-strong);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-control);
   background: transparent;
   color: var(--color-text);
   font: inherit;
@@ -631,22 +631,7 @@ body:has(.lv-app) {
   color: var(--color-muted);
 }
 
-/* ---- The orb: the Ghosty ghost ------------------------------------------- */
-
-/* Fixed square box (same size as the old round orb): no state changes the layout. */
-.orb {
-  --level: 0;
-  --pulse-gain: 0.035;
-  --orb: clamp(180px, 44vmin, 300px);
-  --orb-hi: #f4fffb;
-  --orb-core: #a6f4e0;
-  --orb-deep: #1c6f60;
-    --orb-eye: #07211b;
-  position: relative;
-  width: var(--orb);
-  height: var(--orb);
-  flex: none;
-}
+/* ---- The orb: sizes per layout (the ghost itself is in device/orb.css) ---- */
 
 .lv-device-full .orb {
   --orb: clamp(220px, 70vmin, 340px);
@@ -663,301 +648,6 @@ body:has(.lv-app) {
 
   .lv-main-live .lv-device-stage {
     padding-block: var(--space-2) 0;
-  }
-}
-
-@media (prefers-color-scheme: light) {
-  .orb {
-    --orb-hi: #ffffff;
-    --orb-core: #8ee8d2;
-    --orb-deep: #0b7363;
-  }
-}
-
-.orb > * {
-  position: absolute;
-  inset: 0;
-}
-
-.orb svg {
-  display: block;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-}
-
-/* Ghost-shaped rings: listening glow (teal) and alert ripples (amber). */
-.orb-ring {
-  opacity: 0;
-  transform-origin: 50% 52%;
-  will-change: transform, opacity;
-}
-
-.orb-ring path {
-  stroke-width: 2px;
-  stroke-linejoin: round;
-}
-
-.orb-listen path {
-  stroke: var(--color-ghost);
-}
-
-.orb-ripple path {
-  stroke: var(--color-warn);
-}
-
-/* Listening: one ring follows the mic level, a second one breathes outwards. */
-.orb-listen {
-  transform: scale(calc(1.06 + var(--level) * 0.2));
-  transition:
-    transform 90ms linear,
-    opacity var(--dur-base) var(--ease-out);
-}
-
-.orb[data-mode='listening'] .orb-listen {
-  opacity: calc(0.4 + var(--level) * 0.6);
-}
-
-.orb[data-mode='listening'] .orb-listen-2 {
-  opacity: 0;
-  transition: none;
-  animation: lv-ghost-ripple 1.8s var(--ease-out) infinite;
-}
-
-.orb[data-mode='alert'] .orb-ripple {
-  animation: lv-ghost-ripple var(--dur-ripple) var(--ease-out) infinite;
-}
-
-.orb[data-mode='alert'] .orb-ripple-2 {
-  animation-delay: calc(var(--dur-ripple) / 3);
-}
-
-.orb[data-mode='alert'] .orb-ripple-3 {
-  animation-delay: calc(var(--dur-ripple) * 2 / 3);
-}
-
-/* Idle: a gentle float. */
-.orb[data-mode='idle'] .orb-float {
-  animation: lv-ghost-float var(--dur-breathe) var(--ease-in-out) infinite;
-}
-
-/* Body pulse from the audio level; strongest while speaking. */
-.orb-pulse {
-  transform: scale(calc(1 + var(--level) * var(--pulse-gain)));
-  transform-origin: 50% 70%;
-  transition: transform 90ms linear;
-  will-change: transform;
-}
-
-.orb[data-mode='speaking'] {
-  --pulse-gain: 0.12;
-}
-
-/* The browser is reading an alert aloud (no amplitude available): a gentle speaking pulse. */
-.orb[data-local-speech='true'] .orb-pulse {
-  animation: lv-talk 0.9s var(--ease-in-out) infinite;
-}
-
-.orb-ghost {
-  transition: opacity 400ms var(--ease-in-out);
-}
-
-.orb[data-mode='offline'] .orb-ghost {
-  opacity: 0.72;
-}
-
-.orb-stop-hi {
-  stop-color: var(--orb-hi);
-}
-
-.orb-stop-core {
-  stop-color: var(--orb-core);
-}
-
-.orb-stop-deep {
-  stop-color: var(--orb-deep);
-}
-
-/* State colours: whole layers that cross-fade by opacity. */
-.orb-tint {
-  opacity: 0;
-  transition: opacity 400ms var(--ease-in-out);
-}
-
-.orb[data-mode='thinking'] .orb-tint-think,
-.orb[data-mode='alert'] .orb-tint-alert,
-.orb[data-mode='offline'] .orb-tint-off {
-  opacity: 1;
-}
-
-/* Speaking: the scalloped hem sways from where the sides end. */
-.orb-hem {
-  transform-box: view-box;
-  transform-origin: 100px 176px;
-}
-
-.orb[data-mode='speaking'] .orb-hem,
-.orb[data-local-speech='true'] .orb-hem {
-  animation: lv-ghost-hem 0.7s var(--ease-in-out) infinite;
-}
-
-.orb-sheen {
-  fill: rgb(255 255 255 / 0.5);
-  transform-box: fill-box;
-  transform-origin: center;
-  transform: rotate(-24deg);
-}
-
-.orb[data-mode='offline'] .orb-sheen {
-  opacity: 0.3;
-}
-
-/* Thinking: a light band sweeps across the body. */
-.orb-shimmer {
-  opacity: 0;
-  transition: opacity 400ms var(--ease-in-out);
-}
-
-.orb[data-mode='thinking'] .orb-shimmer {
-  opacity: 1;
-  animation: lv-ghost-shimmer 1.6s var(--ease-in-out) infinite;
-}
-
-.orb-eye {
-  fill: var(--orb-eye);
-  transform-box: fill-box;
-  transform-origin: center;
-  transition: transform var(--dur-base) var(--ease-out);
-}
-
-.orb-eyes {
-  transition: transform var(--dur-base) var(--ease-out);
-}
-
-.orb[data-mode='idle'] .orb-eye {
-  animation: lv-blink 5.6s steps(1, end) infinite;
-}
-
-.orb[data-mode='listening'] .orb-eye {
-  transform: scale(1.12);
-}
-
-/* Thinking: eyes look up and side to side. */
-.orb[data-mode='thinking'] .orb-eyes {
-  animation: lv-ghost-look 2.4s var(--ease-in-out) infinite;
-}
-
-.orb[data-mode='alert'] .orb-eye {
-  transform: scale(1.2);
-}
-
-/* Offline: eyes shut to short lines. */
-.orb[data-mode='offline'] .orb-eye {
-  transform: scale(1.25, 0.14);
-}
-
-@keyframes lv-ghost-float {
-  0%,
-  100% {
-    transform: translateY(1.5%);
-  }
-  50% {
-    transform: translateY(-2.5%);
-  }
-}
-
-@keyframes lv-ghost-ripple {
-  0% {
-    transform: scale(1);
-    opacity: 0.75;
-  }
-  100% {
-    transform: scale(1.4);
-    opacity: 0;
-  }
-}
-
-@keyframes lv-ghost-hem {
-  0%,
-  100% {
-    transform: skewX(0deg) scaleY(1);
-  }
-  25% {
-    transform: skewX(14deg) scaleY(1.08);
-  }
-  75% {
-    transform: skewX(-14deg) scaleY(1.08);
-  }
-}
-
-@keyframes lv-ghost-shimmer {
-  0% {
-    transform: translateX(0);
-  }
-  100% {
-    transform: translateX(260px);
-  }
-}
-
-@keyframes lv-ghost-look {
-  0%,
-  100% {
-    transform: translate(0, -4px);
-  }
-  30% {
-    transform: translate(-9px, -6px);
-  }
-  70% {
-    transform: translate(9px, -6px);
-  }
-}
-
-@keyframes lv-breathe {
-  0%,
-  100% {
-    transform: scale(0.97);
-  }
-  50% {
-    transform: scale(1.03);
-  }
-}
-
-@keyframes lv-blink {
-  0%,
-  95%,
-  100% {
-    transform: scaleY(1);
-  }
-  96%,
-  98% {
-    transform: scaleY(0.1);
-  }
-}
-
-@keyframes lv-spin {
-  to {
-    transform: rotate(1turn);
-  }
-}
-
-@keyframes lv-ripple {
-  0% {
-    transform: scale(0.95);
-    opacity: 0.75;
-  }
-  100% {
-    transform: scale(1.65);
-    opacity: 0;
-  }
-}
-
-@keyframes lv-talk {
-  0%,
-  100% {
-    transform: scale(1);
-  }
-  50% {
-    transform: scale(1.07);
   }
 }
 
@@ -1045,7 +735,7 @@ body:has(.lv-app) {
   width: min(100%, 360px);
   height: var(--size-control-lg);
   border: 0;
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-lg);
   background: var(--color-ghost);
   color: var(--color-ghost-ink);
   font-size: var(--text-md);
@@ -1103,7 +793,7 @@ body:has(.lv-app) {
   min-height: var(--size-control);
   padding: 0 var(--space-5);
   border: 1px solid var(--color-line-strong);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-control);
   background: transparent;
   color: var(--color-text);
   font-weight: 500;
@@ -1207,7 +897,7 @@ body:has(.lv-app) {
   height: var(--size-control);
   padding: 0 var(--space-4);
   border: 1px solid var(--color-line-strong);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-control);
   background: var(--color-raised);
   color: var(--color-text);
   font: inherit;
@@ -1232,7 +922,7 @@ body:has(.lv-app) {
   height: var(--size-control);
   padding: 0 var(--space-5);
   border: 1px solid var(--color-line-strong);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-control);
   background: var(--color-raised);
   color: var(--color-text);
   font-weight: 500;
@@ -1468,7 +1158,7 @@ body:has(.lv-app) {
   align-items: center;
   height: var(--size-tag);
   padding: 0 var(--space-2);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sm);
   background: var(--color-raised);
   color: var(--color-muted);
   font-size: var(--text-xs);
@@ -1590,7 +1280,7 @@ body:has(.lv-app) {
   min-height: var(--size-control-sm);
   padding: 0 var(--space-4);
   border: 1px solid var(--color-line);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-control);
   background: transparent;
   color: var(--color-muted);
   font-weight: 500;
@@ -1641,7 +1331,7 @@ body:has(.lv-app) {
   height: var(--size-control-sm);
   padding: 0 var(--space-4);
   border: 1px solid color-mix(in oklab, var(--color-ghost) 60%, transparent);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-control);
   background: var(--color-ghost);
   color: var(--color-ghost-ink);
   box-shadow: var(--shadow-2);
@@ -1685,7 +1375,7 @@ body:has(.lv-app) {
   animation-delay: calc(var(--i, 0) * var(--stagger));
 }
 
-/* "New" glow on the cards of the latest batch: an inset ring that fades out (opacity only). */
+/* "New" marker on the cards of the latest batch: a hairline that fades out (opacity only). No glow. */
 .lv-card-glow::before {
   content: '';
   position: absolute;
@@ -1693,7 +1383,7 @@ body:has(.lv-app) {
   border-radius: inherit;
   box-shadow: inset 0 0 0 1px var(--color-line-strong);
   opacity: 0;
-  animation: lv-glow var(--dur-glow) var(--ease-out);
+  animation: lv-glow 2.4s var(--ease-out);
   animation-delay: calc(var(--i, 0) * var(--stagger));
   pointer-events: none;
 }
@@ -1701,7 +1391,7 @@ body:has(.lv-app) {
 @keyframes lv-card-in {
   from {
     opacity: 0;
-    transform: translateY(calc(-1 * var(--space-2))) scale(0.985);
+    transform: translateY(calc(-1 * var(--space-2)));
   }
   to {
     opacity: 1;
@@ -1939,7 +1629,7 @@ body:has(.lv-app) {
 @keyframes lv-pop {
   from {
     opacity: 0;
-    transform: scale(0.4);
+    transform: scale(0.9);
   }
   to {
     opacity: 1;
@@ -2187,7 +1877,7 @@ body:has(.lv-app) {
   align-items: center;
   height: var(--size-tag);
   padding: 0 var(--space-2);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sm);
   background: var(--color-raised);
   color: var(--color-muted);
   font-size: var(--text-xs);
@@ -2233,7 +1923,7 @@ body:has(.lv-app) {
   color: var(--color-text);
 }
 
-/* ---- Brain "thinking" shimmer ------------------------------------------- */
+/* ---- Brain "thinking": a small dot pulses while the 0G request is in flight -- */
 
 .lv-thinking {
   display: flex;
@@ -2249,22 +1939,6 @@ body:has(.lv-app) {
   animation: lv-talk 0.9s var(--ease-in-out) infinite;
 }
 
-.lv-card[data-status='thinking']::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(90deg, transparent, var(--color-ghost-tint), transparent);
-  transform: translateX(-100%);
-  animation: lv-shimmer 1.6s var(--ease-in-out) infinite;
-  pointer-events: none;
-}
-
-@keyframes lv-shimmer {
-  to {
-    transform: translateX(100%);
-  }
-}
-
 /* ---- Skeletons (final dimensions) ------------------------------------------ */
 
 .lv-skeleton {
@@ -2278,7 +1952,7 @@ body:has(.lv-app) {
 .lv-skel-line {
   display: block;
   height: var(--space-3);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sm);
   background: var(--color-raised);
 }
 
@@ -2372,17 +2046,15 @@ body:has(.lv-app) {
 
 @media (prefers-reduced-motion: reduce) {
   .orb *,
-  .orb[data-mode] .orb-float,
   .orb[data-mode] .orb-eye,
   .orb[data-mode] .orb-eyes,
   .orb[data-mode] .orb-hem,
-  .orb[data-mode] .orb-shimmer,
   .orb[data-mode] .orb-ring,
   .orb[data-local-speech='true'] .orb-pulse,
   .lv-thinking-dot,
   .lv-pulse-skel,
   .lv-skeleton,
-  .lv-card[data-status='thinking']::after {
+  .lv-thinking-dot {
     animation: none !important;
   }
 
@@ -2393,7 +2065,7 @@ body:has(.lv-app) {
     transition: opacity 150ms linear !important;
   }
 
-  /* Static state cues instead of motion: one still ring, a centred shimmer band, eyes still. */
+  /* Static state cues instead of motion: one still ring, eyes still. */
   .orb[data-mode='alert'] .orb-ripple:not(.orb-ripple-2):not(.orb-ripple-3) {
     opacity: 0.7;
     transform: scale(1.12);
@@ -2401,10 +2073,6 @@ body:has(.lv-app) {
 
   .orb[data-mode='listening'] .orb-listen:not(.orb-listen-2) {
     opacity: 0.7;
-  }
-
-  .orb[data-mode='thinking'] .orb-shimmer {
-    transform: translateX(120px);
   }
 
   .lv-card-in,

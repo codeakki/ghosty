@@ -247,7 +247,7 @@ function AlertCard({ alert, labels, realUsd }: { alert: Alert; labels: Record<st
   return (
     <div className="lv-alert" role="alert" data-real={realUsd !== null ? 'true' : undefined}>
       <p className="lv-alert-kicker">
-        <span aria-hidden="true">●</span> {kicker} · confidence {formatConfidencePct(alert.confidence)}
+        {kicker} · confidence {formatConfidencePct(alert.confidence)}
       </p>
       <p className="lv-alert-leg">{legLine}</p>
       {alert.actions.length > 1 ? (
