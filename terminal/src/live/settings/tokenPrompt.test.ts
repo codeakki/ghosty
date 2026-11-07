@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { GhostyClient, loadSettings, type UnauthorizedInfo } from '../../api/client';
-import { AUTO_OPENED_KEY, commitSettings, initialTokenPrompt, rememberAutoOpened, tokenPromptReducer, type TokenPromptState } from './tokenPrompt';
+import { describeGuestError, GhostyClient, loadSettings, toResult, type UnauthorizedInfo } from '../../api/client';
+import { AUTO_OPENED_KEY, commitSettings, guestLabel, guestSettings, initialTokenPrompt, rememberAutoOpened, tokenPromptReducer, type TokenPromptState } from './tokenPrompt';
 
 const action: UnauthorizedInfo = { method: 'POST', path: '/button' };
 const poll: UnauthorizedInfo = { method: 'GET', path: '/alerts/next' };
@@ -104,5 +104,42 @@ describe('GhostyClient: 401 hook and live settings', () => {
     await new GhostyClient(current).button('cancel');
     const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
     expect((init.headers as Record<string, string>)['x-device-token']).toBe('tok-123');
+  });
+});
+
+describe('guest pass', () => {
+  it('stores the pass in the same settings slot with the guest scope, keeping the server URL', () => {
+    const next = guestSettings({ baseUrl: 'https://x', deviceToken: 'old' }, { token: 'a'.repeat(32), expiresAt: '2026-11-08T10:00:00.000Z' });
+    expect(next).toEqual({ baseUrl: 'https://x', deviceToken: 'a'.repeat(32), scope: 'guest', guestExpiresAt: '2026-11-08T10:00:00.000Z' });
+  });
+
+  it('labels the pass with what it allows and when it expires', () => {
+    const now = Date.parse('2026-11-07T10:00:00Z');
+    expect(guestLabel('2026-11-08T10:00:00Z', now)).toBe('Guest · questions only · expires in 24 h');
+    expect(guestLabel('2026-11-07T10:20:00Z', now)).toBe('Guest · questions only · expires in 20 min');
+    expect(guestLabel('2026-11-07T09:00:00Z', now)).toBe('Guest · pass expired');
+    expect(guestLabel(undefined, now)).toBe('Guest · questions only');
+  });
+
+  it('a saved guest pass survives a reload; an owner token never carries a scope', () => {
+    vi.stubGlobal('localStorage', memoryStorage());
+    commitSettings(guestSettings({ baseUrl: '', deviceToken: '' }, { token: 'b'.repeat(32), expiresAt: '2026-11-08T10:00:00.000Z' }), () => undefined);
+    expect(loadSettings()).toMatchObject({ scope: 'guest', deviceToken: 'b'.repeat(32) });
+    commitSettings({ baseUrl: '', deviceToken: 'owner' }, () => undefined);
+    expect(loadSettings().scope).toBeUndefined();
+    vi.unstubAllGlobals();
+  });
+
+  it('guest refusals and limits read as calm sentences', () => {
+    expect(describeGuestError('guest_forbidden')).toBe("Guests can ask questions; trading needs the owner's pod.");
+    expect(describeGuestError('guest_rate_limited', 1800)).toBe("That's the guest limit for this hour. Try again in 30 min.");
+    expect(describeGuestError('guest_daily_cap')).toMatch(/tomorrow/);
+  });
+
+  it('maps 429 guest_rate_limited to a guest failure with retryAfterSec; 401 guest_expired keeps its code', async () => {
+    const limited = await toResult(new Response(JSON.stringify({ error: 'guest_rate_limited', retryAfterSec: 120 }), { status: 429 }), () => null);
+    expect(limited).toMatchObject({ ok: false, kind: 'guest', code: 'guest_rate_limited', retryAfterSec: 120 });
+    const expired = await toResult(new Response(JSON.stringify({ error: 'guest_expired' }), { status: 401 }), () => null);
+    expect(expired).toMatchObject({ ok: false, kind: 'unauthorized', code: 'guest_expired' });
   });
 });

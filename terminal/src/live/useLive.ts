@@ -7,6 +7,7 @@ import { createBatcher, type Batcher } from './feed/batcher';
 import { applyBatch, initialFeed, type FeedAction, type FeedCard, type FeedFilter, type FeedState } from './feed/feedReducer';
 import { DEFAULT_MOVE_OPTIONS, thresholdFromSearch } from './feed/moveDetector';
 import { initialSim, simReducer } from './sim/simState';
+import { initialPodMirror, podMirrorReducer } from './device/podMirror';
 import { useSim } from './sim/useSim';
 
 /**
@@ -45,13 +46,22 @@ export function useLive(settings: ClientSettings, onUnauthorized?: (info: Unauth
   useEffect(() => () => batcherRef.current?.cancel(), []);
   // Simulation state folds the same stream (SSE `sim` events); it never feeds the live ticker.
   const [sim, simDispatch] = useReducer(simReducer, initialSim);
+  // The physical pod's state (SSE `pod`): the Device orb mirrors it while this browser is not in a turn.
+  const [pod, podDispatch] = useReducer(podMirrorReducer, initialPodMirror);
   const tap = useCallback(
     (action: FeedAction) => {
+      if (action.type === 'sse' && action.event === 'pod') return podDispatch({ type: 'pod', data: action.data, at: Date.now() });
       feedDispatch(action);
       if (action.type === 'sse' && action.event === 'sim') simDispatch(action);
     },
     [feedDispatch],
   );
+  // Safety net: a mode the pod never ended (lost power, dropped event) falls back to idle.
+  useEffect(() => {
+    if (pod.mode === 'idle' || !Number.isFinite(pod.until)) return;
+    const t = setTimeout(() => podDispatch({ type: 'pod/expire', at: Date.now() }), Math.max(0, pod.until - Date.now()));
+    return () => clearTimeout(t);
+  }, [pod]);
   const { state, client, actions, dispatch } = useTerminal(settings, tap, onUnauthorized);
   const simControls = useSim({
     client,
@@ -111,7 +121,7 @@ export function useLive(settings: ClientSettings, onUnauthorized?: (info: Unauth
   );
 
   const live = useMemo(() => ({ injectNews, voiceText, voice }), [injectNews, voiceText, voice]);
-  return { state, feed, client, actions, live, moveOptions, feedViewRef, sim, simControls };
+  return { state, feed, client, actions, live, moveOptions, feedViewRef, sim, simControls, pod };
 }
 
 export interface FeedView {

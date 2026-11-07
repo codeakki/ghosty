@@ -3,7 +3,7 @@ import { describeError, GhostyClient, type ClientSettings, type UnauthorizedInfo
 import type { ApiResult, SseEventType } from '../api/types';
 import { initialState, reducer, type Action } from './reducer';
 
-const SSE_EVENTS: SseEventType[] = ['state', 'news', 'decision', 'alert', 'order', 'episode', 'market', 'providers', 'sim'];
+const SSE_EVENTS: SseEventType[] = ['state', 'news', 'decision', 'alert', 'order', 'episode', 'market', 'providers', 'sim', 'pod'];
 
 const STATUS_POLL_MS = 5_000;
 const EXECUTION_POLL_MS = 30_000;

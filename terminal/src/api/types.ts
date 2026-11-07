@@ -393,7 +393,11 @@ export type ApiResult<T> =
   | { ok: true; data: T; status: number }
   | {
       ok: false;
-      kind: 'not_found' | 'not_configured' | 'brain_offline' | 'unauthorized' | 'http' | 'network' | 'parse';
+      kind: 'not_found' | 'not_configured' | 'brain_offline' | 'unauthorized' | 'guest' | 'http' | 'network' | 'parse';
+      /** Server error code (guest_forbidden, guest_rate_limited, guest_daily_cap, guest_issue_limited, guest_expired, ...). */
+      code?: string;
+      /** 429: seconds until a retry can succeed. */
+      retryAfterSec?: number;
       status: number;
       message: string;
       /** 503 not_configured: which provider and which env vars to set. */
@@ -403,7 +407,24 @@ export type ApiResult<T> =
 
 export type ApiFailure = Extract<ApiResult<unknown>, { ok: false }>;
 
-export type SseEventType = 'state' | 'news' | 'decision' | 'alert' | 'order' | 'episode' | 'market' | 'providers' | 'sim';
+export type SseEventType = 'state' | 'news' | 'decision' | 'alert' | 'order' | 'episode' | 'market' | 'providers' | 'sim' | 'pod';
+
+/** GET /access: whether guest passes are offered, and which scope the current token has. */
+export interface AccessInfo {
+  guestAccess: boolean;
+  guestSim: boolean;
+  guestTtlSec: number;
+  guestMaxPerHour: number;
+  scope: 'owner' | 'guest' | null;
+  expiresAt: string | null;
+}
+
+/** POST /guest/token. */
+export interface GuestPass {
+  token: string;
+  expiresAt: string;
+  ttlSec: number;
+}
 
 // ---------------------------------------------------------------------------
 // Simulation (NEW: /sim/scenarios, /sim/run, /sim/control, SSE `sim`, /episodes/replay)

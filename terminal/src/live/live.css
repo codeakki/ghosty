@@ -2597,3 +2597,94 @@ body:has(.lv-app) {
     animation-delay: 0s !important;
   }
 }
+
+/* ---- Guest pass + pod mirror ------------------------------------------------------------------------------- */
+
+.lv-token-banner-primary {
+  border-color: var(--color-ghost);
+  background: var(--color-ghost);
+  color: var(--color-ghost-ink);
+}
+
+.lv-token-banner-primary:hover {
+  background: var(--color-ghost);
+  opacity: 0.9;
+}
+
+.lv-token-banner-primary:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+@media (max-width: 479px) {
+  .lv-token-banner-text {
+    display: none;
+  }
+  .lv-token-banner[data-kind='guest'] .lv-token-banner-text {
+    display: block;
+  }
+}
+
+.lv-app .guest-pass {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: start;
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-line);
+}
+
+.lv-app .guest-pass-status {
+  color: var(--color-ghost);
+  font-size: var(--text-sm);
+}
+
+.lv-app .guest-pass-note {
+  color: var(--color-text);
+}
+
+/* Fixed-height line under the device label: fades in while the orb mirrors the physical pod (no layout shift). */
+.lv-pod-live {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 1.5em;
+  margin: 0;
+  color: var(--color-ghost);
+  font-size: var(--text-xs);
+  letter-spacing: 0.02em;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 240ms ease,
+    visibility 0s linear 240ms;
+}
+
+.lv-pod-live[data-on='true'] {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 240ms ease;
+}
+
+.lv-pod-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-ghost);
+  animation: lv-pod-live-blink 1.6s ease-in-out infinite;
+}
+
+@keyframes lv-pod-live-blink {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lv-pod-live,
+  .lv-pod-live[data-on='true'] {
+    transition: none;
+  }
+  .lv-pod-live-dot {
+    animation: none;
+  }
+}
