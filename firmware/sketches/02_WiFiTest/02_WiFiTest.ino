@@ -18,8 +18,8 @@
  *   - Brownout reset during connect = power problem (see hardware/wiring.md).
  */
 #include <GhostyBoard.h>
+#include <GhostyNet.h>
 #include <WiFi.h>
-#include <HTTPClient.h>
 #if __has_include(<secrets.h>)
 #include <secrets.h>
 #else
@@ -43,9 +43,8 @@ bool connectWiFi(uint32_t timeoutMs) {
 }
 
 void checkHealth() {
-  WiFiClient client;
   HTTPClient http;
-  http.begin(client, HEALTH_URL);
+  ghostyHttpBegin(http, HEALTH_URL);  // TLS when the URL is https://
   http.addHeader("X-Device-Token", GHOSTY_DEVICE_TOKEN);
   int code = http.GET();
   Serial.printf("[http] GET %s -> %d\n", HEALTH_URL, code);
