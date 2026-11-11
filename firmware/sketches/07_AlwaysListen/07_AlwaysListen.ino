@@ -161,6 +161,8 @@ size_t listen() {
   size_t voiced = START_CHUNKS * CHUNK;
   int quiet = 0;
   setRedLed(true);
+  // Web orb shows "listening" (background task, never delays recording).
+  ghostyPodStateAsync(GHOSTY_SERVER_URL "/pod/state", GHOSTY_DEVICE_TOKEN, "listening");
   while (n + CHUNK <= MAX_SAMPLES && quiet < END_QUIET_CHUNKS) {
     size_t got = readMic(i2s, pcm + n, CHUNK);
     if (got == 0) break;
@@ -271,6 +273,7 @@ int postOnce(const char *path, const uint8_t *body, size_t len, const char *cont
   http.addHeader("Content-Type", contentType);
   http.addHeader("X-Device-Token", GHOSTY_DEVICE_TOKEN);
   http.addHeader("X-Listen", "always");
+  http.addHeader("X-Ghosty-Client", "pod");  // the web orb mirrors pod turns only
   if (signId.length()) http.addHeader("X-Sign-Id", signId);
   int code = http.POST((uint8_t *)body, len);
 
@@ -369,6 +372,7 @@ void pollAnnouncement() {
   http.useHTTP10(true);
   http.setTimeout(20000);
   http.addHeader("X-Device-Token", GHOSTY_DEVICE_TOKEN);
+  http.addHeader("X-Ghosty-Client", "pod");
   int code = http.GET();
   if (code == 200) {
     Serial.println("[announce] signal from the server");
@@ -412,6 +416,7 @@ void loop() {
   }
   if (n == 0) {
     Serial.println("[vad] too short, ignored");
+    ghostyPodStateAsync(GHOSTY_SERVER_URL "/pod/state", GHOSTY_DEVICE_TOKEN, "idle");
     return;
   }
   sendVoice(n);

@@ -4,7 +4,8 @@ import type { LiveApi } from '../useLive';
 import { coinName, formatConfidencePct, formatUsdAmount, legText } from '../words';
 import { modeLabel, type DeviceState } from './machine';
 import { Orb } from './Orb';
-import { useDevice, voiceReadiness } from './useDevice';
+import { mirrorsPod, podLevelAt, podModeLabel } from './podMirror';
+import { useDevice, voiceReadiness, type LevelSource } from './useDevice';
 
 function isTypingTarget(t: EventTarget | null): boolean {
   if (!(t instanceof HTMLElement)) return false;
@@ -14,17 +15,17 @@ function isTypingTarget(t: EventTarget | null): boolean {
 function buttonLabel(s: DeviceState): string {
   switch (s.mode) {
     case 'idle':
-      return 'Hold to Talk';
+      return 'Hold to talk';
     case 'listening':
-      return 'Release to Send';
+      return 'Release to send';
     case 'thinking':
       return 'Thinking…';
     case 'speaking':
-      return 'Tap to Stop';
+      return 'Tap to stop';
     case 'alert':
-      return 'Tap to Confirm';
+      return 'Tap to confirm';
     case 'offline':
-      return 'Trading Paused';
+      return 'Trading paused';
   }
 }
 
@@ -39,6 +40,18 @@ export function DevicePage({ api, full = false }: { api: LiveApi; full?: boolean
   const [typing, setTyping] = useState(false);
   const showType = typing || voice.ready === false;
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Pod mirror: while the physical pod talks (and this browser does not), the orb follows it. The level comes from
+  // the reply's loudness envelope by time (or the pod's mic level), read per frame by the Orb's rAF loop.
+  const pod = api.pod;
+  const mirroring = mirrorsPod(pod, device.mode);
+  const orbMode = mirroring && pod.mode !== 'idle' ? pod.mode : device.mode;
+  const podRef = useRef(pod);
+  const orbLevelRef = useRef<LevelSource>(null);
+  useEffect(() => {
+    podRef.current = pod;
+    orbLevelRef.current = mirroring ? () => podLevelAt(podRef.current, Date.now()) : () => levelRef.current?.() ?? 0;
+  }, [pod, mirroring, levelRef]);
 
   // Space bar = hold to talk (desktop), ignored while typing in a field.
   useEffect(() => {
@@ -107,9 +120,14 @@ export function DevicePage({ api, full = false }: { api: LiveApi; full?: boolean
         Ghosty device
       </h2>
       <div className="lv-device-stage">
-        <Orb mode={device.mode} levelRef={levelRef} localSpeech={localSpeech} />
+        <Orb mode={orbMode} levelRef={orbLevelRef} localSpeech={localSpeech && !mirroring} mirroring={mirroring} />
         <p className="lv-device-state" aria-live="polite">
-          {modeLabel(device)}
+          {mirroring && pod.mode !== 'idle' ? podModeLabel(pod.mode) : modeLabel(device)}
+        </p>
+        {/* Always rendered (fixed height): fades in while mirroring, so nothing below moves. */}
+        <p className="lv-pod-live" data-on={mirroring ? 'true' : undefined} aria-hidden={!mirroring}>
+          <span className="lv-standby" aria-hidden="true" />
+          Live from the pod
         </p>
       </div>
 
@@ -151,14 +169,13 @@ export function DevicePage({ api, full = false }: { api: LiveApi; full?: boolean
           onContextMenu={(e) => e.preventDefault()}
           aria-describedby="talk-hint"
         >
-          <span className="lv-talk-dot" aria-hidden="true" />
           {buttonLabel(device)}
         </button>
         {/* One reserved slot: the hint normally, "Not Now" while an alert waits. Nothing below moves. */}
         <div className="lv-device-secondary">
           {device.mode === 'alert' ? (
             <button type="button" className="lv-btn-quiet" onClick={notNow} aria-describedby="talk-hint">
-              Not Now
+              Not now
             </button>
           ) : null}
           <p id="talk-hint" className={device.mode === 'alert' ? 'lv-sr-only' : 'lv-talk-hint'}>
@@ -211,7 +228,7 @@ export function DevicePage({ api, full = false }: { api: LiveApi; full?: boolean
         </form>
       ) : (
         <button type="button" className="lv-link-btn" onClick={() => setTyping(true)}>
-          Type Instead
+          Type instead
         </button>
       )}
     </section>
@@ -230,7 +247,7 @@ function AlertCard({ alert, labels, realUsd }: { alert: Alert; labels: Record<st
   return (
     <div className="lv-alert" role="alert" data-real={realUsd !== null ? 'true' : undefined}>
       <p className="lv-alert-kicker">
-        <span aria-hidden="true">●</span> {kicker} · confidence {formatConfidencePct(alert.confidence)}
+        {kicker} · confidence {formatConfidencePct(alert.confidence)}
       </p>
       <p className="lv-alert-leg">{legLine}</p>
       {alert.actions.length > 1 ? (

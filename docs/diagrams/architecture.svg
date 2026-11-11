@@ -1,0 +1,132 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="900" viewBox="0 0 960 900" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+<defs>
+<marker id="ahK" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#111"/></marker>
+<marker id="asK" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M10,0 L0,5 L10,10 z" fill="#111"/></marker>
+<marker id="ahA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#0b7a66"/></marker>
+<marker id="asA" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M10,0 L0,5 L10,10 z" fill="#0b7a66"/></marker>
+</defs>
+<rect x="0.75" y="0.75" width="958.5" height="898.5" rx="18" fill="#ffffff" stroke="#d0d7de" stroke-width="1.5"/>
+<text x="28" y="44" font-size="20" text-anchor="start" fill="#111" font-weight="700">Ghosty: system architecture</text>
+<rect x="24" y="70" width="216" height="500" rx="8" fill="#fff" stroke="#111" stroke-width="2"/>
+<text x="40" y="98" font-size="15.5" text-anchor="start" fill="#111" font-weight="700">GHOSTY POD (worn)</text>
+<rect x="38" y="114" width="188" height="196" rx="8" fill="#fff" stroke="#111" stroke-width="1.4"/>
+<text x="50" y="140" font-size="16" text-anchor="start" fill="#111" font-weight="700">ESP32-S3 N16R8</text>
+<text x="50" y="166" font-size="14.5" text-anchor="start" fill="#444" font-weight="400">WiFi + HTTPS</text>
+<text x="50" y="188" font-size="14.5" text-anchor="start" fill="#444" font-weight="400">INMP441 mic</text>
+<text x="50" y="210" font-size="14.5" text-anchor="start" fill="#444" font-weight="400">MAX98357A + speaker</text>
+<text x="50" y="232" font-size="14.5" text-anchor="start" fill="#444" font-weight="400">Button (GPIO15)</text>
+<text x="50" y="254" font-size="14.5" text-anchor="start" fill="#444" font-weight="400">16 kHz PCM audio</text>
+<text x="50" y="276" font-size="14.5" text-anchor="start" fill="#444" font-weight="400">No trading key</text>
+<line x1="80" y1="314" x2="80" y2="384" stroke="#0b7a66" stroke-width="1.6" marker-end="url(#ahA)" marker-start="url(#asA)"/>
+<text x="94" y="344" font-size="14.5" text-anchor="start" fill="#0b7a66" font-weight="700">UART 115200</text>
+<text x="94" y="364" font-size="14.5" text-anchor="start" fill="#0b7a66" font-weight="400">fields in, sig out</text>
+<rect x="38" y="388" width="188" height="168" rx="8" fill="#e8f5f2" stroke="#0b7a66" stroke-width="2"/>
+<text x="50" y="414" font-size="16" text-anchor="start" fill="#111" font-weight="700">Dabao signer</text>
+<text x="50" y="440" font-size="14.5" text-anchor="start" fill="#444" font-weight="400">Baochip-1x, RISC-V</text>
+<text x="50" y="462" font-size="14.5" text-anchor="start" fill="#444" font-weight="400">secp256k1 key in RRAM</text>
+<text x="50" y="484" font-size="14.5" text-anchor="start" fill="#444" font-weight="400">$15 per order</text>
+<text x="50" y="506" font-size="14.5" text-anchor="start" fill="#444" font-weight="400">$50 per day</text>
+<text x="50" y="528" font-size="14.5" text-anchor="start" fill="#444" font-weight="400">5-asset allowlist</text>
+<rect x="24" y="650" width="216" height="112" rx="8" fill="#fff" stroke="#111" stroke-width="1.4" stroke-dasharray="6 4"/>
+<text x="40" y="678" font-size="15.5" text-anchor="start" fill="#111" font-weight="700">WEARER</text>
+<text x="40" y="702" font-size="14.5" text-anchor="start" fill="#444" font-weight="400">speaks and listens;</text>
+<text x="40" y="724" font-size="14.5" text-anchor="start" fill="#444" font-weight="400">confirms alerts in</text>
+<text x="40" y="746" font-size="14.5" text-anchor="start" fill="#444" font-weight="400">the web Device view</text>
+<line x1="132" y1="646" x2="132" y2="574" stroke="#111" stroke-width="1.6" marker-end="url(#ahK)" marker-start="url(#asK)"/>
+<text x="144" y="616" font-size="14.5" text-anchor="start" fill="#444" font-weight="400">voice</text>
+<rect x="372" y="70" width="248" height="620" rx="10" fill="#111"/>
+<text x="386" y="98" font-size="16" text-anchor="start" fill="#fff" font-weight="700">GHOSTY SERVER</text>
+<text x="386" y="120" font-size="14.5" text-anchor="start" fill="#cfe9e3" font-weight="400">Node 22, TypeScript, Fastify</text>
+<rect x="382" y="136.0" width="228" height="48" rx="5" fill="#222" stroke="#3a3a3a"/>
+<text x="392" y="156.0" font-size="15" text-anchor="start" fill="#fff" font-weight="700">API + SSE</text>
+<text x="392" y="176.0" font-size="14.5" text-anchor="start" fill="#c9c9c9" font-weight="400">/voice /sign /button /events</text>
+<rect x="382" y="190.5" width="228" height="48" rx="5" fill="#222" stroke="#3a3a3a"/>
+<text x="392" y="210.5" font-size="15" text-anchor="start" fill="#fff" font-weight="700">Pipeline</text>
+<text x="392" y="230.5" font-size="14.5" text-anchor="start" fill="#c9c9c9" font-weight="400">pending alert, 120 s TTL</text>
+<rect x="382" y="245.0" width="228" height="48" rx="5" fill="#222" stroke="#3a3a3a"/>
+<text x="392" y="265.0" font-size="15" text-anchor="start" fill="#fff" font-weight="700">0G decider</text>
+<text x="392" y="285.0" font-size="14.5" text-anchor="start" fill="#c9c9c9" font-weight="400">plus safe-stop probe</text>
+<rect x="382" y="299.5" width="228" height="48" rx="5" fill="#222" stroke="#3a3a3a"/>
+<text x="392" y="319.5" font-size="15" text-anchor="start" fill="#fff" font-weight="700">Claude agent</text>
+<text x="392" y="339.5" font-size="14.5" text-anchor="start" fill="#c9c9c9" font-weight="400">answers, scout, orders</text>
+<rect x="382" y="354.0" width="228" height="48" rx="5" fill="#222" stroke="#3a3a3a"/>
+<text x="392" y="374.0" font-size="15" text-anchor="start" fill="#fff" font-weight="700">News + checks</text>
+<text x="392" y="394.0" font-size="14.5" text-anchor="start" fill="#c9c9c9" font-weight="400">shocks, odds, price moves</text>
+<rect x="382" y="408.5" width="228" height="48" rx="5" fill="#222" stroke="#3a3a3a"/>
+<text x="392" y="428.5" font-size="15" text-anchor="start" fill="#fff" font-weight="700">Payments</text>
+<text x="392" y="448.5" font-size="14.5" text-anchor="start" fill="#c9c9c9" font-weight="400">x402 client, caps, HCS</text>
+<rect x="382" y="463.0" width="228" height="48" rx="5" fill="#222" stroke="#3a3a3a"/>
+<text x="392" y="483.0" font-size="15" text-anchor="start" fill="#fff" font-weight="700">Executor</text>
+<text x="392" y="503.0" font-size="14.5" text-anchor="start" fill="#c9c9c9" font-weight="400">Hyperliquid + Uniswap leg</text>
+<rect x="382" y="517.5" width="228" height="48" rx="5" fill="#222" stroke="#3a3a3a"/>
+<text x="392" y="537.5" font-size="15" text-anchor="start" fill="#fff" font-weight="700">Signer hub</text>
+<text x="392" y="557.5" font-size="14.5" text-anchor="start" fill="#c9c9c9" font-weight="400">relays sign frames to pod</text>
+<rect x="382" y="572.0" width="228" height="48" rx="5" fill="#222" stroke="#3a3a3a"/>
+<text x="392" y="592.0" font-size="15" text-anchor="start" fill="#fff" font-weight="700">Memory + episodes</text>
+<text x="392" y="612.0" font-size="14.5" text-anchor="start" fill="#c9c9c9" font-weight="400">AES-256-GCM, prevRoot</text>
+<rect x="382" y="626.5" width="228" height="48" rx="5" fill="#222" stroke="#3a3a3a"/>
+<text x="392" y="646.5" font-size="15" text-anchor="start" fill="#fff" font-weight="700">Sim engine</text>
+<text x="392" y="666.5" font-size="14.5" text-anchor="start" fill="#c9c9c9" font-weight="400">historical replay, paper</text>
+<line x1="242" y1="150" x2="368" y2="150" stroke="#0b7a66" stroke-width="1.6" marker-end="url(#ahA)"/>
+<text x="306" y="140" font-size="14.5" text-anchor="middle" fill="#0b7a66" font-weight="700">POST /voice</text>
+<line x1="368" y1="220" x2="242" y2="220" stroke="#0b7a66" stroke-width="1.6" marker-end="url(#ahA)"/>
+<text x="306" y="210" font-size="14.5" text-anchor="middle" fill="#0b7a66" font-weight="700">PCM or 202</text>
+<line x1="242" y1="290" x2="368" y2="290" stroke="#0b7a66" stroke-width="1.6" marker-end="url(#ahA)"/>
+<text x="306" y="280" font-size="14.5" text-anchor="middle" fill="#0b7a66" font-weight="700">POST /sign</text>
+<rect x="372" y="730" width="248" height="120" rx="8" fill="#fff" stroke="#111" stroke-width="1.6"/>
+<text x="386" y="756" font-size="15.5" text-anchor="start" fill="#111" font-weight="700">WEB APP (React + Vite)</text>
+<text x="386" y="780" font-size="14.5" text-anchor="start" fill="#444" font-weight="400">/live /device /feed</text>
+<text x="386" y="802" font-size="14.5" text-anchor="start" fill="#444" font-weight="400">/simulate /pro</text>
+<text x="386" y="824" font-size="14.5" text-anchor="start" fill="#444" font-weight="400">served at / or on Vercel</text>
+<line x1="496" y1="726" x2="496" y2="694" stroke="#111" stroke-width="1.6" marker-end="url(#ahK)" marker-start="url(#asK)"/>
+<text x="508" y="716" font-size="14.5" text-anchor="start" fill="#111" font-weight="700">JSON API + SSE</text>
+<line x1="242" y1="740" x2="368" y2="778" stroke="#111" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#ahK)"/>
+<text x="250" y="800" font-size="14.5" text-anchor="start" fill="#444" font-weight="400">taps Confirm</text>
+<rect x="744" y="70" width="196" height="52" rx="6" fill="#fff" stroke="#111" stroke-width="1.2"/>
+<text x="754" y="91" font-size="15" text-anchor="start" fill="#111" font-weight="700">0G Compute</text>
+<text x="754" y="112" font-size="14.5" text-anchor="start" fill="#444" font-weight="400">decides; mainnet router</text>
+<line x1="624" y1="96" x2="740" y2="96" stroke="#111" stroke-width="1.6" marker-end="url(#ahK)" marker-start="url(#asK)"/>
+<rect x="744" y="130" width="196" height="52" rx="6" fill="#fff" stroke="#111" stroke-width="1.2"/>
+<text x="754" y="151" font-size="15" text-anchor="start" fill="#111" font-weight="700">0G Storage</text>
+<text x="754" y="172" font-size="14.5" text-anchor="start" fill="#444" font-weight="400">memory + episode log</text>
+<line x1="624" y1="156" x2="740" y2="156" stroke="#111" stroke-width="1.6" marker-end="url(#ahK)" marker-start="url(#asK)"/>
+<rect x="744" y="190" width="196" height="52" rx="6" fill="#fff" stroke="#111" stroke-width="1.2"/>
+<text x="754" y="211" font-size="15" text-anchor="start" fill="#111" font-weight="700">Claude Sonnet 5.5</text>
+<text x="754" y="232" font-size="14.5" text-anchor="start" fill="#444" font-weight="400">talks, scouts, orders</text>
+<line x1="624" y1="216" x2="740" y2="216" stroke="#111" stroke-width="1.6" marker-end="url(#ahK)" marker-start="url(#asK)"/>
+<rect x="744" y="250" width="196" height="52" rx="6" fill="#fff" stroke="#111" stroke-width="1.2"/>
+<text x="754" y="271" font-size="15" text-anchor="start" fill="#111" font-weight="700">Groq Whisper</text>
+<text x="754" y="292" font-size="14.5" text-anchor="start" fill="#444" font-weight="400">speech to text</text>
+<line x1="624" y1="276" x2="740" y2="276" stroke="#111" stroke-width="1.6" marker-end="url(#ahK)" marker-start="url(#asK)"/>
+<rect x="744" y="310" width="196" height="52" rx="6" fill="#fff" stroke="#111" stroke-width="1.2"/>
+<text x="754" y="331" font-size="15" text-anchor="start" fill="#111" font-weight="700">ElevenLabs</text>
+<text x="754" y="352" font-size="14.5" text-anchor="start" fill="#444" font-weight="400">text to speech (PCM)</text>
+<line x1="624" y1="336" x2="740" y2="336" stroke="#111" stroke-width="1.6" marker-end="url(#ahK)" marker-start="url(#asK)"/>
+<rect x="744" y="370" width="196" height="52" rx="6" fill="#fff" stroke="#111" stroke-width="1.2"/>
+<text x="754" y="391" font-size="15" text-anchor="start" fill="#111" font-weight="700">RSS, Polymarket, Ethos</text>
+<text x="754" y="412" font-size="14.5" text-anchor="start" fill="#444" font-weight="400">news, odds, credibility</text>
+<line x1="624" y1="396" x2="740" y2="396" stroke="#111" stroke-width="1.6" marker-end="url(#ahK)" marker-start="url(#asK)"/>
+<rect x="744" y="430" width="196" height="52" rx="6" fill="#e8f5f2" stroke="#0b7a66" stroke-width="1.6"/>
+<text x="754" y="451" font-size="15" text-anchor="start" fill="#111" font-weight="700">Signal Desk</text>
+<text x="754" y="472" font-size="14.5" text-anchor="start" fill="#444" font-weight="400">sells intel over x402</text>
+<line x1="624" y1="456" x2="740" y2="456" stroke="#0b7a66" stroke-width="1.6" marker-end="url(#ahA)" marker-start="url(#asA)"/>
+<rect x="744" y="490" width="196" height="52" rx="6" fill="#e8f5f2" stroke="#0b7a66" stroke-width="1.6"/>
+<text x="754" y="511" font-size="15" text-anchor="start" fill="#111" font-weight="700">Hedera testnet</text>
+<text x="754" y="532" font-size="14.5" text-anchor="start" fill="#444" font-weight="400">USDC/HBAR, mirror, HCS</text>
+<line x1="624" y1="516" x2="740" y2="516" stroke="#0b7a66" stroke-width="1.6" marker-end="url(#ahA)" marker-start="url(#asA)"/>
+<rect x="744" y="550" width="196" height="52" rx="6" fill="#e8f5f2" stroke="#0b7a66" stroke-width="1.6"/>
+<text x="754" y="571" font-size="15" text-anchor="start" fill="#111" font-weight="700">Hyperliquid</text>
+<text x="754" y="592" font-size="14.5" text-anchor="start" fill="#444" font-weight="400">perps on mainnet</text>
+<line x1="624" y1="576" x2="740" y2="576" stroke="#0b7a66" stroke-width="1.6" marker-end="url(#ahA)" marker-start="url(#asA)"/>
+<rect x="744" y="610" width="196" height="52" rx="6" fill="#fff" stroke="#111" stroke-width="1.2"/>
+<text x="754" y="631" font-size="15" text-anchor="start" fill="#111" font-weight="700">Uniswap API</text>
+<text x="754" y="652" font-size="14.5" text-anchor="start" fill="#444" font-weight="400">spot leg on Base</text>
+<line x1="624" y1="636" x2="740" y2="636" stroke="#111" stroke-width="1.6" marker-end="url(#ahK)" marker-start="url(#asK)"/>
+<rect x="744" y="670" width="196" height="52" rx="6" fill="#fff" stroke="#111" stroke-width="1.2"/>
+<text x="754" y="691" font-size="15" text-anchor="start" fill="#111" font-weight="700">Binance data</text>
+<text x="754" y="712" font-size="14.5" text-anchor="start" fill="#444" font-weight="400">historical candles</text>
+<line x1="624" y1="696" x2="740" y2="696" stroke="#111" stroke-width="1.6" marker-end="url(#ahK)" marker-start="url(#asK)"/>
+<line x1="920" y1="482" x2="920" y2="488" stroke="#0b7a66" stroke-width="1.6" marker-end="url(#ahA)"/>
+<line x1="28" y1="874" x2="58" y2="874" stroke="#0b7a66" stroke-width="3"/>
+<text x="66" y="879" font-size="14.5" text-anchor="start" fill="#444" font-weight="400">hardware key boundary and paid-intel path. Networks shown are the hosted server's config.</text>
+</svg>

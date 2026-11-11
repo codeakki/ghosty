@@ -1,275 +1,119 @@
-# Ghosty
+<p align="center">
+  <img src="docs/brand/ghosty-cover.png" alt="Ghosty" width="720" />
+</p>
 
-Ghosty is a wearable ESP32 voice pod that hosts a private, user-owned trading copilot. It reads the news for you, scores how credible each signal is, speaks an alert through its own speaker, and executes the trade from its own wallet when you press one button. The decision loop runs on 0G Compute, every decision is logged to 0G Storage, before each shock decision the agent buys a headline-intelligence bundle from an independent x402 merchant on Hedera (USDC or HBAR, verified on chain, logged to an HCS topic), and trades go to Hyperliquid perps (with a Uniswap spot leg). If the 0G brain is unreachable, the pod says so and refuses to trade.
+<h3 align="center">Market intelligence. Trades only when you press.</h3>
 
-Built at ETHGlobal Mumbai, Nov 6–8 2026.
+<p align="center">
+  <a href="https://ghosty-sepia.vercel.app"><b>Live app</b></a> ·
+  <a href="https://ghosty-sepia.vercel.app/device"><b>Device</b></a> ·
+  <a href="hardware/photos/ghosty-flow.mp4"><b>Demo video</b></a> ·
+  <a href="docs/architecture.md"><b>Architecture</b></a> ·
+  <a href="docs/evidence.md"><b>Evidence</b></a>
+</p>
+
+---
 
 ## Demo
 
-> Demo video and GIF go here before submission.
+![How a headline becomes a trade](hardware/photos/ghosty-flow.gif)
 
-<!-- TODO: add hardware/photos/demo.gif and uncomment
-![Ghosty demo](hardware/photos/demo.gif)
--->
+Headlines and market odds stream in all day. Ghosty keeps the one headline that matters, decides what to do and writes that decision down before it says a word. The pod tells you in plain words, and nothing trades until you press the button. No press, no trade. Narrated version: [hardware/photos/ghosty-flow.mp4](hardware/photos/ghosty-flow.mp4).
 
-- Video (≤ 3 min): _TODO link_
-- HashScan x402 payment (agent buys intel before a 0G decision, 0.01 USDC, mirror-verified): [0.0.9185802@1793984888.876950864](https://hashscan.io/testnet/transaction/0.0.9185802-1793984888-876950864) · HCS audit topic: [0.0.11342727](https://hashscan.io/testnet/topic/0.0.11342727) · walkthrough: [docs/hedera.md](docs/hedera.md)
-- 0G Storage episode log: _TODO root hash / storagescan link_
+## What it is
+
+Ghosty is a small voice pod plus a server that does the heavy lifting. It reads market news for you, scores how credible each headline is, and speaks up when something moves gold, oil, crypto or stocks. Each alert decision is made on 0G Compute, logged to 0G Storage and a public Hedera topic, and informed by a second opinion the agent buys itself over x402. Trades go to Hyperliquid, with an optional Uniswap spot leg on Base, and only after you press the button.
+
+Built at ETHGlobal Mumbai, Nov 6 to 8, 2026.
 
 ## How it works
 
-```
-[ESP32-S3 pod] --WAV over HTTP POST---> [server: Fastify/Express TS]
-   button GPIO15                        ├─ STT (Groq whisper; 0G Whisper if router exposes audio)
-   INMP441 mic  GPIO4/5/6                ├─ news ingest: RSS (CoinDesk/Cointelegraph/TheBlock/Decrypt),
-   MAX98357A amp GPIO4/5/7               │    CryptoPanic, Polymarket Gamma, Grok x_search (optional)
-   speaker, LiPo→TP4056→5V boost         ├─ credibility: Ethos score per handle/address (optional)
-                                         ├─ decision loop: 0G Compute chat completion (request ID logged)
-<--raw PCM s16le 16k over HTTP--         ├─ memory: encrypted (AES-256) blobs on 0G Storage; episode log per decision
-                                         ├─ payments: x402 client buys intel from the Signal Desk (USDC/HBAR on Hedera testnet)
-                                         ├─ execution: Hyperliquid API wallet (@nktkas/hyperliquid) opens perp
-                                         │    (xyz:GOLD / xyz:WTI long, BTC short) — main venue
-                                         ├─ spot leg: viem + Uniswap Trading API (Arbitrum/Base) swap → USDC
-                                         │    before funding, or USDC → PAXG safe-haven (Uniswap track)
-                                         └─ safe-stop: if 0G unreachable → speak "brain offline", block trade
-```
+<p align="center">
+  <img src="docs/diagrams/architecture.svg" alt="Ghosty architecture: pod with ESP32-S3 and Dabao signer, server modules, external services" width="100%" />
+</p>
 
-1. The server ingests news and prediction-market moves, then weights each item by source credibility.
-2. A 0G Compute call decides whether the signal is actionable and which playbook applies (for example, a geopolitical shock maps to long gold / oil perps and short BTC).
-3. The server synthesizes a short spoken alert and streams it to the pod as raw PCM.
-4. The user presses the button. The server places the order on **Hyperliquid** (main venue; HIP-3 markets on trade.xyz cover gold, oil, and stock perps 24/7) and runs the spot leg through the **Uniswap** Trading API.
-5. The decision, its 0G request ID, and the result are written as an episode to **0G Storage**.
+- **A headline lands.** The server polls RSS and Polymarket every 60 s, and a shock detector flags the ones that matter.
+- **Ghosty buys a second opinion.** Its Hedera agent wallet pays the Signal Desk 0.01 USDC over x402 for an intel bundle (source credibility, outlet count, severity).
+- **0G decides.** The headline, recent news, your memory and the paid bundle go to 0G Compute, which returns a signal, a confidence and legs sized to your cap.
+- **Logged before it is spoken.** The decision goes to 0G Storage as an episode and to the Hedera audit topic.
+- **The pod speaks and waits.** "Geopolitical shock. I suggest long gold. Press to confirm." Nothing trades without a press within 120 s.
+- **Or just ask.** Speech to text, a research assistant that answers questions, and a voice reply. Spoken orders go through the same signer and limits.
 
-Full detail: [docs/architecture.md](docs/architecture.md).
+More: [docs/architecture.md](docs/architecture.md)
 
 ## Hardware
 
-### Bill of materials
-
-| Part | Qty | Purpose | Status |
-|---|---|---|---|
-| ESP32-S3 N16R8 dev board | 1 | Main MCU, WiFi, 16 MB flash, 8 MB PSRAM, USB-C flashing | Bought |
-| INMP441 I2S MEMS mic | 1 | Voice input | Bought |
-| MAX98357A I2S amp | 1 | Speaker driver | Bought |
-| Mini speaker | 1 | Voice output | Bought |
-| 3.7 V 500 mAh LiPo | 1 | Battery | Bought |
-| TP4056 charger | 1 | LiPo charging and protection | Bought |
-| Push button | 1 | Push-to-talk and trade confirm | Bought |
-| 5 V boost converter | 1 | Lift LiPo to 5 V for the board and amp | To buy |
-| 470–1000 µF capacitor | 1 | Absorb WiFi and audio current spikes | To buy |
-| Vibration motor + 2N2222 + 1 kΩ + 1N4148 | 1 set | Haptic alert (optional) | To buy |
-| Slide switch | 1 | Power switch (optional) | To buy |
-
-Full list with notes: [hardware/BOM.md](hardware/BOM.md).
-
-### Wiring
-
-| Module | Module pin | ESP32-S3 pin |
-|---|---|---|
-| INMP441 | VDD / GND / L/R | 3V3 / GND / GND |
-| INMP441 | SCK / WS / SD | GPIO4 / GPIO5 / GPIO6 |
-| MAX98357A | VIN / GND | 3V3 on USB power (5V pin is dead on many clones) / GND |
-| MAX98357A | BCLK / LRC / DIN | GPIO4 / GPIO5 / GPIO7 |
-| Speaker | + / − | Amp + / − |
-| Button | one leg / other leg | GPIO15 / GND (`INPUT_PULLUP`) |
-| LiPo | + / − | TP4056 B+ / B− |
-| TP4056 | OUT+ / OUT− | 5 V boost in → boost out to 5V / GND |
-
-Mic and amp share one I2S port in full duplex: BCLK and WS are common, data runs on separate pins, 16 kHz with 32-bit slots.
-
-> **Warning: pins to avoid**
-> - **GPIO0, GPIO3, GPIO45, GPIO46** are strapping pins. Leave them free.
-> - **GPIO19 / GPIO20** are the native USB port. **GPIO26–37** are flash and octal PSRAM.
-> - **GPIO17 / GPIO18** are kept free for the Dabao UART link.
-
-> **Power note:** a LiPo (3.0–4.2 V) on the 5V pin browns out under WiFi plus audio. Use LiPo → TP4056 → 5 V boost → 5V pin, feed the amp VIN from the boost, and add a 470–1000 µF capacitor across 5V/GND. On USB power the 5V pin of many N16R8 clones outputs nothing, so feed the amp from 3V3 there.
-
-Full guide with power and test order: [hardware/wiring.md](hardware/wiring.md). Measured results and fixes from the first ESP32-S3 bring-up: [hardware/bringup-esp32s3.md](hardware/bringup-esp32s3.md). Ghost enclosure (STL files): [hardware/enclosure/](hardware/enclosure/README.md).
-
-## Firmware quick start
-
-1. Install **Arduino IDE 2.x**.
-2. In *Preferences → Additional boards manager URLs* add:
-   `https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json`
-3. *Boards Manager* → install **esp32 by Espressif** (CI uses core 3.3.12).
-4. Select board **ESP32S3 Dev Module**, Flash Size **16MB**, PSRAM **OPI PSRAM**, USB CDC On Boot **Disabled**. On Windows you may need the CH343 / CH340 USB driver.
-5. Link the shared library into your sketchbook:
-   ```bash
-   ./firmware/scripts/link-lib.sh
-   ```
-6. Create your secrets file (gitignored):
-   ```bash
-   cp firmware/libraries/GhostyBoard/src/secrets.h.example firmware/libraries/GhostyBoard/src/secrets.h
-   # edit WiFi SSID/password and server URL
-   ```
-7. Open `firmware/sketches/01_Blink/01_Blink.ino` and upload. Work through the sketches in order.
-
-Flashing: plug into the board's **COM** USB-C port. It enters download mode by itself.
-
-## Server quick start
-
-Requires Node 22+ and npm.
-
-```bash
-cd server
-cp .env.example .env   # fill in keys as you need each provider
-npm ci
-npm run doctor         # which providers are live, and the exact URL for each missing key
-npm run dev            # or: npm run start:live (build + start)
-curl localhost:3000/health
-```
-
-### Live mode vs test mode
-
-The server runs on **real data only**. `GHOSTY_MODE=live` is the default: each provider is the real implementation when its keys are in `server/.env` (template: [`server/.env.example`](server/.env.example)), and otherwise answers `503 {"error":"not_configured","provider","missingEnv"}`. Nothing is faked: without `OG_API_KEY` there is no brain, so safe-stop is engaged and no decision is made. Keyless sources are on by default in live mode: RSS + Polymarket news (`NEWS_LIVE=true`), Ethos credibility (`ETHOS_ENABLED=true`) and Hyperliquid market data.
-
-`GHOSTY_MODE=test` is set by `npm test` only. It swaps in deterministic offline fakes (tone TTS, keyword decider, fake venue, canned headlines) so the suite never touches the network.
-
-| Provider | Keys that enable it | Where to get them | Live mode without them |
-|---|---|---|---|
-| Speech-to-text (Groq Whisper) | `GROQ_API_KEY` | https://console.groq.com/keys | `/voice` answers `503 not_configured` |
-| Text-to-speech (ElevenLabs) | `ELEVENLABS_API_KEY` (optional `ELEVENLABS_VOICE_ID`) | https://elevenlabs.io/app/settings/api-keys | OpenAI TTS if `OPENAI_API_KEY` is set, else `503 not_configured` |
-| Text-to-speech fallback (OpenAI) | `OPENAI_API_KEY` | https://platform.openai.com/api-keys | Optional |
-| Live news (RSS + Polymarket) | none (`NEWS_LIVE=true` by default) | n/a | Polymarket is blocked on many Indian ISPs: it shows `offline` |
-| CryptoPanic | `CRYPTOPANIC_TOKEN` | https://cryptopanic.com/developers/api/ | Left out of the feed |
-| Grok x_search (X posts) | `XAI_API_KEY` | https://console.x.ai | Left out of the feed |
-| Ethos credibility | none (`ETHOS_ENABLED=true` by default) | n/a | Weights unknown if disabled |
-| 0G Compute decider | `OG_API_KEY` (+ `OG_ROUTER_URL`, `OG_MODEL`) | https://pc.0g.ai (mainnet) or https://pc.testnet.0g.ai | Safe-stop: `503 brain_offline`, no decision |
-| 0G Storage memory + episode log | `OG_PRIVATE_KEY` (optional `OG_MEMORY_KEY`) | Any EVM key, funded at https://faucet.0g.ai | `503 not_configured` |
-| Hedera agent wallet (x402 payer) + HCS audit | `HEDERA_ACCOUNT_ID`, `HEDERA_PRIVATE_KEY`, `HEDERA_HCS_TOPIC_ID`, `HEDERA_HCS_SUBMIT_KEY` (written by `npm run hedera:setup` from `HEDERA_TREASURY_*`, see [docs/hedera.md](docs/hedera.md#4-accounts-and-keys)) | https://portal.hedera.com (testnet faucet) | `/sim/pay-signal` answers `503 not_configured` |
-| Signal Desk merchant (`npm run signal-desk`) | `X402_PAY_TO` (a **second** testnet account, USDC-associated by `npm run hedera:setup`) | https://portal.hedera.com | desk answers `503 payments_not_configured` |
-| Hyperliquid perps | `HL_MASTER_ADDRESS`, `HL_AGENT_PRIVATE_KEY` (+ `HL_TESTNET`, `HL_DEXES`, `HL_FALLBACK_COINS`) | API wallet approved at https://app.hyperliquid-testnet.xyz/API | Confirm answers `503 not_configured`; market listing stays real |
-| Uniswap spot leg | `UNISWAP_API_KEY`, `EVM_PRIVATE_KEY`, `UNISWAP_SPOT_LEG=true` (+ `EVM_RPC_URL`, `EVM_CHAIN_ID`) | https://developers.uniswap.org/dashboard | Spot step fails with `not_configured` |
-
-**Doctor.** `npm run doctor` loads `server/.env`, runs the same probes as `GET /providers/status`, and prints a table per track (state, detail, missing env, next action with the URL to get the key). It never prints secrets and always exits 0.
-
-**Terminal.** `GET /providers/status` (provider health), `GET /market/snapshot` and `GET /market/history` (Hyperliquid prices with no keys; `MARKET_DATA_NETWORK=mainnet` by default for display, orders follow `HL_TESTNET`), plus SSE `providers` and `market` events on `/events`. When `terminal/dist/index.html` exists the server serves the terminal at `/` (`TERMINAL_DIST` overrides the path); CORS allows the Vite dev server at `http://localhost:5173` in live mode. See [docs/api.md](docs/api.md#terminal-providers-and-market-data).
-
-Status endpoints show which mode each integration is in: `GET /zerog/status`, `GET /x402/status`, `GET /execution/markets` (see [docs/api.md](docs/api.md#integration-status)). Pre-flight checks: `npm run doctor`, `npm run hl:check` (Hyperliquid markets and margin, read-only) and `npm run hedera:setup` (idempotent custody split: treasury, agent hot wallet, USDC association, HCS topic) and `npm run x402:demo` (one real intel purchase from the Signal Desk, appended to [docs/evidence.md](docs/evidence.md)).
-
-No pod yet? Open http://localhost:3000/sim for the virtual pod (hold-to-talk, inject headlines, confirm trades, live state), or use `npm run pod -- help`. See [docs/simulator.md](docs/simulator.md).
-
-## Live view (web UI)
-
-No hardware yet, so the web UI stands in for the pod. Open it and you see two things: **the device** (a ghost orb that listens, thinks on 0G, speaks and alerts, with one big button) and **the feed** (cards that keep popping in: market moves, headlines, the agent's decisions, transactions). Everything comes from the running server; nothing is made up.
-
-![Ghosty Live view: device on the left, live feed on the right](docs/assets/ui-split.png)
-
-| Route | What it is |
-|---|---|
-| `/` | Landing page: what Ghosty is, features, how it works, the sponsor stack. "Open the app" goes to `/live` |
-| `/live` | Split view: Device (left) + Feed (right). Stacks on phones, device first |
-| `/device` | The pod, full screen. Open it on a phone as the pod stand-in |
-| `/feed` | The feed only |
-| `/simulate` | Replay a real past shock through the real 0G brain (paper, or opt-in real Hyperliquid mainnet orders) |
-| `/pro` | The dense terminal (every panel at once, described below). Not in the navbar; open it by URL |
-
-```bash
-# terminal 1: the server (port 3000)
-cd server && npm run dev
-# terminal 2: the web UI (http://localhost:5173, proxies API calls to the server)
-cd terminal && npm i && npm run dev
-```
-
-**Device.** Hold the button (or the space bar) to talk: the orb follows your mic level, then "Thinking on 0G…", then speaks the reply with the orb pulsing to the audio. When an alert arrives the orb ripples amber, chimes, buzzes (where the phone supports it) and reads the alert; a tap confirms the trade, "Not now" cancels. Without `GROQ_API_KEY` + `ELEVENLABS_API_KEY` it says so and you can type instead.
-
-**Feed cards.** *Market move* (a watched asset moved ≥ 0.25% in 60 s or broke its 1 h high/low, at most one card per asset per 2 min), *Headline* (source, age, Ethos credibility, shock tag, Polymarket odds), *Ghosty · 0G* (thinking, then the decision with confidence, rationale, suggested legs and the 0G request id, or why there was no decision), *Alert* (what the pod was told), *Transactions* (Hyperliquid orders, Uniswap swaps, Hedera x402 payments, 0G Storage episodes, with explorer links and a track label) and *System* (providers going on/offline, safe-stop). Filter with the chips; hover or scroll down to pause, then "N New" jumps back. `?moveThreshold=0.05` lowers the move threshold for a demo (the feed header flags it).
-
-Design system, references and tokens: [docs/design/ghosty-design.md](docs/design/ghosty-design.md).
-
-<p>
-  <img src="docs/assets/ui-device-mobile.png" alt="The device page on a phone: ghost orb, Hold to Talk button" width="260" />
-  <img src="docs/assets/ui-feed.png" alt="The feed page: live prices, filter chips and market move cards" width="560" />
+<p align="center">
+  <img src="docs/diagrams/hardware.svg" alt="Pod wiring: INMP441 mic, MAX98357A amp, button, ESP32-S3, Dabao over UART, planned battery path" width="100%" />
 </p>
 
-## Terminal (`/pro`)
+- **ESP32-S3 pod.** Handles WiFi, records and plays audio, and relays signing frames. It holds a device token, never a trading key.
+- **Mic, speaker, button.** INMP441 mic and MAX98357A amp on one I2S port, a 40 mm speaker and a push button.
+- **Dabao signer on UART.** A separate chip (Baochip-1x) holds the Hyperliquid API-wallet key, checks every order against its own limits (5 assets, $15 per order, $50 per day) and only then signs.
+- Parts and wiring: [hardware/BOM.md](hardware/BOM.md), [hardware/wiring.md](hardware/wiring.md), [firmware/README.md](firmware/README.md).
 
-The dense market intelligence terminal drives and explains the whole system in one screen, with or without the pod.
+## Sponsors we integrated
 
-![Ghosty terminal: pipeline strip, alert, signal card, provider health and proof log](docs/assets/terminal.png)
+### 0G
 
-Point the UI at another server with `VITE_GHOSTY_URL=http://192.168.1.50:3000 npm run dev`, or set the server URL and device token under **Settings** in `/pro` (kept in the browser). `npm run build` writes `terminal/dist/` for the server to serve at `/`.
+- **Compute is the decision brain.** Every alert decision is a 0G Compute call with its own request ID. If 0G is unreachable, the pod says so and refuses alert trades (safe-stop).
+- **Storage is the memory.** Your memory is encrypted (AES-256-GCM) on 0G Storage, and each decision is an episode chained to the previous one by `prevRoot`, so the history can be replayed and checked.
+- **Why it matters:** the brain and the record of what it decided do not live on our server alone.
+- **Evidence:** decision `bb6d851f-34c9-41f5-8a83-b7f755059320` (made with paid intel) in [HCS topic 0.0.11342727](https://hashscan.io/testnet/topic/0.0.11342727), message #3. On-chain Storage episode root: pending.
 
-| Panel | What it shows |
-|---|---|
-| Top bar | Network (testnet / mainnet), brain status (0G live, stub, or safe-stop), x402 spend today against the cap, UTC and IST clocks, the safe-stop switch, settings |
-| Pipeline strip | News → Credibility → 0G Brain → Alert → Confirm → Execute → Log → Pay. Each stage lights up as its event arrives and shows the latest value or id. Hover or click a stage for a one-line explanation and the sponsor it maps to. `STUB` marks a stage that ran on a stand-in because its keys are not set |
-| News tape | Headlines with source, age, Ethos or source-table credibility and a shock tag (WAR, STRIKE, SANCTION, HACK, DEPEG). The "manual test headline" box runs the real pipeline on your own headline |
-| Signal | The latest decision: signal, confidence, rationale, the order ticket (venue, market, side, size) and Confirm / Cancel buttons that mirror the pod's one button |
-| Market watch | Hyperliquid mids, 24 h change, funding, open interest and a 24 h sparkline for BTC, ETH, gold, oil, stocks (from `/market/snapshot`, `/market/history` and the SSE `market` event) |
-| Provider health | Every integration grouped by track (0G, Hedera, Uniswap, Hyperliquid, Data, Audio) with a state and the env vars still missing |
-| Proof log | Evidence for judges, newest first: 0G request ids, 0G Storage roots, Hedera x402 transactions (HashScan), Hyperliquid orders, Uniswap swaps. Simulated ids are labelled and never linked |
-| Virtual pod | Hold to talk (button or space bar): records 16 kHz mono WAV, posts it to `/voice`, plays the PCM reply and shows transcript, signal, request id and latency. You can also type a question |
-| Event console | Every SSE event and terminal action, filterable by type |
+### Hedera
 
-No placeholder data: when a provider is missing the panel says so (for example "Not configured: set GROQ_API_KEY" or "Brain offline: trading blocked (safe-stop)").
+- **x402 payments.** Before each shock decision the agent wallet pays the Signal Desk, a separate merchant, in USDC (an HTS token) or HBAR, with no human approval and inside per-call and daily caps.
+- **Verified and logged.** Ghosty re-checks each payment on the mirror node, then writes the payment and the decision to a public HCS audit topic.
+- **Custody split.** The treasury key stays on the operator laptop; the server holds only a small agent hot wallet and an HCS submit key.
+- **Why it matters:** the agent pays for its own information, and anyone can audit what it paid and decided.
+- **Evidence:** [0.01 USDC payment](https://hashscan.io/testnet/transaction/0.0.9185802-1793984888-876950864), [0.01 HBAR payment](https://hashscan.io/testnet/transaction/0.0.9185802-1793984930-617250384), [audit topic](https://hashscan.io/testnet/topic/0.0.11342727). Walkthrough: [docs/hedera.md](docs/hedera.md).
 
-## Sketch roadmap
+### Uniswap
 
-| # | Sketch | What it proves | Status |
-|---|---|---|---|
-| 01 | `01_Blink` | Toolchain and upload work (heartbeat and PSRAM on serial) | Scaffolded |
-| 02 | `02_WiFiTest` | WiFi joins with `secrets.h` | Scaffolded |
-| 03 | `03_MicTest` | INMP441 over full-duplex I2S, RMS level meter | Scaffolded |
-| 04 | `04_SpeakerTest` | MAX98357A plays a sine tone | Scaffolded |
-| 05 | `05_RecordPlayback` | 5 s recorded into PSRAM and played back | Scaffolded |
-| 06 | `06_CloudVoice` | Hold button → POST WAV → stream PCM reply | Skeleton |
+- **Spot leg on Base.** A confirmed alert can run a spot swap from native ETH to USDC through the Uniswap Trading API (approval check, quote, Permit2, swap).
+- **Why it matters:** one press can move spot funds and open the hedge in the same flow.
+- **Evidence:** code in [server/src/wallet/uniswap.ts](server/src/wallet/uniswap.ts), notes in [FEEDBACK.md](FEEDBACK.md). Swap tx: pending.
 
-"Scaffolded" means it compiles in CI but has not yet been verified on the team's hardware.
+### Also used
 
-## API contract
+- **Hyperliquid:** the execution venue for perps, including HIP-3 gold, oil and stocks. Ghosty trades through an API wallet that can trade but cannot withdraw.
+- **Dabao chip:** the separate signer that keeps the trading key off the networked pod and the server.
+- **Ethos and Polymarket:** source credibility scores and market odds that feed the news scout.
 
-| Method | Path | Request | Response |
-|---|---|---|---|
-| `GET` | `/health` | — | `{"ok":true,"version":"0.1.0","safeStop":false}`; `safeStop: true` = 0G unreachable, trading blocked |
-| `POST` | `/voice` | WAV body (16 kHz, 16-bit, mono) as `audio/wav` or `application/octet-stream`; `X-Device-Token` when `DEVICE_TOKEN` is set | `200 application/octet-stream`: raw PCM s16le, 16 kHz, mono, with headers `x-sample-rate`, `x-request-id`, `x-signal`. `400` bad WAV, `401` bad token, `503 {"error":"brain_offline"}` (no audio) |
-| `POST` | `/button` | JSON `{"action":"confirm"\|"cancel"}`, same token header | `200 {action, requestId, signal, executed, actions, orders}`; only confirms an alert you have heard. `409 nothing_pending` when nothing is pending, `409 alert_expired` after `PENDING_DECISION_TTL_SEC`; `400`, `401`, `503 brain_offline` |
+## Safety
 
-The device streams the PCM reply straight to I2S in 1–2 KB chunks. No MP3 decoding on the device. On `503` (safe-stop) the pod plays nothing and blinks the red LED 3 times. Details: [docs/api.md](docs/api.md).
+- **You confirm every alert trade.** One press within 120 s, executed at most once.
+- **Caps everywhere.** Trade size is capped on the server and again on the Dabao; x402 spend is capped per call and per day.
+- **Safe-stop.** No 0G brain means no alert decision, never a cached or local fallback.
+- **No withdraw rights.** Trading keys are Hyperliquid API wallets; the master key never touches the server.
+- **Honest limit.** The server sees audio, transcripts and trades. Ghosty is user-owned, not zero-knowledge.
 
-## Hackathon tracks
+## Run it
 
-| # | Track | How Ghosty qualifies |
-|---|---|---|
-| 1 | **0G — Physical AI: Agents with a Body** | Real wearable. Every decision is a 0G Compute call with its request ID logged; each decision is written as an episode to 0G Storage; encrypted memory on 0G Storage; safe-stop when 0G is unreachable. |
-| 2 | **Hedera — AI Agents That Pay: x402** | Before each shock decision the agent's hot wallet buys a headline-intelligence bundle from the Signal Desk (a separate x402 merchant) in USDC (HTS) or HBAR on `hedera:testnet`, with no human approval, inside per-asset caps. Each payment is re-checked on the mirror node and logged with the decision to an HCS topic. Tx and topic links under [Demo](#demo); walkthrough in [docs/hedera.md](docs/hedera.md). |
-| 3 | **Uniswap — Build with Uniswap** | The spot leg of each trade runs through the Uniswap Trading API. Code: [`server/src/wallet/uniswap.ts`](server/src/wallet/uniswap.ts). Feedback: [FEEDBACK.md](FEEDBACK.md). |
-| stretch | Arkiv + Swarm bonus, EF Anon-RPC | Public market-event index on Arkiv; chain reads via Anon-RPC. Only if time allows. |
-
-Execution venue: **Hyperliquid** (not a sponsor). HIP-3 perps for gold, oil, and stocks, opened from an approved API wallet.
-
-**What breaks without 0G:** the decision loop and episode log — the device safe-stops and refuses to trade.
-
-Per-track checklists and doc links: [docs/tracks.md](docs/tracks.md).
-
-## Repo layout
-
-```
-ghosty/
-├─ README.md           this file
-├─ PLAN.md             hackathon plan: milestones, task board, demo script, risks
-├─ CONTRIBUTING.md     commit, branch, and PR rules
-├─ FEEDBACK.md         Uniswap track feedback
-├─ hardware/           BOM, wiring guide, photos
-├─ firmware/
-│  ├─ libraries/GhostyBoard/   shared pins + secrets (local Arduino library)
-│  ├─ sketches/01_…06_…        bring-up sketches, in test order
-│  └─ scripts/link-lib.sh      symlink the library into ~/Documents/Arduino/libraries
-├─ server/             Node + TypeScript service (voice, news, agent, payments, execution)
-├─ terminal/           Vite + React web UI: Live view (device + feed) and the /pro terminal
-├─ docs/               architecture, API, setup, troubleshooting, demo script, tracks, research
-└─ .github/            CI workflows, issue and PR templates
+```bash
+cd server && cp .env.example .env    # fill the keys you need
+npm ci && npm run doctor             # shows which providers are live
+npm run dev                          # server on :3000
+cd ../terminal && npm i && npm run dev   # web app on :5173
 ```
 
-Plan and task board: [PLAN.md](PLAN.md). How to contribute: [CONTRIBUTING.md](CONTRIBUTING.md).
+Live mode has no fakes: a missing key makes that provider answer `503 not_configured`. Server guide: [server/README.md](server/README.md). API: [docs/api.md](docs/api.md).
+
+## Status
+
+Hedera x402 payments are settled, mirror-verified and logged, and a 0G decision with paid intel is on the audit topic.
+A real Hyperliquid fill, a Uniswap swap, a 0G Storage root and Dabao signing on hardware are still pending.
+Every proof is listed in [docs/evidence.md](docs/evidence.md).
 
 ## Team
 
 | Name | Role | Contact |
 |---|---|---|
-| _TODO_ | Firmware + hardware | _TODO_ |
-| _TODO_ | Server + agent | _TODO_ |
-| _TODO_ | Onchain integrations | _TODO_ |
+| Akshay Sharma | Product, server and agent | [@codeakki](https://github.com/codeakki) |
+| Kenil Shah | Firmware and hardware | [@KENILSHAHH](https://github.com/KENILSHAHH) |
+| Akhil Nanavati | Onchain integrations and simulation | [@Akhil-2310](https://github.com/Akhil-2310) |
+| Kavish Shah | Hardware | [@kavishshahh](https://github.com/kavishshahh) |
 
 ## License
 

@@ -12,6 +12,11 @@ export interface CardContext {
   storagescan: string | undefined;
 }
 
+/** Shock tags are upper-case keywords ("NUCLEAR"); the feed shows them in sentence case like every other label. */
+function sentenceCase(word: string): string {
+  return word.charAt(0) + word.slice(1).toLowerCase();
+}
+
 const TRACK_LABEL: Record<TxTrack, string> = { '0g': '0G', hedera: 'Hedera', uniswap: 'Uniswap', hyperliquid: 'Hyperliquid' };
 
 function Ext({ href, children, label }: { href: string; children: ReactNode; label?: string }) {
@@ -61,7 +66,7 @@ function CardTime({ at, className }: { at: number; className: string }) {
   const iso = new Date(sim.simAt).toISOString();
   return (
     <span className={`${className} lv-sim-time`} title={`Simulated time ${iso.replace('T', ' ').slice(0, 16)} UTC · not live`}>
-      <span className="lv-sim-tag">SIM</span>
+      <span className="lv-sim-tag">Sim</span>
       <time dateTime={iso}>{formatSimClock(sim.simAt)}</time>
     </span>
   );
@@ -153,7 +158,7 @@ function NewsRow({ card }: { card: NewsCard }) {
     <div className="lv-news-row">
       <p className="lv-news-title">{item.url ? <Ext href={item.url}>{item.title}</Ext> : item.title}</p>
       <p className="lv-news-meta">
-        {shock ? <span className={`lv-tag lv-tag-shock lv-tag-${shock.kind}`}>{shock.tag}</span> : null}
+        {shock ? <span className={`lv-tag lv-tag-shock lv-tag-${shock.kind}`}>{sentenceCase(shock.tag)}</span> : null}
         {injected ? <span className="lv-tag">Test</span> : null}
         {cred && CRED_WARN.has(cred.level) ? (
           <span className={`lv-tag lv-tag-cred lv-cred-${cred.level}`} title={credTitle}>
@@ -262,7 +267,7 @@ function TxView({ card, ctx }: { card: TxCard; ctx: CardContext }) {
           <p className="lv-card-meta">
             {o.live ? (
               <>
-                <span className="lv-real-tag">REAL</span> Hyperliquid {o.network === 'testnet' ? 'testnet' : 'mainnet'} order from the simulation
+                <span className="lv-real-tag">Real</span> Hyperliquid {o.network === 'testnet' ? 'testnet' : 'mainnet'} order from the simulation
               </>
             ) : (
               'Hyperliquid perp order'

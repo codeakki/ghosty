@@ -1,0 +1,17 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "vite",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "rewrites": [
+    {
+      "source": "/:route(state|events|health|access|news|alerts|voice|button|episodes|signal|zerog|x402|execution|providers|market|hedera)",
+      "destination": "https://gh-f8c6b0f6fdd845a0b61dd39fde641ecb.ecs.ap-south-1.on.aws/:route"
+    },
+    {
+      "source": "/:route(state|events|health|news|alerts|voice|button|episodes|signal|zerog|x402|execution|providers|market|hedera|sim|guest|pod)/:path*",
+      "destination": "https://gh-f8c6b0f6fdd845a0b61dd39fde641ecb.ecs.ap-south-1.on.aws/:route/:path*"
+    },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}

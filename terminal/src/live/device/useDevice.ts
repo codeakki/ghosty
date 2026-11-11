@@ -38,7 +38,12 @@ function failureNote(r: ApiFailure, what: 'voice' | 'text' | 'button'): NonNulla
     return { tone: 'warn', text: 'Ghosty can’t decide yet — the server isn’t fully set up. See Setup in the feed.' };
   }
   if (r.kind === 'brain_offline') return { tone: 'warn', text: 'The 0G brain is unreachable, so Ghosty is paused.' };
-  if (r.kind === 'unauthorized') return { tone: 'warn', text: 'This device isn’t allowed yet: add your device token in Settings.' };
+  if (r.kind === 'unauthorized') {
+    if (r.code === 'guest_expired') return { tone: 'info', text: 'Your guest pass expired. Get a new one in Settings.' };
+    return { tone: 'warn', text: 'This device isn’t allowed yet: add your device token or try Ghosty as a guest.' };
+  }
+  // Guest limits and refusals are calm information, not errors.
+  if (r.kind === 'guest') return { tone: 'info', text: describeError(r) };
   return { tone: 'warn', text: describeError(r) };
 }
 

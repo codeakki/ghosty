@@ -95,6 +95,7 @@ void sendVoice(size_t samples) {
   http.setTimeout(30000);  // STT + agent + TTS can be slow
   http.addHeader("Content-Type", "audio/wav");
   http.addHeader("X-Device-Token", GHOSTY_DEVICE_TOKEN);
+  http.addHeader("X-Ghosty-Client", "pod");  // the web orb mirrors pod turns only
   int code = http.POST(wav, WAV_HEADER_BYTES + pcmBytes);
   Serial.printf("[http] POST /voice -> %d\n", code);
 
@@ -129,6 +130,8 @@ void loop() {
   if (!buttonPressed()) return;
 
   setRedLed(true);
+  // Web orb shows "listening" (background task, never delays recording).
+  ghostyPodStateAsync(GHOSTY_SERVER_URL "/pod/state", GHOSTY_DEVICE_TOKEN, "listening");
   uint32_t t0 = millis();
   size_t n = recordWhileHeld();
   setRedLed(false);
@@ -137,6 +140,7 @@ void loop() {
 
   if (n < MIN_SAMPLES) {
     Serial.println("[rec] too short, ignored");
+    ghostyPodStateAsync(GHOSTY_SERVER_URL "/pod/state", GHOSTY_DEVICE_TOKEN, "idle");
   } else if (WiFi.status() != WL_CONNECTED) {
     Serial.println("[wifi] not connected, reconnecting");
     blinkRed(2, 200, 200);

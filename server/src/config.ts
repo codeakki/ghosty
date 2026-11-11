@@ -243,6 +243,22 @@ const ConfigSchema = z.object({
   /** A presented decision (spoken reply or alert) can be confirmed for this long; later presses answer 409 alert_expired. */
   PENDING_DECISION_TTL_SEC: posInt(120),
 
+  // ---------- Guest access (docs/api.md#guest-access) ----------
+  /** Anyone can get a guest token (POST /guest/token) that only asks Claude questions. Off by default. */
+  GUEST_ACCESS: bool(false),
+  /** Guest token lifetime. */
+  GUEST_TTL_SEC: posInt(86_400),
+  /** Voice/text turns per guest token per rolling hour (429 guest_rate_limited after). */
+  GUEST_MAX_PER_HOUR: posInt(10),
+  /** Guest turns per UTC day, all guests together (cost guard, 429 guest_daily_cap after). */
+  GUEST_MAX_PER_DAY: posInt(300),
+  /** Guest tokens one IP may get per rolling hour. */
+  GUEST_ISSUE_PER_IP_PER_HOUR: posInt(5),
+  /** Unexpired guest tokens at once, all IPs together. */
+  GUEST_MAX_ACTIVE: posInt(500),
+  /** Let guests start PAPER simulation runs (POST /sim/run without liveOrders). Off by default (each run calls 0G). */
+  GUEST_SIM: bool(false),
+
   /** Read-only Hyperliquid prices for the terminal. Independent of HL_TESTNET (which only drives execution). */
   MARKET_DATA_NETWORK: z.enum(['mainnet', 'testnet']).default('mainnet').catch('mainnet'),
   /** Coins shown in the terminal. HIP-3 coins carry their dex prefix (xyz:GOLD). Missing ones are reported, not faked. */

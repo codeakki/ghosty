@@ -1,5 +1,6 @@
 import { memo } from 'react';
 import type { TerminalState } from '../state/reducer';
+import { GhostMark } from './brand/GhostMark';
 import { Link } from './Link';
 import { ROUTE_PATH, type AppRoute } from './router';
 
@@ -11,9 +12,9 @@ const TABS: Array<{ route: AppRoute; label: string }> = [
 ];
 
 type Tone = 'ok' | 'warn' | 'bad' | 'muted';
-type Status = { tone: Tone; text: string; title: string; live: boolean };
+type StatusInfo = { tone: Tone; text: string; title: string; live: boolean };
 
-function connectionStatus(state: TerminalState): Status {
+function connectionStatus(state: TerminalState): StatusInfo {
   const safeStop = state.snapshot?.safeStop === true || state.health?.safeStop === true;
   if (state.serverReachable === false) return { tone: 'bad', text: 'Offline', title: 'The Ghosty server did not answer /health', live: false };
   if (safeStop) return { tone: 'warn', text: '0G offline · safe-stop', title: '0G brain unreachable: every trade is blocked', live: false };
@@ -24,14 +25,15 @@ function connectionStatus(state: TerminalState): Status {
 }
 
 /**
- * One status pill: a CSS dot (not a glyph, so it centres exactly) and a word. Same height as the tab group.
- * Below 640px the word is visually hidden and the pill shrinks to its dot; the word stays for screen readers.
+ * One header status as quiet text. The standby light (a small steady mint dot) shows only while the live event
+ * stream is really open: it means "Ghosty is live and listening", and appears nowhere else in the header.
+ * Below 640px the word is visually hidden when the light can stand in for it; the word stays for screen readers.
  */
-function Pill(props: { tone: Tone; text: string; title: string; live?: boolean; role?: 'status' }) {
+function Status(props: { tone: Tone; text: string; title: string; live?: boolean; role?: 'status'; kind?: 'network' }) {
   return (
-    <span className={`lv-pill lv-tone-${props.tone}`} data-live={props.live ? 'true' : undefined} title={props.title} role={props.role}>
-      <span className="lv-pill-dot" aria-hidden="true" />
-      <span className="lv-pill-text">{props.text}</span>
+    <span className={`lv-status lv-tone-${props.tone}`} data-live={props.live ? 'true' : undefined} data-kind={props.kind} title={props.title} role={props.role}>
+      {props.live ? <span className="lv-standby" aria-hidden="true" /> : null}
+      <span className="lv-status-text">{props.text}</span>
     </span>
   );
 }
@@ -48,21 +50,6 @@ function GearIcon() {
   );
 }
 
-/**
- * The mark is the device itself, small: the ghost orb with its two eyes (same shapes as the Device page orb),
- * on a soft halo. Not a generic ghost icon.
- */
-function GhostMark() {
-  return (
-    <svg className="lv-mark" viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
-      <circle cx="12" cy="12" r="11" className="lv-mark-halo" />
-      <circle cx="12" cy="12" r="8" className="lv-mark-core" />
-      <ellipse cx="9.6" cy="11.4" rx="1.05" ry="1.6" className="lv-mark-eye" />
-      <ellipse cx="14.4" cy="11.4" rx="1.05" ry="1.6" className="lv-mark-eye" />
-    </svg>
-  );
-}
-
 export const TopNav = memo(function TopNav({ route, state, onSettings }: { route: AppRoute; state: TerminalState; onSettings: () => void }) {
   const status = connectionStatus(state);
   const network = state.market.data?.network ?? null;
@@ -70,7 +57,7 @@ export const TopNav = memo(function TopNav({ route, state, onSettings }: { route
   return (
     <header className="lv-nav">
       <Link to={ROUTE_PATH.home} className="lv-wordmark" translate="no" aria-label="ghosty, home">
-        <GhostMark />
+        <GhostMark size={26} className="lv-mark" />
         <span className="lv-wordmark-text">ghosty</span>
       </Link>
       <nav className="lv-tabs" aria-label="Views">
@@ -81,9 +68,10 @@ export const TopNav = memo(function TopNav({ route, state, onSettings }: { route
         ))}
       </nav>
       <div className="lv-nav-end">
-        <Pill tone={status.tone} text={status.text} title={status.title} live={status.live} role="status" />
-        <Pill
-          tone={network === 'mainnet' ? 'warn' : 'muted'}
+        <Status tone={status.tone} text={status.text} title={status.title} live={status.live} role="status" />
+        <Status
+          kind="network"
+          tone="muted"
           text={networkText}
           title={network === 'mainnet' ? 'Hyperliquid mainnet: real prices, real money' : network ? `Hyperliquid ${network}` : 'Network not known yet'}
         />

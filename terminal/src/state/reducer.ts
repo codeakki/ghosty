@@ -266,6 +266,9 @@ function foldSse(state: TerminalState, event: SseEventType, data: unknown, at: n
       if (!providers) return base;
       return log({ ...base, providers: { status: 'live', data: providers } }, 'providers', providerSummary(providers), at);
     }
+    case 'pod':
+      // The physical pod's state (SSE `pod`) drives the Live device orb only (live/device/podMirror.ts).
+      return state;
   }
 }
 

@@ -1,4 +1,5 @@
 import type {
+  AccessInfo,
   Alert,
   ApiFailure,
   ApiResult,
@@ -7,6 +8,7 @@ import type {
   DecisionEvent,
   EpisodeRecord,
   ExecutionMarkets,
+  GuestPass,
   HealthResponse,
   InjectResult,
   MarketAsset,
@@ -49,8 +51,12 @@ import type {
 export interface ClientSettings {
   /** "" = same origin (Vite proxy in dev, the Ghosty server in production). */
   baseUrl: string;
-  /** Sent as X-Device-Token on guarded routes when the server has DEVICE_TOKEN set. */
+  /** Sent as X-Device-Token on guarded routes when the server has DEVICE_TOKEN set (or a guest pass). */
   deviceToken: string;
+  /** Set when deviceToken is a guest pass (POST /guest/token): questions only. */
+  scope?: 'owner' | 'guest';
+  /** Guest pass expiry (ISO). */
+  guestExpiresAt?: string;
 }
 
 const SETTINGS_KEY = 'ghosty.terminal.settings.v1';
@@ -62,7 +68,9 @@ export function loadSettings(): ClientSettings {
     if (!raw) return DEFAULT_SETTINGS;
     const parsed: unknown = JSON.parse(raw);
     if (!isRecord(parsed)) return DEFAULT_SETTINGS;
-    return { baseUrl: normalizeBaseUrl(str(parsed.baseUrl)), deviceToken: str(parsed.deviceToken) };
+    const base = { baseUrl: normalizeBaseUrl(str(parsed.baseUrl)), deviceToken: str(parsed.deviceToken) };
+    if (parsed.scope === 'guest' && base.deviceToken) return { ...base, scope: 'guest', guestExpiresAt: str(parsed.guestExpiresAt) };
+    return base;
   } catch {
     return DEFAULT_SETTINGS;
   }
@@ -605,7 +613,8 @@ export class GhostyClient {
   }
 
   private headers(extra: Record<string, string> = {}): Record<string, string> {
-    const h: Record<string, string> = { ...extra };
+    // Browser turns are tagged so the server never mirrors them onto the pod orb.
+    const h: Record<string, string> = { 'x-ghosty-client': 'web', ...extra };
     if (this.settings.deviceToken) h['x-device-token'] = this.settings.deviceToken;
     return h;
   }
@@ -641,6 +650,32 @@ export class GhostyClient {
   }
   state() {
     return this.request('GET', '/state', parseSnapshot);
+  }
+  access() {
+    return this.request<AccessInfo>('GET', '/access', (b) =>
+      isRecord(b)
+        ? {
+            guestAccess: b.guestAccess === true,
+            guestSim: b.guestSim === true,
+            guestTtlSec: num(b.guestTtlSec) ?? 86_400,
+            guestMaxPerHour: num(b.guestMaxPerHour) ?? 10,
+            scope: b.scope === 'owner' || b.scope === 'guest' ? b.scope : null,
+            expiresAt: optStr(b.expiresAt) ?? null,
+          }
+        : null,
+    );
+  }
+  /** A question-only guest pass. */
+  guestToken() {
+    return this.request<GuestPass>(
+      'POST',
+      '/guest/token',
+      (b) =>
+        isRecord(b) && typeof b.token === 'string' && typeof b.expiresAt === 'string'
+          ? { token: b.token, expiresAt: b.expiresAt, ttlSec: num(b.ttlSec) ?? 86_400 }
+          : null,
+      {},
+    );
   }
   providers() {
     return this.request('GET', '/providers/status', parseProviders);
@@ -800,7 +835,11 @@ export async function toResult<T>(res: Response, parse: (body: unknown) => T | n
   if (res.status === 404 && (!code || code === 'Not Found')) {
     return { ok: false, kind: 'not_found', status: 404, message: message || 'endpoint not found' };
   }
-  if (res.status === 401) return { ok: false, kind: 'unauthorized', status: 401, message: 'device token rejected' };
+  if (res.status === 401) return { ok: false, kind: 'unauthorized', status: 401, message: 'device token rejected', ...(code ? { code } : {}) };
+  if (code.startsWith('guest_')) {
+    const retry = isRecord(body) ? num(body.retryAfterSec) : null;
+    return { ok: false, kind: 'guest', status: res.status, message: message || code, code, ...(retry === null ? {} : { retryAfterSec: retry }) };
+  }
   if (res.status === 503 && (code === 'brain_offline' || code === 'memory_unavailable')) {
     return { ok: false, kind: 'brain_offline', status: 503, message: code };
   }
@@ -825,12 +864,37 @@ export function describeError(r: ApiFailure): string {
         ? '0G memory unavailable: trading blocked (safe-stop).'
         : 'Brain offline: trading blocked (safe-stop).';
     case 'unauthorized':
-      return 'Device token rejected. Set the server’s DEVICE_TOKEN in Settings → Device token.';
+      return r.code === 'guest_expired'
+        ? 'Your guest pass expired. Get a new one in Settings.'
+        : 'Device token rejected. Set the server’s DEVICE_TOKEN in Settings → Device token.';
+    case 'guest':
+      return describeGuestError(r.code, r.retryAfterSec);
     case 'network':
       return 'Server unreachable. Start it with `cd server && npm run dev`, or fix the URL in Settings.';
     case 'parse':
       return 'Server answered with an unexpected shape. Update the terminal and server to the same version.';
     default:
       return `HTTP ${r.status}: ${r.message}`;
+  }
+}
+
+/** Calm, plain words for a guest refusal or limit. */
+export function describeGuestError(code: string | undefined, retryAfterSec?: number): string {
+  const wait = retryAfterSec === undefined ? '' : ` Try again in ${retryAfterSec < 90 ? `${Math.max(1, Math.round(retryAfterSec))} s` : `${Math.round(retryAfterSec / 60)} min`}.`;
+  switch (code) {
+    case 'guest_forbidden':
+      return "Guests can ask questions; trading needs the owner's pod.";
+    case 'guest_rate_limited':
+      return `That's the guest limit for this hour.${wait}`;
+    case 'guest_daily_cap':
+      return "Guests have used today's questions. Come back tomorrow.";
+    case 'guest_issue_limited':
+      return `Too many guest passes from this network.${wait}`;
+    case 'guest_capacity':
+      return `Guest passes are full right now.${wait}`;
+    case 'guest_access_off':
+      return 'Guest access is switched off on this server.';
+    default:
+      return 'Guest request refused.';
   }
 }
