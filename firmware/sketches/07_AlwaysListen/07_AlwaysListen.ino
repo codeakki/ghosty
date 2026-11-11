@@ -37,7 +37,8 @@
 
 constexpr size_t CHUNK = 256;                        // 16 ms at 16 kHz
 constexpr size_t MAX_SAMPLES = SAMPLE_RATE * 10;     // 10 s cap = 320 KB
-constexpr size_t PRE_ROLL = SAMPLE_RATE * 3 / 10;    // keep 300 ms before the trigger
+constexpr size_t PRE_ROLL = SAMPLE_RATE;             // keep 1 s before the trigger: in a loud room the
+                                                     // trigger fires late and a soft "Ghosty" falls before it
 constexpr int START_CHUNKS = 3;                      // ~50 ms above the start level
 constexpr int END_QUIET_CHUNKS = 62;                 // ~1 s below the start level
 constexpr size_t MIN_SPEECH = SAMPLE_RATE * 2 / 5;   // ignore blips < 400 ms
@@ -187,7 +188,8 @@ size_t streamReply(HTTPClient &http) {
   int remaining = http.getSize();  // -1 = unknown, read until close
   size_t have = 0, total = 0;
   uint32_t lastData = millis();
-  while (remaining != 0 && millis() - lastData < 3000) {
+  // 15 s: Wi-Fi here can stall for several seconds; a song should ride that out, not end.
+  while (remaining != 0 && millis() - lastData < 15000) {
     int avail = s->available();
     if (avail <= 0) {
       if (!http.connected()) break;
@@ -206,6 +208,49 @@ size_t streamReply(HTTPClient &http) {
     have &= 1;
   }
   return total;
+}
+
+// ---- Error beeps ---------------------------------------------------------
+// The server speaks its own errors ("Software error ... your pod hardware is fine").
+// These beeps cover the cases where no speech can arrive, so silence never hides
+// a software or network problem:
+//   2 low beeps        = can't reach the server (Wi-Fi, server not running, timeout)
+//   3 high-low beeps   = the server answered with an error and no audio
+//   1 long low beep    = Wi-Fi lost and reconnecting failed
+void beep(float hz, uint32_t ms) {
+  static int16_t buf[256];
+  const size_t total = SAMPLE_RATE * ms / 1000;
+  const size_t ramp = SAMPLE_RATE / 100;  // 10 ms fade, no clicks
+  for (size_t done = 0; done < total; done += 256) {
+    for (size_t i = 0; i < 256; i++) {
+      size_t n = done + i;
+      float g = 1.0f;
+      if (n < ramp) g = (float)n / ramp;
+      else if (n + ramp > total) g = n >= total ? 0 : (float)(total - n) / ramp;
+      buf[i] = (int16_t)(12000.0f * g * sinf(2.0f * PI * hz * n / SAMPLE_RATE));
+    }
+    playPcm16(i2s, buf, 256);
+  }
+}
+
+void silence(uint32_t ms) {
+  static int16_t zero[256] = {0};
+  for (size_t done = 0; done < SAMPLE_RATE * ms / 1000; done += 256) playPcm16(i2s, zero, 256);
+}
+
+void errorBeepsUnreachable() {
+  Serial.println("[error] beeps: can't reach the server");
+  for (int i = 0; i < 2; i++) { beep(330, 250); silence(150); }
+}
+
+void errorBeepsServer() {
+  Serial.println("[error] beeps: server error without audio");
+  for (int i = 0; i < 3; i++) { beep(880, 120); beep(440, 120); silence(120); }
+}
+
+void errorBeepWiFi() {
+  Serial.println("[error] beep: Wi-Fi lost");
+  beep(260, 900);
 }
 
 // ---- Dabao signer relay ------------------------------------------------
@@ -261,8 +306,8 @@ int postOnce(const char *path, const uint8_t *body, size_t len, const char *cont
   ghostyHttpBegin(http, url.c_str());  // TLS when the URL is https://
   http.useHTTP10(true);   // no chunked encoding -> body is raw bytes on the socket
   http.setTimeout(60000); // STT + Claude + order + TTS
-  const char *keep[] = {"X-Sign-Id"};
-  http.collectHeaders(keep, 1);
+  const char *keep[] = {"X-Sign-Id", "X-Ghosty-Error"};
+  http.collectHeaders(keep, 2);
   http.addHeader("Content-Type", contentType);
   http.addHeader("X-Device-Token", GHOSTY_DEVICE_TOKEN);
   http.addHeader("X-Listen", "always");
@@ -283,15 +328,19 @@ int postOnce(const char *path, const uint8_t *body, size_t len, const char *cont
   } else if (code == 204) {
     Serial.printf("[http] POST %s -> 204 (no wake word)\n", path);
   } else if (code == 200) {
-    Serial.printf("[http] POST %s -> 200\n", path);
-    Serial.printf("[play] %u bytes played\n", (unsigned)streamReply(http));
-  } else if (code == 503) {
-    Serial.printf("[http] POST %s -> 503 (brain offline or not configured)\n", path);
-    blinkRed(3, 60, 60);
+    String err = http.header("X-Ghosty-Error");
+    if (err.length()) Serial.printf("[http] POST %s -> 200, spoken software error: %s\n", path, err.c_str());
+    else Serial.printf("[http] POST %s -> 200\n", path);
+    size_t played = streamReply(http);
+    Serial.printf("[play] %u bytes played\n", (unsigned)played);
+    if (played == 0) errorBeepsServer();  // 200 with no audio: still never silent
+  } else if (code < 0) {
+    Serial.printf("[http] POST %s -> %d (%s)\n", path, code, HTTPClient::errorToString(code).c_str());
+    errorBeepsUnreachable();
   } else {
-    Serial.printf("[http] POST %s -> %d\n", path, code);
-    if (code < 0) Serial.printf("[http] error: %s\n", HTTPClient::errorToString(code).c_str());
-    blinkRed(5, 200, 200);
+    String err = http.header("X-Ghosty-Error");
+    Serial.printf("[http] POST %s -> %d%s%s\n", path, code, err.length() ? ", error: " : "", err.c_str());
+    errorBeepsServer();
   }
   http.end();
   return code;
@@ -318,22 +367,35 @@ void sendVoice(size_t samples) {
   }
 }
 
-// Speaks a queued news signal (with its odds and price checks) if the server has one.
+// Plays queued audio (songs, announcements) if the server has some. When the stream is cut
+// short (Wi-Fi drop), asks the server to resume from the byte where it stopped, up to 5 times.
 void pollAnnouncement() {
-  HTTPClient http;
-  ghostyHttpBegin(http, GHOSTY_SERVER_URL "/announce");
-  http.useHTTP10(true);
-  http.setTimeout(20000);
-  http.addHeader("X-Device-Token", GHOSTY_DEVICE_TOKEN);
-  http.addHeader("X-Ghosty-Client", "pod");
-  int code = http.GET();
-  if (code == 200) {
-    Serial.println("[announce] signal from the server");
-    Serial.printf("[play] %u bytes played\n", (unsigned)streamReply(http));
-  } else if (code != 204) {
-    Serial.printf("[announce] GET /announce -> %d\n", code);
+  size_t resumeFrom = 0;
+  for (int attempt = 0; attempt <= 5; attempt++) {
+    HTTPClient http;
+    ghostyHttpBegin(http, GHOSTY_SERVER_URL "/announce");
+    http.useHTTP10(true);
+    http.setTimeout(20000);
+    http.addHeader("X-Device-Token", GHOSTY_DEVICE_TOKEN);
+    http.addHeader("X-Ghosty-Client", "pod");
+    if (resumeFrom) http.addHeader("X-Resume-From", String((unsigned long)resumeFrom));
+    int code = http.GET();
+    if (code != 200) {
+      if (code != 204) Serial.printf("[announce] GET /announce -> %d\n", code);
+      http.end();
+      return;
+    }
+    int size = http.getSize();
+    if (resumeFrom) Serial.printf("[announce] resuming at byte %u\n", (unsigned)resumeFrom);
+    else Serial.println("[announce] audio from the server");
+    size_t played = streamReply(http);
+    http.end();
+    Serial.printf("[play] %u bytes played\n", (unsigned)played);
+    if (size <= 0 || played >= (size_t)size) return;  // finished (or unknown length)
+    resumeFrom += played & ~(size_t)1;                // whole samples only
+    Serial.printf("[play] stream cut after %u of %d bytes, resuming\n", (unsigned)played, size);
   }
-  http.end();
+  Serial.println("[play] gave up resuming");
 }
 
 void setup() {
@@ -353,11 +415,17 @@ void setup() {
 void loop() {
   if (WiFi.status() != WL_CONNECTED) {
     connectWiFi();
+    if (WiFi.status() != WL_CONNECTED) errorBeepWiFi();
     return;
   }
+  // Check for queued audio (songs, announcements) at least every ANNOUNCE_POLL_MS, even in a
+  // room that keeps the mic busy: listen() only returns LISTEN_IDLE after 15 s of silence.
+  static uint32_t lastPoll = 0;
   size_t n = listen();
-  if (n == LISTEN_IDLE) {
+  if (n == LISTEN_IDLE || millis() - lastPoll > ANNOUNCE_POLL_MS) {
+    if (n != LISTEN_IDLE && n != 0) sendVoice(n);  // answer what was said first
     pollAnnouncement();
+    lastPoll = millis();
     drainMic(300);
     return;
   }
@@ -367,5 +435,8 @@ void loop() {
     return;
   }
   sendVoice(n);
+  // Right after a reply, check the queue: "play Amplifier" starts the song now, not 15 s later.
+  pollAnnouncement();
+  lastPoll = millis();
   drainMic(300);  // skip our own reply's tail and the backlog from the request
 }
