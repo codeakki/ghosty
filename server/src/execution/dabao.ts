@@ -1,5 +1,5 @@
 import { createL1ActionHash } from '@nktkas/hyperliquid/signing';
-import { hashTypedData, recoverAddress, type Hex } from 'viem';
+import { hashTypedData, keccak256, recoverAddress, serializeTransaction, type Address, type Hex } from 'viem';
 
 /**
  * Hyperliquid orders signed on the Dabao (Baochip-1x) next to the pod, never on the server.
@@ -14,6 +14,15 @@ import { hashTypedData, recoverAddress, type Hex } from 'viem';
 export const FRAME_START = 0xa5;
 export const CMD_GET_INFO = 0x01;
 export const CMD_SIGN_ORDER = 0x02;
+/** Uniswap swap on Base: the Dabao builds the EIP-1559 bytes from these fields (tx_signer.c). */
+export const CMD_SIGN_EVM_TX = 0x03;
+/** Hedera x402 payment: the Dabao parses the TransactionBody and signs keccak256(body). */
+export const CMD_SIGN_HEDERA = 0x04;
+/** USDC Permit2 PermitSingle on Base for the Uniswap router (tx_signer.c permit_check). */
+export const CMD_SIGN_PERMIT2 = 0x05;
+export const PERMIT2_ADDRESS = '0x000000000022D473030F116dDEE9F6B43aC78BA3';
+export const MAX_UINT160 = (1n << 160n) - 1n;
+const PERMIT_AMOUNT_MAX_WIRE = (1n << 64n) - 1n;
 export const RSP_INFO = 0x81;
 export const RSP_SIGNATURE = 0x82;
 export const RSP_ERROR = 0xff;
@@ -30,9 +39,25 @@ export const DABAO_ERRORS: Record<number, string> = {
   8: 'nobody pressed the signer button in time',
   9: 'the signer has no key',
   10: 'the signer failed to sign',
-  11: 'the order would pass the signer daily limit of 100 dollars',
-  12: 'the signer allows one order every 10 seconds',
+  11: 'this would pass the signer daily limit',
+  12: 'the signer was asked again too soon',
+  13: 'the signer refused a transaction for another chain',
+  14: 'the signer does not allow this contract or receiver',
+  15: 'the amount is above the signer limit',
+  16: 'the signer does not sign this kind of transaction',
 };
+
+/** Exactly what the Dabao signs for a swap: an EIP-1559 call with an empty access list. */
+export interface EvmTxFields {
+  chainId: number;
+  nonce: number;
+  maxPriorityFeePerGas: bigint;
+  maxFeePerGas: bigint;
+  gas: bigint;
+  to: Address;
+  value: bigint;
+  data: Hex;
+}
 
 /** Exactly what the Dabao signs: one IOC limit order, no vault, no expiry. */
 export interface HlOrderFields {
@@ -100,6 +125,123 @@ export function encodeSignRequest(f: HlOrderFields): Buffer {
   return encodeFrame(CMD_SIGN_ORDER, p);
 }
 
+export function encodeEvmTxRequest(tx: EvmTxFields): Buffer {
+  const data = Buffer.from(tx.data.slice(2), 'hex');
+  const p = Buffer.alloc(70 + data.length);
+  [BigInt(tx.chainId), BigInt(tx.nonce), tx.maxPriorityFeePerGas, tx.maxFeePerGas, tx.gas, tx.value].forEach((v, i) =>
+    p.writeBigUInt64LE(v, i * 8),
+  );
+  Buffer.from(tx.to.slice(2), 'hex').copy(p, 48);
+  p.writeUInt16LE(data.length, 68);
+  data.copy(p, 70);
+  return encodeFrame(CMD_SIGN_EVM_TX, p);
+}
+
+export function evmTxRequest(tx: EvmTxFields) {
+  return {
+    type: 'eip1559' as const,
+    chainId: tx.chainId,
+    nonce: tx.nonce,
+    maxPriorityFeePerGas: tx.maxPriorityFeePerGas,
+    maxFeePerGas: tx.maxFeePerGas,
+    gas: tx.gas,
+    to: tx.to,
+    value: tx.value,
+    data: tx.data,
+    accessList: [],
+  };
+}
+
+/** keccak256 of the unsigned EIP-1559 bytes: what the Dabao signs. */
+export function evmTxDigest(tx: EvmTxFields): Hex {
+  return keccak256(serializeTransaction(evmTxRequest(tx)));
+}
+
+/** Signed raw transaction from the Dabao's r||s. Throws unless it recovers to `signer`. */
+export async function signedEvmTx(tx: EvmTxFields, rs: Uint8Array, signer: string): Promise<Hex> {
+  const sig = await toExchangeSignature(evmTxDigest(tx), rs, signer);
+  return serializeTransaction(evmTxRequest(tx), { r: sig.r, s: sig.s, yParity: sig.v - 27 });
+}
+
+export interface PermitSingleFields {
+  token: Address;
+  amount: bigint;
+  expiration: number;
+  nonce: number;
+  spender: Address;
+  sigDeadline: number;
+}
+
+export function encodePermitRequest(p: PermitSingleFields): Buffer {
+  if (p.amount !== MAX_UINT160 && p.amount >= PERMIT_AMOUNT_MAX_WIRE) throw new DabaoFrameError('permit amount must fit 64 bits or be the uint160 maximum');
+  const b = Buffer.alloc(72);
+  Buffer.from(p.token.slice(2), 'hex').copy(b, 0);
+  b.writeBigUInt64LE(p.amount === MAX_UINT160 ? PERMIT_AMOUNT_MAX_WIRE : p.amount, 20);
+  b.writeBigUInt64LE(BigInt(p.expiration), 28);
+  b.writeBigUInt64LE(BigInt(p.nonce), 36);
+  Buffer.from(p.spender.slice(2), 'hex').copy(b, 44);
+  b.writeBigUInt64LE(BigInt(p.sigDeadline), 64);
+  return encodeFrame(CMD_SIGN_PERMIT2, b);
+}
+
+export function permitDigest(p: PermitSingleFields, chainId = 8453): Hex {
+  return hashTypedData({
+    domain: { name: 'Permit2', chainId, verifyingContract: PERMIT2_ADDRESS },
+    types: {
+      PermitSingle: [
+        { name: 'details', type: 'PermitDetails' },
+        { name: 'spender', type: 'address' },
+        { name: 'sigDeadline', type: 'uint256' },
+      ],
+      PermitDetails: [
+        { name: 'token', type: 'address' },
+        { name: 'amount', type: 'uint160' },
+        { name: 'expiration', type: 'uint48' },
+        { name: 'nonce', type: 'uint48' },
+      ],
+    },
+    primaryType: 'PermitSingle',
+    message: {
+      details: { token: p.token, amount: p.amount, expiration: p.expiration, nonce: p.nonce },
+      spender: p.spender,
+      sigDeadline: BigInt(p.sigDeadline),
+    },
+  });
+}
+
+/** 65-byte r||s||v signature for the Permit2 permit, checked to recover to `signer`. */
+export async function signedPermit(p: PermitSingleFields, rs: Uint8Array, signer: string): Promise<Hex> {
+  const sig = await toExchangeSignature(permitDigest(p), rs, signer);
+  return `0x${sig.r.slice(2)}${sig.s.slice(2)}${sig.v.toString(16)}` as Hex;
+}
+
+export function encodeHederaRequest(body: Uint8Array): Buffer {
+  return encodeFrame(CMD_SIGN_HEDERA, body);
+}
+
+/** Low-s r||s, as Hedera expects for an ECDSA key. */
+export function lowS(rs: Uint8Array): Buffer {
+  if (rs.length !== 64) throw new DabaoFrameError(`signature must be 64 bytes, got ${rs.length}`);
+  let s = BigInt(`0x${Buffer.from(rs.subarray(32)).toString('hex')}`);
+  if (s > SECP256K1_N / 2n) s = SECP256K1_N - s;
+  return Buffer.concat([Buffer.from(rs.subarray(0, 32)), Buffer.from(s.toString(16).padStart(64, '0'), 'hex')]);
+}
+
+/** The Dabao's reply as r||s, or an error with the reason the speaker can say. */
+export function signatureFromReply(frame: Uint8Array): Buffer {
+  const reply = decodeFrame(frame);
+  if (reply.type === RSP_ERROR) throw new DabaoRejectedError(reply.payload[0] ?? 0);
+  if (reply.type !== RSP_SIGNATURE) throw new DabaoFrameError(`unexpected reply 0x${reply.type.toString(16)}`);
+  return reply.payload;
+}
+
+export class DabaoRejectedError extends Error {
+  override readonly name = 'DabaoRejectedError';
+  constructor(readonly code: number) {
+    super(`Dabao: ${DABAO_ERRORS[code] ?? `error ${code}`}`);
+  }
+}
+
 /** The /exchange action for these fields, keys in Hyperliquid's canonical order. */
 export function orderAction(f: HlOrderFields) {
   return {
@@ -144,6 +286,11 @@ export async function toExchangeSignature(digest: Hex, rs: Uint8Array, signer: s
     if (addr && addr.toLowerCase() === signer.toLowerCase()) return { r: hex(r), s: hex(s), v };
   }
   throw new DabaoFrameError('signature does not match the Dabao address');
+}
+
+/** Compressed public key (33 bytes) from a GET_INFO v2 reply, or undefined for v1 firmware. */
+export function infoPublicKey(payload: Uint8Array): Buffer | undefined {
+  return payload.length >= 55 ? Buffer.from(payload.subarray(22, 55)) : undefined;
 }
 
 /** `0x…` address from a GET_INFO reply payload. */

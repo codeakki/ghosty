@@ -11,7 +11,7 @@ import { encodeWav } from '../src/audio/wav.js';
 import { loadConfig } from '../src/config.js';
 import { orderDigest, type HlOrderFields, type HlSignature } from '../src/execution/dabao.js';
 import { HyperliquidVenue, type HlInfoApi } from '../src/execution/hyperliquid.js';
-import { signerHub } from '../src/execution/signerHub.js';
+import { signerHub, SignerHub } from '../src/execution/signerHub.js';
 import { executeVoiceOrder, voiceOrder } from '../src/execution/voiceOrder.js';
 
 // Throwaway test key (well known, never funded) standing in for the Dabao's key.
@@ -106,10 +106,11 @@ describe('voice order signed on the Dabao', { skip: !existsSync(HOST) && 'run fi
 
   it('speaks the Dabao refusal and submits nothing', async () => {
     const submitted: unknown[] = [];
+    const noPodHub = new SignerHub();  // no pod has ever asked this hub for work
     const venue = new HyperliquidVenue({
       info,
       testnet: true,  // the Dabao is a mainnet signer: it refuses testnet orders
-      signer: { address: DABAO, sign: (frame) => signerHub.sign(frame), submit: async (p) => submitted.push(p) },
+      signer: { address: DABAO, sign: (frame) => noPodHub.sign(frame), submit: async (p) => submitted.push(p) },
     });
     const orderAgent = {
       async handle() {

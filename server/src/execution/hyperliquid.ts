@@ -72,6 +72,8 @@ export interface OrderResult {
   fallback?: boolean;
   /** app.hyperliquid(-testnet).xyz link for the order / account. */
   url?: string;
+  /** On-chain transaction hash, when the venue gives one directly (Uniswap swaps). */
+  txHash?: string;
   error?: string;
 }
 

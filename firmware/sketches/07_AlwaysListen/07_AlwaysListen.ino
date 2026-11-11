@@ -37,7 +37,7 @@
 
 constexpr size_t CHUNK = 256;                        // 16 ms at 16 kHz
 constexpr size_t MAX_SAMPLES = SAMPLE_RATE * 10;     // 10 s cap = 320 KB
-constexpr size_t PRE_ROLL = SAMPLE_RATE * 3 / 10;    // keep 300 ms before the trigger
+constexpr size_t PRE_ROLL = SAMPLE_RATE * 8 / 10;    // keep 800 ms before the trigger (the soft start of "Ghosty")
 constexpr int START_CHUNKS = 3;                      // ~50 ms above the start level
 constexpr int END_QUIET_CHUNKS = 62;                 // ~1 s below the start level
 constexpr size_t MIN_SPEECH = SAMPLE_RATE * 2 / 5;   // ignore blips < 400 ms
@@ -45,7 +45,7 @@ constexpr float START_FACTOR = 4.0f;                 // start level = floor * fa
 constexpr uint32_t MIN_START = 200;                  // ... but never below this
 constexpr float KEEP_FACTOR = 2.0f;                  // once started, speech continues above floor * this
 constexpr size_t NET_CHUNK = 1024;
-constexpr float SPEAKER_GAIN = 4.0f;                 // reply loudness; peaks are soft-limited, not clipped
+constexpr float SPEAKER_GAIN = 6.0f;                 // reply loudness; peaks are soft-limited, not clipped
 constexpr int32_t LIMIT_KNEE = 20000;                // soft limiter starts here (full scale 32767)
 
 I2SClass i2s;
@@ -92,6 +92,8 @@ void boost(int16_t *pcm, size_t n) {
 }
 
 void connectWiFi() {
+  WiFi.disconnect(true, false);  // end any half-open attempt, or begin() fails with "sta is connecting"
+  delay(200);
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
   Serial.printf("[wifi] connecting to %s", WIFI_SSID);
@@ -211,7 +213,7 @@ size_t streamReply(HTTPClient &http) {
 // goes to the Dabao unchanged; its reply frame goes back to POST /sign. The
 // ESP32 only moves bytes: the server and the Dabao each check the CRC.
 
-constexpr size_t FRAME_MAX = 128;
+constexpr size_t FRAME_MAX = 3200;  // a Uniswap swap frame (~1.4 KB; Dabao limit 3100 + header)
 constexpr uint32_t SIGN_WAIT_MS = 35000;  // covers the Dabao's 30 s button wait if AUTO_APPROVE is off
 
 uint16_t crc16(const uint8_t *d, size_t n) {
@@ -234,7 +236,12 @@ size_t timeoutFrame(uint8_t *out) {
 // Sends `req` to the Dabao and returns its reply frame length (0 = no reply).
 size_t dabaoExchange(const uint8_t *req, size_t reqLen, uint8_t *out) {
   while (Serial1.available()) Serial1.read();  // drop boot text or stale bytes
-  Serial1.write(req, reqLen);
+  // 16-byte chunks with a short pause: the Dabao loses bytes in a long burst (a swap frame is ~1.4 KB).
+  for (size_t i = 0; i < reqLen; i += 16) {
+    Serial1.write(req + i, reqLen - i < 16 ? reqLen - i : 16);
+    Serial1.flush();
+    delayMicroseconds(2000);
+  }
   size_t n = 0, need = 6;
   uint32_t t0 = millis();
   while (millis() - t0 < SIGN_WAIT_MS && n < need) {
@@ -299,10 +306,10 @@ void sendVoice(size_t samples) {
   writeWavHeader(wav, pcmBytes, SAMPLE_RATE);
 
   String signId;
-  uint8_t frame[FRAME_MAX], reply[FRAME_MAX];
+  static uint8_t frame[FRAME_MAX], reply[FRAME_MAX];
   size_t frameLen = 0;
   int code = postOnce("/voice", wav, WAV_HEADER_BYTES + pcmBytes, "audio/wav", signId, frame, frameLen);
-  for (int round = 0; code == 202 && round < 3; round++) {
+  for (int round = 0; code == 202 && round < 6; round++) {
     Serial.println("[dabao] signing");
     size_t n = dabaoExchange(frame, frameLen, reply);
     if (n == 0) {
@@ -312,6 +319,46 @@ void sendVoice(size_t samples) {
       Serial.printf("[dabao] reply type 0x%02x\n", reply[1]);
     }
     code = postOnce("/sign", reply, n, "application/octet-stream", signId, frame, frameLen);
+  }
+}
+
+// Between voice turns the agent may need the Dabao (an x402 payment or a swap it started itself).
+// GET /sign/next answers 202 + a frame when one is waiting, else 204.
+void pollSignRequests() {
+  static uint8_t frame[FRAME_MAX], reply[FRAME_MAX];
+  for (int round = 0; round < 4; round++) {
+    HTTPClient http;
+    ghostyHttpBegin(http, GHOSTY_SERVER_URL "/sign/next");
+    http.useHTTP10(true);
+    http.setTimeout(10000);
+    const char *keep[] = {"X-Sign-Id"};
+    http.collectHeaders(keep, 1);
+    http.addHeader("X-Device-Token", GHOSTY_DEVICE_TOKEN);
+    int code = http.GET();
+    if (code != 202) {
+      if (code != 204) Serial.printf("[sign] GET /sign/next -> %d\n", code);
+      http.end();
+      return;
+    }
+    String signId = http.header("X-Sign-Id");
+    size_t frameLen = 0;
+    Stream *s = http.getStreamPtr();
+    int size = http.getSize();
+    uint32_t t0 = millis();
+    while (s && size > 0 && frameLen < (size_t)size && frameLen < FRAME_MAX && millis() - t0 < 5000) {
+      if (s->available()) frame[frameLen++] = s->read(); else delay(1);
+    }
+    http.end();
+    Serial.printf("[sign] background request, %u bytes\n", (unsigned)frameLen);
+    size_t n = dabaoExchange(frame, frameLen, reply);
+    if (n == 0) {
+      Serial.println("[dabao] no reply");
+      n = timeoutFrame(reply);
+    } else {
+      Serial.printf("[dabao] reply type 0x%02x\n", reply[1]);
+    }
+    size_t unused = 0;
+    if (postOnce("/sign", reply, n, "application/octet-stream", signId, frame, unused) != 204) return;
   }
 }
 
@@ -349,10 +396,16 @@ void setup() {
 void loop() {
   if (WiFi.status() != WL_CONNECTED) {
     connectWiFi();
+    // The Wi-Fi radio adds mic noise: measure the floor again with Wi-Fi up.
+    if (WiFi.status() == WL_CONNECTED) {
+      drainMic(300);
+      calibrate();
+    }
     return;
   }
   size_t n = listen();
   if (n == LISTEN_IDLE) {
+    pollSignRequests();
     pollAnnouncement();
     drainMic(300);
     return;

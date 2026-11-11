@@ -18,7 +18,7 @@ if [ "${1:-}" = "host" ]; then
   cc -O2 -Wall -Wextra \
     -DuECC_SUPPORTS_secp160r1=0 -DuECC_SUPPORTS_secp192r1=0 -DuECC_SUPPORTS_secp224r1=0 \
     -DuECC_SUPPORTS_secp256r1=0 -DuECC_SUPPORTS_secp256k1=1 \
-    -o "$SRC/host/host_signer" "$SRC/host/host_signer.c" "$SRC/hl_signer.c" \
+    -o "$SRC/host/host_signer" "$SRC/host/host_signer.c" "$SRC/hl_signer.c" "$SRC/tx_signer.c" \
     "$SRC/third_party/micro-ecc/uECC.c" "$SRC/third_party/tiny_sha3/sha3.c"
   echo "built $SRC/host/host_signer"
   exit 0

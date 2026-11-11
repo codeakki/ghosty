@@ -74,6 +74,8 @@ def main():
     if kind == 0xFF:
         raise SystemExit(f"error: {ERRORS.get(p[0], p[0])}")
     print(f"address 0x{p[:20].hex()}  network {'mainnet' if p[20] == 0 else 'testnet'}  version {p[21]}")
+    if len(p) >= 55:
+        print(f"pubkey  {p[22:55].hex()}   (HEDERA_DABAO_PUBLIC_KEY)")
     if "--sign" in sys.argv:
         px, sz = b"4106", b"0.0025"
         order = struct.pack("<IBBQ", 110003, 1, 0, int(time.time() * 1000)) + bytes([len(px)]) + px + bytes([len(sz)]) + sz
