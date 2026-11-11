@@ -43,10 +43,16 @@ const ConfigSchema = z.object({
 
   GROQ_API_KEY: optional,
   GROQ_STT_MODEL: z.string().default('whisper-large-v3-turbo'),
+  /** Speech-to-text language (ISO 639-1). Fixed to English so Whisper never writes the wearer's words in Chinese or Urdu. Empty = auto-detect. */
+  STT_LANGUAGE: z.string().default('en'),
   ELEVENLABS_API_KEY: optional,
   // "George", the voice used throughout the ElevenLabs API reference examples.
-  ELEVENLABS_VOICE_ID: z.string().default('JBFqnCBsd6RMkjVDRZzb'),
+  ELEVENLABS_VOICE_ID: z.string().default('EXAVITQu4vr4xnSDxMaL'),
   ELEVENLABS_MODEL_ID: z.string().default('eleven_flash_v2_5'),
+  /** Speaking speed, 0.7-1.2 (1.0 = normal). Default 0.9: a little slower and clearer on the pod speaker. */
+  ELEVENLABS_SPEED: z.coerce.number().min(0.7).max(1.2).default(0.9).catch(0.9),
+  /** 0-1: higher is steadier and clearer, lower more expressive. */
+  ELEVENLABS_STABILITY: z.coerce.number().min(0).max(1).default(0.6).catch(0.6),
   // TTS fallback only (gpt-4o-mini-tts, 24 kHz PCM resampled to 16 kHz). Used when ELEVENLABS_API_KEY is unset.
   OPENAI_API_KEY: optional,
 
@@ -98,6 +104,14 @@ const ConfigSchema = z.object({
   /** Only used when a private key is raw hex; DER keys carry their own type. */
   HEDERA_KEY_TYPE: z.enum(['ecdsa', 'ed25519']).default('ecdsa').catch('ecdsa'),
   HEDERA_NETWORK: z.enum(['testnet', 'mainnet']).default('testnet').catch('testnet'),
+  /** Who signs x402 payments: `key` = HEDERA_PRIVATE_KEY here; `dabao` = the Dabao in the pod pays from HEDERA_DABAO_ACCOUNT_ID. */
+  X402_SIGNER: z.enum(['key', 'dabao']).default('key').catch('key'),
+  /** Hedera account whose ECDSA key is the Dabao's key (npm run hedera:dabao-account). Required for X402_SIGNER=dabao. */
+  HEDERA_DABAO_ACCOUNT_ID: optional,
+  /** The Dabao's compressed secp256k1 public key, 66 hex chars (GET_INFO v2). Required for X402_SIGNER=dabao. */
+  HEDERA_DABAO_PUBLIC_KEY: optional,
+  /** HBAR moved from HEDERA_TREASURY_ACCOUNT_ID to HEDERA_ACCOUNT_ID right before every Ghosty prompt. 0 = off. */
+  PROMPT_FEE_HBAR: z.coerce.number().min(0).max(10).default(0).catch(0),
   /** TREASURY: tops up the agent and is the HCS topic admin. Read only by `npm run hedera:setup`, never by the server. */
   HEDERA_TREASURY_ACCOUNT_ID: optional,
   HEDERA_TREASURY_PRIVATE_KEY: optional,
@@ -166,6 +180,8 @@ const ConfigSchema = z.object({
   UNISWAP_API_URL: z.string().default('https://trade-api.gateway.uniswap.org/v1'),
   /** Run the Uniswap spot leg before the perp legs. */
   UNISWAP_SPOT_LEG: bool(false),
+  /** Who signs swaps: `key` = EVM_PRIVATE_KEY here; `dabao` = the Dabao in the pod, from HL_DABAO_ADDRESS (native ETH input only). */
+  UNISWAP_SIGNER: z.enum(['key', 'dabao']).default('key').catch('key'),
   // Demo pair on Base Sepolia (84532). VERIFY before the event: pool liquidity is thin and addresses are per chain.
   // WETH: OP-stack predeploy 0x4200…0006. USDC: Circle's Base Sepolia USDC.
   UNISWAP_DEMO_TOKEN_IN: z.string().default('0x4200000000000000000000000000000000000006'),

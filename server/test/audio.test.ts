@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 import { resamplePcm16 } from '../src/audio/resample.js';
 import { createStt, FakeStt, GroqStt, SttError } from '../src/audio/stt.js';
 import type { TtsError } from '../src/audio/tts.js';
-import { createTts, ElevenLabsTts, OpenAiTts, ToneTts } from '../src/audio/tts.js';
+import { createTts, ElevenLabsTts, normalizePeak, OpenAiTts, ToneTts } from '../src/audio/tts.js';
 import { encodeWav, parseWav } from '../src/audio/wav.js';
 
 interface Call {
@@ -117,10 +117,23 @@ describe('ElevenLabsTts', () => {
     const call = calls[0]!;
     assert.equal(
       call.url,
-      'https://api.elevenlabs.io/v1/text-to-speech/JBFqnCBsd6RMkjVDRZzb/stream?output_format=pcm_16000',
+      'https://api.elevenlabs.io/v1/text-to-speech/EXAVITQu4vr4xnSDxMaL/stream?output_format=pcm_16000',
     );
     assert.equal((call.init.headers as Record<string, string>)['xi-api-key'], 'xi_test');
-    assert.deepEqual(JSON.parse(call.init.body as string), { text: 'Geopolitical shock detected.', model_id: 'eleven_flash_v2_5' });
+    assert.deepEqual(JSON.parse(call.init.body as string), {
+      text: 'Geopolitical shock detected.',
+      model_id: 'eleven_flash_v2_5',
+      voice_settings: { stability: 0.6, similarity_boost: 0.75, speed: 0.9 },
+    });
+  });
+
+  it('scales every reply to the same peak level', () => {
+    const quiet = Buffer.alloc(8);
+    [100, -400, 200, 0].forEach((v, i) => quiet.writeInt16LE(v, i * 2));
+    const out = normalizePeak(quiet, 0.3);
+    assert.equal(Math.abs(out.readInt16LE(2)), Math.round(0.3 * 32767));
+    assert.equal(out.readInt16LE(0), Math.round(100 * (0.3 * 32767) / 400));
+    assert.deepEqual(normalizePeak(Buffer.alloc(4)), Buffer.alloc(4), 'silence stays silent');
   });
 
   it('throws TtsError on 4xx', async () => {

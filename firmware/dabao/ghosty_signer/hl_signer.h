@@ -14,12 +14,12 @@
 #include <stdint.h>
 
 #define HL_FRAME_START 0xA5
-#define HL_MAX_PAYLOAD 96
+#define HL_MAX_PAYLOAD 3100  // a Uniswap swap with its calldata (EVM_MAX_DATA + 70); orders are under 96
 
 // Requests (ESP32 -> Dabao) and replies (Dabao -> ESP32).
 #define HL_CMD_GET_INFO 0x01        // payload: none
 #define HL_CMD_SIGN_ORDER 0x02      // payload: see hl_parse_order
-#define HL_RSP_INFO 0x81            // payload: address[20] | network u8 | version u8
+#define HL_RSP_INFO 0x81            // payload: address[20] | network u8 | version u8 [| pubkey[33] from v2]
 #define HL_RSP_SIGNATURE 0x82       // payload: r[32] | s[32]
 #define HL_RSP_ERROR 0xFF           // payload: error code u8
 
@@ -37,6 +37,10 @@ enum hl_error {
   HL_ERR_SIGN = 10,          // signing failed
   HL_ERR_DAILY = 11,         // today's signed total would pass the daily limit
   HL_ERR_RATE = 12,          // asked again too soon after the last signature
+  HL_ERR_CHAIN = 13,         // transaction for another chain
+  HL_ERR_TARGET = 14,        // contract or receiver not on the allowlist
+  HL_ERR_AMOUNT = 15,        // amount or gas above the per-transaction limit
+  HL_ERR_TXTYPE = 16,        // method or transaction type the Dabao does not sign
 };
 
 typedef struct {

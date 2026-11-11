@@ -11,7 +11,15 @@ import { planSteps, type PlannedAction, type PlanStep, type SpotLegSpec } from '
 import { FakeSpotLeg, type SpotLeg } from './wallet/uniswap.js';
 import { fetchAll, type NewsItem, type NewsProvider } from './news/types.js';
 import { ProviderNotConfiguredError, type NotConfiguredInfo } from './mode.js';
-import { classifyIntent, hasWakeWord, type VoiceIntent } from './claude/intent.js';
+import { classifyIntent, hasWakeWord, isBareWakeWord, isVenueOrder, type VoiceIntent } from './claude/intent.js';
+
+/** After a clip that is only "Ghosty", the next clip within this time is for Ghosty too (the wearer paused). */
+export const WAKE_FOLLOW_UP_MS = 10_000;
+/** Midterms simulation: the suggested real Uniswap buy, and how long a yes is accepted. */
+export const SIM_BUY_USD = 5;
+/** Hyperliquid's minimum order is 10 dollars. */
+export const SIM_LONG_USD = 10;
+export const SIM_CONFIRM_MS = 120_000;
 import { ASSISTANT_FALLBACK_REPLY, type VoiceAssistant } from './claude/voice.js';
 import type { OrderAgentReply } from './claude/orderAgent.js';
 import { GUEST_NO_ASSISTANT_REPLY, GUEST_TRADE_REPLY } from './guest/access.js';
@@ -102,6 +110,14 @@ export interface PipelineDeps {
   recentNews?: () => Array<{ title: string; source: string }>;
   /** Hyperliquid tx hash of a filled order, saved in the journal. Best effort. */
   lookupFillHash?: (orderId: string) => Promise<string | undefined>;
+  /** Charged right before every Ghosty prompt is handled (PROMPT_FEE_HBAR). A failure is logged, never blocks the turn. */
+  promptFee?: (transcript: string) => Promise<void>;
+  /** Real Uniswap buy (USDC, signed on the Dabao) for the scripted simulation, after the wearer says yes. */
+  simulationBuy?: (asset: 'ETH', usd: number) => Promise<{ reply: string; result?: OrderResult }>;
+  /** Real Hyperliquid long for the simulation (signed on the Dabao). */
+  simulationLong?: (usd: number) => Promise<{ reply: string; result?: OrderResult }>;
+  /** Live evaluation spoken by the simulation (Polymarket result, ETH move). */
+  simulationEvaluation?: () => Promise<string>;
   /** Journal write failures (the turn itself never fails because of memory). */
   onMemoryError?: (err: unknown) => void;
   /** How long a presented decision can still be confirmed (PENDING_DECISION_TTL_SEC). Default 120 000 ms. */
@@ -235,9 +251,22 @@ export class Pipeline {
    * Always-listening pod: the same as handleVoice, but only for speech addressed to Ghosty. Without the wake word
    * (room talk, a TV, Whisper's "Thank you." on noise) it returns undefined after STT: no Claude, no 0G, no order.
    */
+  /** End of the follow-up window after a bare wake word (ms since epoch). */
+  private wakeUntil = 0;
+  /** The simulation's suggested buy, waiting for a yes. */
+  private simPending: { asset: 'ETH'; usd: number; until: number } | undefined;
+
   async handleListening(wav: WavAudio, onWake?: () => void): Promise<{ transcript: string; result?: VoiceResult }> {
     const { text } = await this.deps.stt.transcribe(wav);
-    if (!hasWakeWord(text)) return { transcript: text };
+    const now = Date.now();
+    const followUp = now < this.wakeUntil;
+    if (isBareWakeWord(text)) {
+      // "Ghosty." then a pause: stay quiet and take the next clip as the request.
+      this.wakeUntil = now + WAKE_FOLLOW_UP_MS;
+      return { transcript: text };
+    }
+    if (!hasWakeWord(text) && !followUp && !isVenueOrder(text)) return { transcript: text };
+    this.wakeUntil = 0;
     onWake?.();
     return { transcript: text, result: await this.answer(text, 'voice') };
   }
@@ -349,10 +378,14 @@ export class Pipeline {
   }
 
   private async answer(transcript: string, trigger: DecisionTrigger): Promise<VoiceResult> {
+    await this.deps.promptFee?.(transcript).catch(() => undefined);
     const intent = classifyIntent(transcript);
     const { assistant } = this.deps;
     let turn: Omit<VoiceResult, 'audio' | 'ttsNotConfigured'>;
-    if (this.deps.orderAgent) {
+    const sim = await this.simulation(transcript, intent);
+    if (sim) {
+      turn = sim;
+    } else if (this.deps.orderAgent) {
       turn = await this.order(this.deps.orderAgent, transcript, intent);
     } else if (assistant && intent === 'question') {
       turn = await this.ask(assistant, transcript, intent);
@@ -419,9 +452,10 @@ export class Pipeline {
       const orders: JournalOrder[] = [];
       for (const o of turn.orders ?? []) {
         const txHash =
-          o.status === 'filled' && o.orderId && this.deps.lookupFillHash
+          o.txHash ??
+          (o.status === 'filled' && o.orderId && this.deps.lookupFillHash
             ? await this.deps.lookupFillHash(o.orderId).catch(() => undefined)
-            : undefined;
+            : undefined);
         orders.push({
           coin: o.coin,
           side: o.isBuy ? 'buy' : 'sell',
@@ -490,6 +524,53 @@ export class Pipeline {
         assistantError: err instanceof Error ? err.name : 'unknown error',
       };
     }
+  }
+
+  /**
+   * Scripted demo, only on request ("run the midterms simulation"): Ghosty speaks the news and suggests 5 dollars
+   * of ETH on Uniswap. A "yes" within SIM_CONFIRM_MS (no wake word needed) runs the REAL swap; "no" cancels it.
+   */
+  private async simulation(transcript: string, intent: VoiceIntent): Promise<Omit<VoiceResult, 'audio' | 'ttsNotConfigured'> | undefined> {
+    const now = Date.now();
+    const said = transcript.replace(/\b(?:hey\s+)?gh?o+s?h?t[\s-]?(?:y|ie|i|ee|e)\b[,.!]?/gi, ' ').trim();
+    const id = `sim-${randomUUID()}`;
+    if (this.deps.simulationBuy && /\b(?:run|start|play|begin|do)\b.*\bsimulation\b|\bsimulat\w*\b.*\bmid-?terms?\b|\bmid-?terms?\b.*\bsimulat/i.test(said)) {
+      return { transcript, answeredBy: 'claude', intent, reply: await this.startSimulation(), requestId: id };
+    }
+    const pending = this.simPending;
+    if (!pending || now > pending.until) return undefined;
+    // A full order ("buy 5 dollars of Apple on Uniswap") is not an answer to the simulation: the order agent takes it.
+    if (said.split(/\s+/).length > 4 || /\b(?:apple|nvidia|tesla|microsoft|amazon|google|alphabet|meta|strategy|sandisk|spacex|bitcoin|btc|gold|oil|sol(?:ana)?)\b/i.test(said)) return undefined;
+    const hyper = /\b(?:hyper\s?liquid|long|perp)\b/i.test(said);
+    const uni = /\b(?:uni\s?swap|usdc|spot)\b/i.test(said) || /^\W*(?:yes|yeah|yep|yup|sure|ok(?:ay)?|do it|go ahead|confirm|buy it)\b/i.test(said);
+    if (hyper && this.deps.simulationLong) {
+      this.simPending = undefined;
+      const { reply, result } = await this.deps.simulationLong(SIM_LONG_USD);
+      return { transcript, answeredBy: 'order', intent: 'trade', reply, requestId: id, orders: result ? [result] : [] };
+    }
+    if (uni) {
+      this.simPending = undefined;
+      const { reply, result } = await this.deps.simulationBuy!(pending.asset, pending.usd);
+      return { transcript, answeredBy: 'order', intent: 'trade', reply, requestId: id, orders: result ? [result] : [] };
+    }
+    if (/^\W*(?:no|nope|cancel|stop|don'?t)\b/i.test(said)) {
+      this.simPending = undefined;
+      return { transcript, answeredBy: 'claude', intent, reply: 'Okay, I cancelled it. No trade.', requestId: id };
+    }
+    return undefined;
+  }
+
+  /** Builds the simulation's spoken alert (with the live evaluation) and opens the window for the answer. */
+  async startSimulation(): Promise<string> {
+    const evaluation = (await this.deps.simulationEvaluation?.().catch(() => undefined)) ?? '';
+    const now = Date.now();
+    this.simPending = { asset: 'ETH', usd: SIM_BUY_USD, until: now + SIM_CONFIRM_MS };
+    this.wakeUntil = now + SIM_CONFIRM_MS;
+    return (
+      'Simulation. Breaking news: the Democrats won the midterms, and crypto and stock prices are rising. ' +
+      `${evaluation} I think this is bullish for crypto, so I suggest going long ETH. ` +
+      `Say Hyperliquid to long ${SIM_LONG_USD} dollars of ETH, or Uniswap to buy ${SIM_BUY_USD} dollars of ETH with USDC. These are real trades. Say no to skip.`
+    );
   }
 
   /** "yes" / "confirm" / "cancel" by voice: the button is the only way to act on a pending 0G decision. */

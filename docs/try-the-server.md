@@ -70,5 +70,5 @@ Dabao ──> pod ──/sign──> server: checks the signature ──> Hyperl
 server ──> pod speaker: "Done. I bought 10.16 dollars of gold…"
 ```
 
-The Dabao limits orders to gold, oil, BTC, ETH, and SOL, at most 15 USD per order and 50 USD per day. Close orders
+The Dabao limits orders to gold, oil, BTC, ETH, and SOL, at most 15 USD per order and 100 USD per day. Close orders
 (reduce-only) are exempt.

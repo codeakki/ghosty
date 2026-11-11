@@ -12,7 +12,15 @@ import type { Decision } from './agent/decide.js';
 import { createStt } from './audio/stt.js';
 import { ClaudeVoiceAssistant, type VoiceAssistant, type VoiceContext } from './claude/voice.js';
 import { ClaudeOrderAgent } from './claude/orderAgent.js';
+import { executeSpotBuy, SpotDailyBudget } from './execution/spotOrder.js';
+import { evaluateMidterms } from './signals/midterms.js';
+import { isTestMode } from './mode.js';
+import { executeVoiceOrder, voiceOrder } from './execution/voiceOrder.js';
+import { createPromptFee } from './payments/promptFee.js';
 import { SIGN_TIMEOUT_MS, signerHub } from './execution/signerHub.js';
+
+/** How long GET /sign/next holds the pod's request open for a sign request. */
+const SIGN_NEXT_HOLD_MS = 300;
 import { lookupFillHash } from './execution/hyperliquid.js';
 import { ClaudeMarketPicker, runSignalChecks } from './signals/checks.js';
 import { isAddress } from './wallet/account.js';
@@ -296,6 +304,9 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
           : undefined;
   // Memory, journal and trades are kept per Hyperliquid account (the master address), not per device.
   const accountId = isAddress(config.HL_MASTER_ADDRESS) ? config.HL_MASTER_ADDRESS.toLowerCase() : 'device-0';
+  // Uniswap buys (stocks, ETH, BTC in USDC) only when the Dabao signs them; one daily budget for agent and simulation.
+  const spotDeps =
+    config.UNISWAP_SIGNER === 'dabao' && deps.spot ? { spot: deps.spot, chainId: config.EVM_CHAIN_ID, budget: new SpotDailyBudget() } : undefined;
   // Spoken orders: Claude hears every turn and places explicit orders on the venue, capped at MAX_TRADE_USD.
   const orderAgent: PipelineDeps['orderAgent'] =
     opts.orderAgent !== undefined
@@ -307,6 +318,8 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
             context: () => voiceContext(),
             venue: deps.venue,
             maxTradeUsd: config.MAX_TRADE_USD,
+            // Uniswap buys only when the Dabao signs them (USDC from its address); never with a server key.
+            ...(spotDeps ? { spot: spotDeps } : {}),
           })
         : undefined;
   // Only the live decision loop pays. The SimEngine below gets the bare decider, never buyIntel: sim decisions are paper-only.
@@ -324,6 +337,12 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
     userId: accountId,
     recentNews: () => state.snapshot().news.slice(0, 3).map((n) => ({ title: n.title, source: n.source })),
     lookupFillHash: (orderId) => lookupFillHash(config, orderId),
+    promptFee: createPromptFee(config, (msg, data) => app.log.info(data, msg)),
+    ...(spotDeps ? { simulationBuy: (asset: 'ETH', usd: number) => executeSpotBuy(asset, usd, spotDeps) } : {}),
+    simulationLong:
+      (deps as Partial<PipelineDeps>).simulationLong ??
+      ((usd: number) => executeVoiceOrder(voiceOrder('buy', 'ETH', usd), { venue: deps.venue, maxTradeUsd: config.MAX_TRADE_USD })),
+    simulationEvaluation: (deps as Partial<PipelineDeps>).simulationEvaluation ?? (isTestMode(config) ? async () => '' : () => evaluateMidterms()),
     onMemoryError: (err) => app.log.warn({ err: String(err) }, '0G journal write failed'),
   });
 
@@ -686,6 +705,16 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
   const ANNOUNCE_TTL_MS = 10 * 60_000;
 
   // The pod polls this while idle: 200 + PCM for the oldest fresh announcement, 204 when there is none.
+  // Midterms demo, started from outside the pod: Ghosty speaks the live evaluation and the two choices on the pod
+  // (queued for GET /announce). The wearer answers by voice: "Hyperliquid", "Uniswap" or "no".
+  app.post('/sim/midterms', { preHandler: [requireDevice] }, async (req) => {
+    const text = await pipeline.startSimulation();
+    const id = `sim-midterms-${Date.now()}`;
+    announcements.push({ id, text, at: Date.now() });
+    req.log.info({ id, text }, 'midterms simulation queued for the pod');
+    return { queued: id, text };
+  });
+
   app.get('/announce', { preHandler: [requireDevice] }, async (req, reply) => {
     while (announcements.length && Date.now() - announcements[0]!.at > ANNOUNCE_TTL_MS) announcements.shift();
     const next = announcements.shift();
@@ -737,14 +766,34 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
   });
 
   // The Dabao's reply to a 202 sign request (the frame, byte for byte). Resumes the voice turn that asked for it.
+  // A request picked up with GET /sign/next (no voice turn) only delivers the reply: 204.
   app.post('/sign', { preHandler: [requireDevice] }, async (req, reply) => {
     const id = req.headers['x-sign-id'];
-    const turn = typeof id === 'string' ? openTurns.get(id) : undefined;
-    if (!turn || typeof id !== 'string') return reply.code(404).send({ error: 'unknown_sign_id' });
+    if (typeof id !== 'string') return reply.code(404).send({ error: 'unknown_sign_id' });
     if (!Buffer.isBuffer(req.body) || req.body.length === 0) return reply.code(400).send({ error: 'expected_signer_frame' });
+    const turn = openTurns.get(id);
     openTurns.delete(id);
-    if (!signerHub.deliver(id, req.body)) req.log.warn({ signId: id }, 'sign reply after the request expired');
-    return relayTurn(turn.result, req, reply, turn.pod);
+    const delivered = signerHub.deliver(id, req.body);
+    if (!delivered) req.log.warn({ signId: id }, 'sign reply after the request expired');
+    if (turn) return relayTurn(turn.result, req, reply, turn.pod);
+    return delivered ? reply.code(204).send() : reply.code(404).send({ error: 'unknown_sign_id' });
+  });
+
+  // Between voice turns the pod asks for work: the agent's own swaps and x402 payments need the Dabao too.
+  // 202 + frame + x-sign-id when one is waiting (within a short hold), else 204.
+  app.get('/sign/next', { preHandler: [requireDevice] }, async (req, reply) => {
+    const next = signerHub.nextRequest();
+    let timer: NodeJS.Timeout | undefined;
+    const request = await Promise.race([
+      next.promise,
+      new Promise<undefined>((r) => (timer = setTimeout(() => r(undefined), SIGN_NEXT_HOLD_MS))),
+    ]).finally(() => {
+      clearTimeout(timer);
+      next.cancel();
+    });
+    if (!request) return reply.code(204).send();
+    req.log.info({ signId: request.id }, 'background sign request sent to the pod');
+    return reply.code(202).header('content-type', 'application/octet-stream').header('x-sign-id', request.id).send(request.frame);
   });
 
   /**

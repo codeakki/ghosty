@@ -37,6 +37,26 @@ export function hasWakeWord(utterance: string): boolean {
   return WAKE_WORD.test(utterance) || WAKE_WORD_DEVANAGARI.test(utterance);
 }
 
+/**
+ * A clear order that names a venue ("buy $5 of Apple stock on Uniswap"). Whisper often drops "Ghosty" right before
+ * "buy", so such an order counts as addressed to Ghosty. Background talk rarely says a trade verb and a venue name.
+ */
+export function isVenueOrder(utterance: string): boolean {
+  return /\b(?:buy|sell|long|short|close)\b/i.test(utterance) && /\b(?:uni\s?swap|hyper\s?liquid)\b/i.test(utterance);
+}
+
+/** True when the utterance is only the wake word ("Ghosty.", "Hey Ghosty"): the order usually follows in the next clip. */
+export function isBareWakeWord(utterance: string): boolean {
+  if (!hasWakeWord(utterance)) return false;
+  const rest = utterance
+    .replace(new RegExp(WAKE_WORD.source, 'gi'), ' ')
+    .replace(new RegExp(WAKE_WORD_DEVANAGARI.source, 'gu'), ' ')
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\b(?:hey|hi|hello|ok|okay|yo|so|um|uh)\b/gi, ' ')
+    .trim();
+  return rest.length === 0;
+}
+
 /** Pure keyword routing: same text in, same intent out. */
 export function classifyIntent(utterance: string): VoiceIntent {
   const text = utterance.trim().replace(/\s+/g, ' ');

@@ -70,8 +70,14 @@ async function failure(provider: string, res: Response): Promise<TtsError> {
 }
 
 export const ELEVENLABS_BASE_URL = 'https://api.elevenlabs.io/v1';
-/** "George", the voice id used in the ElevenLabs API reference examples. */
-export const ELEVENLABS_DEFAULT_VOICE_ID = 'JBFqnCBsd6RMkjVDRZzb';
+/** "Sarah": American, mature, reassuring, clear. */
+export const ELEVENLABS_DEFAULT_VOICE_ID = 'EXAVITQu4vr4xnSDxMaL';
+/** Slightly slower than normal (1.0) so the tiny speaker stays easy to follow. ElevenLabs accepts 0.7-1.2. */
+export const ELEVENLABS_DEFAULT_SPEED = 0.9;
+/** Higher = steadier, clearer delivery; lower = more expressive. */
+export const ELEVENLABS_DEFAULT_STABILITY = 0.6;
+/** Every reply is scaled so its loudest sample reaches this fraction of full scale (the pod adds its own gain). */
+export const TTS_TARGET_PEAK = 0.3;
 export const ELEVENLABS_DEFAULT_MODEL = 'eleven_flash_v2_5';
 /** A ~45-word reply can take 15-20 s to synthesize on a slow network; 20 s timed out in practice. */
 export const TTS_TIMEOUT_MS = 45_000;
@@ -80,6 +86,8 @@ export interface ElevenLabsTtsOptions {
   apiKey: string;
   voiceId?: string;
   modelId?: string;
+  speed?: number;
+  stability?: number;
   baseUrl?: string;
   timeoutMs?: number;
   fetch?: typeof fetch;
@@ -104,15 +112,36 @@ export class ElevenLabsTts implements TextToSpeech {
       res = await this.fetchImpl(url, {
         method: 'POST',
         headers: { 'xi-api-key': this.opts.apiKey, 'content-type': 'application/json', accept: 'audio/pcm' },
-        body: JSON.stringify({ text, model_id: this.opts.modelId ?? ELEVENLABS_DEFAULT_MODEL }),
+        body: JSON.stringify({
+          text,
+          model_id: this.opts.modelId ?? ELEVENLABS_DEFAULT_MODEL,
+          voice_settings: {
+            stability: this.opts.stability ?? ELEVENLABS_DEFAULT_STABILITY,
+            similarity_boost: 0.75,
+            speed: this.opts.speed ?? ELEVENLABS_DEFAULT_SPEED,
+          },
+        }),
         signal: AbortSignal.timeout(this.opts.timeoutMs ?? TTS_TIMEOUT_MS),
       });
     } catch (err) {
       throw new TtsError(`elevenlabs tts request failed: ${(err as Error).message}`);
     }
     if (!res.ok) throw await failure('elevenlabs', res);
-    return wholeSamples(await readBody(res));
+    return normalizePeak(wholeSamples(await readBody(res)));
   }
+}
+
+/** Scales s16le PCM so its loudest sample is `peak` of full scale: every reply comes out equally loud. */
+export function normalizePeak(pcm: Buffer, peak = TTS_TARGET_PEAK): Buffer {
+  let max = 0;
+  for (let i = 0; i + 1 < pcm.length; i += 2) max = Math.max(max, Math.abs(pcm.readInt16LE(i)));
+  if (max === 0) return pcm;
+  const gain = (peak * 32767) / max;
+  const out = Buffer.alloc(pcm.length - (pcm.length % 2));
+  for (let i = 0; i + 1 < pcm.length; i += 2) {
+    out.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(pcm.readInt16LE(i) * gain))), i);
+  }
+  return out;
 }
 
 export const OPENAI_SPEECH_URL = 'https://api.openai.com/v1/audio/speech';
@@ -166,13 +195,15 @@ export class OpenAiTts implements TextToSpeech {
  */
 export function createTts(
   config: Pick<Config, 'ELEVENLABS_API_KEY' | 'ELEVENLABS_VOICE_ID' | 'ELEVENLABS_MODEL_ID' | 'OPENAI_API_KEY'> &
-    Partial<Pick<Config, 'GHOSTY_MODE'>>,
+    Partial<Pick<Config, 'GHOSTY_MODE' | 'ELEVENLABS_SPEED' | 'ELEVENLABS_STABILITY'>>,
 ): TextToSpeech {
   if (config.ELEVENLABS_API_KEY) {
     return new ElevenLabsTts({
       apiKey: config.ELEVENLABS_API_KEY,
       voiceId: config.ELEVENLABS_VOICE_ID,
       modelId: config.ELEVENLABS_MODEL_ID,
+      speed: config.ELEVENLABS_SPEED,
+      stability: config.ELEVENLABS_STABILITY,
     });
   }
   if (config.OPENAI_API_KEY) return new OpenAiTts({ apiKey: config.OPENAI_API_KEY });
