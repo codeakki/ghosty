@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto';
 import type { Config } from '../config.js';
 import { isTestMode } from '../mode.js';
 import { missingKeys, NotConfiguredSpotLeg } from '../notConfigured.js';
-import { createEvmClients, explorerTxUrl, isAddress, type Address, type Hex } from './account.js';
+import { DabaoSpotWallet } from '../execution/dabaoWallets.js';
+import { chainFor, createEvmClients, explorerTxUrl, isAddress, type Address, type Hex } from './account.js';
 
 /**
  * Uniswap Trading API spot leg (track: "Build with Uniswap").
@@ -265,8 +266,27 @@ export function createSpotLeg(
     Config,
     'UNISWAP_API_KEY' | 'UNISWAP_API_URL' | 'UNISWAP_SLIPPAGE_PCT' | 'EVM_PRIVATE_KEY' | 'EVM_CHAIN_ID' | 'EVM_RPC_URL'
   > &
-    Partial<Pick<Config, 'GHOSTY_MODE'>>,
+    Partial<Pick<Config, 'GHOSTY_MODE' | 'UNISWAP_SIGNER' | 'HL_DABAO_ADDRESS'>>,
 ): SpotLeg {
+  // UNISWAP_SIGNER=dabao: swaps come from the Dabao's address and only the Dabao signs them.
+  if (config.UNISWAP_SIGNER === 'dabao') {
+    if (!config.UNISWAP_API_KEY || !isAddress(config.HL_DABAO_ADDRESS)) {
+      if (isTestMode(config)) return new FakeSpotLeg();
+      return new NotConfiguredSpotLeg(missingKeys(config, ['UNISWAP_API_KEY', 'HL_DABAO_ADDRESS']));
+    }
+    const wallet = new DabaoSpotWallet({ address: config.HL_DABAO_ADDRESS, chainId: config.EVM_CHAIN_ID, rpcUrl: config.EVM_RPC_URL });
+    const chain = chainFor(config.EVM_CHAIN_ID, config.EVM_RPC_URL);
+    return new UniswapSpotLeg({
+      apiKey: config.UNISWAP_API_KEY,
+      baseUrl: config.UNISWAP_API_URL,
+      swapper: wallet.address,
+      chainId: config.EVM_CHAIN_ID,
+      slippagePct: config.UNISWAP_SLIPPAGE_PCT,
+      explorerTxUrl: (hash) => explorerTxUrl(chain, hash),
+      walletClient: wallet,
+      publicClient: wallet,
+    });
+  }
   const clients = config.UNISWAP_API_KEY ? createEvmClients(config) : undefined;
   if (!config.UNISWAP_API_KEY || !clients) {
     if (isTestMode(config)) return new FakeSpotLeg();

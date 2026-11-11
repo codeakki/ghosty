@@ -33,6 +33,7 @@
 
 /* Single translation unit: the SDK build compiles one .c file per program. */
 #include "hl_signer.c"
+#include "tx_signer.c"
 #include "third_party/micro-ecc/uECC.c"
 #include "third_party/tiny_sha3/sha3.c"
 
@@ -51,23 +52,45 @@
  * 0 = also wait for a press on PB3 before every signature.
  */
 #define AUTO_APPROVE 1
-#define DAILY_LIMIT_MICRO_USD 50000000ULL   /* 50 USD of orders per UTC day */
+#define DAILY_LIMIT_MICRO_USD 100000000ULL  /* 100 USD of orders per UTC day */
 #define MIN_SIGN_INTERVAL_MS 10000          /* at most one signature per 10 s */
+
+/* Base swaps (tx_signer.h has the per-swap limits). Swaps pay in USDC; ETH value is refused. */
+#define EVM_DAILY_LIMIT_WEI 0ULL
+#define EVM_MIN_INTERVAL_MS 10000                /* at most one swap or approval per 10 s */
+#define PERMIT_DAILY_USDC_MICROS 100000000ULL    /* exact permits: 100 USDC per UTC day (by the permit deadline) */
+#define PERMIT_MIN_INTERVAL_MS 10000
+
+/* Hedera x402 payments (per payment: tx_signer.h). */
+#define HED_DAILY_TINYBAR 100000000LL     /* 1 HBAR per UTC day */
+#define HED_DAILY_USDC_MICROS 2000000LL   /* 2 USDC per UTC day */
+#define HED_MIN_INTERVAL_MS 2000
 
 /* 0 = Hyperliquid mainnet ("a"), 1 = testnet ("b"). Orders for the other network are refused. */
 #define SIGNER_NETWORK 0
-#define SIGNER_VERSION 1
+#define SIGNER_VERSION 3  /* 2: Base swaps (0x03), Hedera payments (0x04). 3: USDC Permit2 permits (0x05) */
 
 /* RRAM user area (survives reflashing the program region). 32-byte pages. */
 #define KEY_ADDR (RRAM_USER_BASE + 0x1000)    /* "GHK1" | key[32] | crc16 -> 64 bytes */
 #define NONCE_ADDR (RRAM_USER_BASE + 0x1040)  /* "GHN1" | last nonce u64 | crc16 -> 32 bytes */
 #define DAILY_ADDR (RRAM_USER_BASE + 0x1060)  /* "GHD1" | day u32 | spent micro-USD u64 | crc16 */
+#define EVM_DAILY_ADDR (RRAM_USER_BASE + 0x1080)  /* "GHE1" | day u32 | spent wei u64 | crc16 */
+#define HED_DAILY_ADDR (RRAM_USER_BASE + 0x10A0)  /* "GHH1" | day u32 | tinybar u64 | usdc u64 | crc16 */
+#define PERMIT_DAILY_ADDR (RRAM_USER_BASE + 0x10C0)  /* "GHP1" | day u32 | usdc u64 | crc16 */
 
 static uint8_t g_key[32];
 static uint64_t g_last_nonce;
 static uint32_t g_day;          /* UTC day of the order nonce (ms / 86400000) */
 static uint64_t g_day_spent;    /* micro-USD signed on g_day */
 static uint64_t g_last_sign_ms; /* millis() of the last signature, 0 = none yet */
+static uint32_t g_evm_day;
+static uint64_t g_evm_spent;    /* wei swapped on g_evm_day */
+static uint64_t g_evm_last_ms;
+static uint32_t g_hed_day;
+static int64_t g_hed_tinybar, g_hed_usdc;
+static uint64_t g_hed_last_ms;
+static uint32_t g_permit_day;
+static uint64_t g_permit_spent, g_permit_last_ms;
 
 /* ------------------------------------------------------------------------ */
 /* Persistent state */
@@ -179,6 +202,49 @@ static void load_daily(void) {
     for (int i = 0; i < 8; i++) g_day_spent |= (uint64_t)b[4 + i] << (8 * i);
 }
 
+static void put_le(uint8_t *b, uint64_t v, int n) {
+    for (int i = 0; i < n; i++) b[i] = (uint8_t)(v >> (8 * i));
+}
+
+static uint64_t get_le(const uint8_t *b, int n) {
+    uint64_t v = 0;
+    for (int i = n - 1; i >= 0; i--) v = v << 8 | b[i];
+    return v;
+}
+
+static void store_chain_daily(void) {
+    uint8_t e[12], h[20];
+    put_le(e, g_evm_day, 4);
+    put_le(e + 4, g_evm_spent, 8);
+    store_record(EVM_DAILY_ADDR, "GHE1", e, sizeof e);
+    put_le(h, g_hed_day, 4);
+    put_le(h + 4, (uint64_t)g_hed_tinybar, 8);
+    put_le(h + 12, (uint64_t)g_hed_usdc, 8);
+    store_record(HED_DAILY_ADDR, "GHH1", h, sizeof h);
+    uint8_t q[12];
+    put_le(q, g_permit_day, 4);
+    put_le(q + 4, g_permit_spent, 8);
+    store_record(PERMIT_DAILY_ADDR, "GHP1", q, sizeof q);
+}
+
+static void load_chain_daily(void) {
+    uint8_t e[12], h[20];
+    if (load_record(EVM_DAILY_ADDR, "GHE1", e, sizeof e)) {
+        g_evm_day = (uint32_t)get_le(e, 4);
+        g_evm_spent = get_le(e + 4, 8);
+    }
+    if (load_record(HED_DAILY_ADDR, "GHH1", h, sizeof h)) {
+        g_hed_day = (uint32_t)get_le(h, 4);
+        g_hed_tinybar = (int64_t)get_le(h + 4, 8);
+        g_hed_usdc = (int64_t)get_le(h + 12, 8);
+    }
+    uint8_t q[12];
+    if (load_record(PERMIT_DAILY_ADDR, "GHP1", q, sizeof q)) {
+        g_permit_day = (uint32_t)get_le(q, 4);
+        g_permit_spent = get_le(q + 4, 8);
+    }
+}
+
 /* ------------------------------------------------------------------------ */
 /* UART frames */
 
@@ -205,7 +271,7 @@ static int read_frame(uint8_t *type, uint8_t *payload, uint16_t *len) {
         if (!read_byte(&payload[i], BYTE_TIMEOUT_MS)) return 0;
     for (int i = 0; i < 2; i++)
         if (!read_byte(&crc[i], BYTE_TIMEOUT_MS)) return 0;
-    uint8_t buf[3 + HL_MAX_PAYLOAD];
+    static uint8_t buf[3 + HL_MAX_PAYLOAD];
     copy(buf, hdr, 3);
     copy(buf + 3, payload, n);
     if (hl_crc16(buf, 3 + n) != (uint16_t)(crc[0] | (crc[1] << 8))) return -1;
@@ -284,6 +350,88 @@ static void handle_sign(const uint8_t *payload, uint16_t len) {
     wipe(sig, sizeof sig);
 }
 
+static void reply_signature(const uint8_t digest[32]) {
+    uint8_t sig[64];
+    if (hl_sign(g_key, digest, sig) != HL_OK) {
+        send_error(HL_ERR_SIGN);
+        return;
+    }
+    send(HL_RSP_SIGNATURE, sig, 64);
+    wipe(sig, sizeof sig);
+}
+
+/* Uniswap swap on Base: the Dabao builds the EIP-1559 bytes from the fields it checked. */
+static void handle_evm(const uint8_t *payload, uint16_t len) {
+    evm_tx_t tx;
+    int rc = evm_parse_tx(payload, len, &tx);
+    if (rc == HL_OK) rc = evm_check_tx(&tx);
+    uint32_t day = (uint32_t)(evm_deadline(&tx) / 86400ULL);
+    uint64_t spent = rc == HL_OK && day == g_evm_day ? g_evm_spent : 0;
+    if (rc == HL_OK && spent + tx.value > EVM_DAILY_LIMIT_WEI) rc = HL_ERR_DAILY;
+    if (rc == HL_OK && g_evm_last_ms && millis() - g_evm_last_ms < EVM_MIN_INTERVAL_MS) rc = HL_ERR_RATE;
+    uint8_t digest[32];
+    if (rc == HL_OK && !evm_tx_digest(&tx, digest)) rc = HL_ERR_FIELD;
+    if (rc == HL_OK && !wait_for_approval()) rc = HL_ERR_REJECTED;
+    if (rc != HL_OK) {
+        send_error((uint8_t)rc);
+        return;
+    }
+    g_evm_day = day;
+    g_evm_spent = spent + tx.value;
+    /* The one-time USDC approval does not start the swap timer: the first swap follows it within seconds. */
+    if (!(tx.data_len >= 4 && tx.data[0] == 0x09 && tx.data[1] == 0x5e && tx.data[2] == 0xa7 && tx.data[3] == 0xb3)) g_evm_last_ms = millis();
+    store_chain_daily();
+    reply_signature(digest);
+}
+
+/* USDC Permit2 permit: Uniswap's standard one (max amount, up to 31 days) or an exact one (daily limit). */
+static void handle_permit(const uint8_t *payload, uint16_t len) {
+    permit_t pm;
+    int rc = permit_parse(payload, len, &pm);
+    if (rc == HL_OK) rc = permit_check(&pm);
+    uint32_t day = (uint32_t)(pm.sig_deadline / 86400ULL);
+    uint64_t spent = rc == HL_OK && day == g_permit_day ? g_permit_spent : 0;
+    uint64_t counted = pm.amount == PERMIT_AMOUNT_MAX ? 0 : pm.amount;  /* standing permit: the server limits buys */
+    if (rc == HL_OK && spent + counted > PERMIT_DAILY_USDC_MICROS) rc = HL_ERR_DAILY;
+    if (rc == HL_OK && g_permit_last_ms && millis() - g_permit_last_ms < PERMIT_MIN_INTERVAL_MS) rc = HL_ERR_RATE;
+    if (rc == HL_OK && !wait_for_approval()) rc = HL_ERR_REJECTED;
+    if (rc != HL_OK) {
+        send_error((uint8_t)rc);
+        return;
+    }
+    g_permit_day = day;
+    g_permit_spent = spent + counted;
+    g_permit_last_ms = millis();
+    store_chain_daily();
+    uint8_t digest[32];
+    permit_digest(&pm, digest);
+    reply_signature(digest);
+}
+
+/* Hedera x402 payment: the Dabao parses the TransactionBody and signs keccak256(body). */
+static void handle_hedera(const uint8_t *payload, uint16_t len) {
+    hedera_summary_t sum;
+    int rc = hedera_check_body(payload, len, &sum);
+    uint32_t day = (uint32_t)(sum.valid_start / 86400ULL);
+    int64_t tb = rc == HL_OK && day == g_hed_day ? g_hed_tinybar : 0;
+    int64_t us = rc == HL_OK && day == g_hed_day ? g_hed_usdc : 0;
+    if (rc == HL_OK && (tb + sum.tinybar_out > HED_DAILY_TINYBAR || us + sum.usdc_out > HED_DAILY_USDC_MICROS)) rc = HL_ERR_DAILY;
+    if (rc == HL_OK && g_hed_last_ms && millis() - g_hed_last_ms < HED_MIN_INTERVAL_MS) rc = HL_ERR_RATE;
+    if (rc == HL_OK && !wait_for_approval()) rc = HL_ERR_REJECTED;
+    if (rc != HL_OK) {
+        send_error((uint8_t)rc);
+        return;
+    }
+    g_hed_day = day;
+    g_hed_tinybar = tb + sum.tinybar_out;
+    g_hed_usdc = us + sum.usdc_out;
+    g_hed_last_ms = millis();
+    store_chain_daily();
+    uint8_t digest[32];
+    hl_keccak256(payload, len, digest);
+    reply_signature(digest);
+}
+
 int main(void) {
     bao_init();
     trng_init();
@@ -298,6 +446,7 @@ int main(void) {
     int have_key = key_ready();
     load_nonce();
     load_daily();
+    load_chain_daily();
 
     /* One status line at boot (the ESP32 skips bytes outside frames). The address is public. */
     uint8_t addr[20];
@@ -306,7 +455,7 @@ int main(void) {
         for (int i = 0; i < 20; i++) mini_printf("%02x", addr[i]);
     mini_printf("\r\n");
 
-    uint8_t payload[HL_MAX_PAYLOAD];
+    static uint8_t payload[HL_MAX_PAYLOAD];
     while (1) {
         uint8_t type;
         uint16_t len;
@@ -319,13 +468,20 @@ int main(void) {
         if (!have_key) {
             send_error(HL_ERR_KEY);
         } else if (type == HL_CMD_GET_INFO && len == 0) {
-            uint8_t info[22];
+            uint8_t info[22 + 33];
             hl_address(g_key, info);
             info[20] = SIGNER_NETWORK;
             info[21] = SIGNER_VERSION;
+            hl_public_key(g_key, info + 22);
             send(HL_RSP_INFO, info, sizeof info);
         } else if (type == HL_CMD_SIGN_ORDER) {
             handle_sign(payload, len);
+        } else if (type == HL_CMD_SIGN_EVM_TX) {
+            handle_evm(payload, len);
+        } else if (type == HL_CMD_SIGN_HEDERA) {
+            handle_hedera(payload, len);
+        } else if (type == HL_CMD_SIGN_PERMIT2) {
+            handle_permit(payload, len);
         } else {
             send_error(HL_ERR_COMMAND);
         }

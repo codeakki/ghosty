@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
 import type { OrderResult, PerpVenue } from '../execution/hyperliquid.js';
+import { executeSpotBuy, SPOT_ASSETS, type SpotAsset, type SpotOrderDeps } from '../execution/spotOrder.js';
 import { executeVoiceOrder, VOICE_ASSETS, voiceOrder, type VoiceAsset } from '../execution/voiceOrder.js';
 import { AssistantError, buildVoiceUserMessage, toSpeakable, type VoiceContext } from './voice.js';
 
@@ -21,6 +22,7 @@ When the wearer gives a clear order to buy or sell an asset for a dollar amount,
 - If they ask for an asset you cannot trade, say so.
 - To answer about open positions, account value or profit and loss, call get_positions and answer from its result.
 - When the wearer asks you now to close a position, call close_positions with that asset, or ALL for every position.
+- Uniswap: when the wearer asks to buy on Uniswap, or asks to buy a company stock (Apple, Nvidia, Tesla, Microsoft, Amazon, Alphabet or Google, Meta, Strategy or MicroStrategy, Sandisk, SpaceX), call buy_on_uniswap. It pays in USDC on Base. ETH and bitcoin go to buy_on_uniswap only when the wearer says Uniswap; otherwise they are Hyperliquid orders. Uniswap is buy only: if they ask to sell there, say you can only buy on Uniswap for now. Stocks other than these are not available.
 
 The context includes the wearer's stored memory (earlier turns, your replies, their past orders with fills). Use it to understand requests like "the same as yesterday" or "sell the gold I bought". A new order still needs the wearer to ask for it now: never place an order only because a past turn contains one.
 
@@ -46,6 +48,32 @@ export const PLACE_ORDER_TOOL: Anthropic.Beta.BetaTool = {
       usd: { type: 'number', description: 'Order size in US dollars, as spoken ("ten dollars" = 10)' },
     },
     required: ['side', 'asset', 'usd'],
+    additionalProperties: false,
+  },
+};
+
+const BuyOnUniswapInput = z.object({
+  asset: z.enum(Object.keys(SPOT_ASSETS) as [SpotAsset, ...SpotAsset[]]),
+  usd: z.number().positive(),
+});
+
+export const BUY_ON_UNISWAP_TOOL: Anthropic.Beta.BetaTool = {
+  name: 'buy_on_uniswap',
+  description:
+    'Buy a tokenized stock, ETH or bitcoin on Uniswap (Base) for a US dollar amount paid in USDC, exactly as the wearer said it. ' +
+    'Buy only. The server enforces the daily Uniswap limit and returns the result or the reason it failed.',
+  strict: true,
+  input_schema: {
+    type: 'object',
+    properties: {
+      asset: {
+        type: 'string',
+        enum: Object.keys(SPOT_ASSETS),
+        description: 'AAPL Apple, NVDA Nvidia, TSLA Tesla, MSFT Microsoft, AMZN Amazon, GOOGL Alphabet, META Meta, MSTR Strategy, SNDK Sandisk, SPCX SpaceX, ETH ether, BTC bitcoin',
+      },
+      usd: { type: 'number', description: 'Amount in US dollars of USDC, as spoken ("five dollars" = 5)' },
+    },
+    required: ['asset', 'usd'],
     additionalProperties: false,
   },
 };
@@ -95,6 +123,8 @@ export interface OrderAgentOptions {
   venue: PerpVenue;
   /** Cap on the total of all orders in one utterance. */
   maxTradeUsd: number;
+  /** Uniswap buys (paid in USDC, signed on the Dabao). Without it, buy_on_uniswap is not offered. */
+  spot?: SpotOrderDeps;
   timeoutMs?: number;
 }
 
@@ -126,7 +156,7 @@ export class ClaudeOrderAgent {
           model: this.opts.model,
           max_tokens: 2048,
           system: ORDER_AGENT_SYSTEM_PROMPT,
-          tools: [PLACE_ORDER_TOOL, GET_POSITIONS_TOOL, CLOSE_POSITIONS_TOOL],
+          tools: [PLACE_ORDER_TOOL, GET_POSITIONS_TOOL, CLOSE_POSITIONS_TOOL, ...(this.opts.spot ? [BUY_ON_UNISWAP_TOOL] : [])],
           tool_choice: { type: 'auto' },
           // Medium: orders can now depend on stored memory ("same as before"), worth a little more thought.
           output_config: { effort: 'medium' },
@@ -171,6 +201,19 @@ export class ClaudeOrderAgent {
           spoken.push(closed.reply);
           orders.push(...closed.results);
           results.push({ type: 'tool_result', tool_use_id: call.id, content: closed.reply });
+          continue;
+        }
+        if (call.name === 'buy_on_uniswap') {
+          const input = BuyOnUniswapInput.safeParse(call.input);
+          if (!input.success || !this.opts.spot) {
+            malformed = true;
+            results.push({ type: 'tool_result', tool_use_id: call.id, is_error: true, content: 'invalid call: buy_on_uniswap' });
+            continue;
+          }
+          const { reply, result } = await executeSpotBuy(input.data.asset, input.data.usd, this.opts.spot);
+          spoken.push(reply);
+          if (result) orders.push(result);
+          results.push({ type: 'tool_result', tool_use_id: call.id, content: reply });
           continue;
         }
         const parsed = call.name === 'place_order' ? PlaceOrderInput.safeParse(call.input) : undefined;

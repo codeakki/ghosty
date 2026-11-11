@@ -124,7 +124,8 @@ export class GroqStt implements SpeechToText {
 // }
 
 /** Real Groq STT when GROQ_API_KEY is set; otherwise the fake in test mode, NotConfiguredStt in live mode. */
-export function createStt(config: Pick<Config, 'GROQ_API_KEY' | 'GROQ_STT_MODEL'> & Partial<Pick<Config, 'GHOSTY_MODE'>>): SpeechToText {
-  if (config.GROQ_API_KEY) return new GroqStt({ apiKey: config.GROQ_API_KEY, model: config.GROQ_STT_MODEL });
+export function createStt(config: Pick<Config, 'GROQ_API_KEY' | 'GROQ_STT_MODEL'> & Partial<Pick<Config, 'GHOSTY_MODE' | 'STT_LANGUAGE'>>): SpeechToText {
+  if (config.GROQ_API_KEY)
+    return new GroqStt({ apiKey: config.GROQ_API_KEY, model: config.GROQ_STT_MODEL, ...(config.STT_LANGUAGE ? { language: config.STT_LANGUAGE } : {}) });
   return isTestMode(config) ? new FakeStt() : new NotConfiguredStt();
 }

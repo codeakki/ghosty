@@ -1,3 +1,4 @@
+import { DabaoHederaSigner } from '../execution/dabaoWallets.js';
 import { createHash } from 'node:crypto';
 import { loadConfig, type Config } from '../config.js';
 import { FakeEthosScorer } from '../credibility/ethos.js';
@@ -87,15 +88,28 @@ export function createPayments(
   let payer: Payer;
   let spendCap: SpendCap;
   let audit: AuditLog = new NoopAuditLog();
-  if (config.HEDERA_ACCOUNT_ID && config.HEDERA_PRIVATE_KEY) {
-    const real = new X402Payer({ ...opts, config });
+  // X402_SIGNER=dabao: payments come from the Dabao's Hedera account and only the Dabao signs them.
+  const dabao =
+    config.X402_SIGNER === 'dabao' && config.HEDERA_DABAO_ACCOUNT_ID && config.HEDERA_DABAO_PUBLIC_KEY
+      ? new DabaoHederaSigner({
+          accountId: config.HEDERA_DABAO_ACCOUNT_ID,
+          publicKeyHex: config.HEDERA_DABAO_PUBLIC_KEY,
+          network: config.HEDERA_NETWORK,
+        })
+      : undefined;
+  if (dabao || (config.X402_SIGNER !== 'dabao' && config.HEDERA_ACCOUNT_ID && config.HEDERA_PRIVATE_KEY)) {
+    const real = new X402Payer({ ...opts, config, ...(dabao && !opts.signer ? { signer: dabao } : {}) });
     mode = 'real';
     payer = real;
     spendCap = real.spendCap;
     audit = opts.audit ?? HcsAuditLog.fromConfig(config);
   } else if (!isTestMode(config)) {
     mode = 'not_configured';
-    payer = new NotConfiguredPayer(missingKeys(config, ['HEDERA_ACCOUNT_ID', 'HEDERA_PRIVATE_KEY']));
+    payer = new NotConfiguredPayer(
+      config.X402_SIGNER === 'dabao'
+        ? missingKeys(config, ['HEDERA_DABAO_ACCOUNT_ID', 'HEDERA_DABAO_PUBLIC_KEY'])
+        : missingKeys(config, ['HEDERA_ACCOUNT_ID', 'HEDERA_PRIVATE_KEY']),
+    );
     spendCap = new SpendCap({ maxPerDay: dailyCaps(config), file: null });
   } else {
     mode = 'fake';

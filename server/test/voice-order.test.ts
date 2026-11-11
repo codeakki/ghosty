@@ -4,7 +4,7 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { buildApp } from '../src/app.js';
 import { FakeStt } from '../src/audio/stt.js';
 import { encodeWav } from '../src/audio/wav.js';
-import { hasWakeWord } from '../src/claude/intent.js';
+import { hasWakeWord, isBareWakeWord, isVenueOrder } from '../src/claude/intent.js';
 import { CLOSE_POSITIONS_TOOL, ClaudeOrderAgent, GET_POSITIONS_TOOL, ORDER_AGENT_SYSTEM_PROMPT, PLACE_ORDER_TOOL } from '../src/claude/orderAgent.js';
 import type { VoiceContext } from '../src/claude/voice.js';
 import { loadConfig } from '../src/config.js';
@@ -248,5 +248,126 @@ describe('always-listening /voice (X-Listen: always)', () => {
     assert.equal(res.statusCode, 200);
     assert.deepEqual(seen, ['Ghosty, buy ten dollars of gold']);
     assert.ok(res.rawPayload.length > 0);
+  });
+});
+
+describe('wake word then a pause', () => {
+  it('knows a clip that is only the wake word', () => {
+    for (const t of ['Ghosty.', 'Hey Ghosty!', 'ok ghostie', 'गोस्टी']) assert.equal(isBareWakeWord(t), true, t);
+    for (const t of ['Ghosty, buy Apple', 'Buy Apple', 'hey there']) assert.equal(isBareWakeWord(t), false, t);
+  });
+
+  it('answers the next clip without the wake word, once, inside the window', async () => {
+    const clips = ['Ghosty.', 'Buy $5 of Apple stock on Uniswap', 'and also some gold'];
+    const seen: string[] = [];
+    const app = buildApp({
+      config: loadConfig({}),
+      assistant: null,
+      orderAgent: { async handle(u: string) { seen.push(u); return { text: 'Done.', id: 'msg_fake', orders: [] }; } },
+      deps: { stt: { async transcribe() { return { text: clips.shift()! }; } } as never },
+    });
+    const post = () => app.inject({ method: 'POST', url: '/voice', headers: { 'content-type': 'audio/wav', 'x-listen': 'always' }, payload: encodeWav(Buffer.alloc(16000), { sampleRate: 16000 }) });
+    assert.equal((await post()).statusCode, 204, 'bare wake word: quiet');
+    assert.equal((await post()).statusCode, 200, 'the order right after it');
+    assert.equal((await post()).statusCode, 204, 'the window closes after one answer');
+    assert.deepEqual(seen, ['Buy $5 of Apple stock on Uniswap']);
+    await app.close();
+  });
+});
+
+describe('venue orders without the wake word', () => {
+  it('counts a clear order that names Uniswap or Hyperliquid', () => {
+    for (const t of ['Buy $5 of Apple stock on Uniswap', 'sell ten dollars of gold on Hyperliquid', 'buy ETH on uni swap']) assert.equal(isVenueOrder(t), true, t);
+    for (const t of ['Uniswap is down today', 'buy me a coffee', 'How are you?']) assert.equal(isVenueOrder(t), false, t);
+  });
+});
+
+describe('midterms simulation', () => {
+  function rig(clips: string[]) {
+    const buys: Array<[string, number]> = [];
+    const agentSaw: string[] = [];
+    const app = buildApp({
+      config: loadConfig({}),
+      assistant: null,
+      orderAgent: { async handle(u: string) { agentSaw.push(u); return { text: 'ok', id: 'm', orders: [] }; } },
+      deps: {
+        stt: { async transcribe() { return { text: clips.shift()! }; } } as never,
+        simulationBuy: async (asset: 'ETH', usd: number) => {
+          buys.push([asset, usd]);
+          return { reply: 'Done. I bought 0.00223 ETH for 5 dollars of USDC on Uniswap.', result: { orderId: '0xabc', coin: 'uniswap:ETH', isBuy: true, sizeUsd: usd, status: 'filled' as const, txHash: '0xabc' } };
+        },
+      } as never,
+    });
+    const post = async () => {
+      const res = await app.inject({ method: 'POST', url: '/voice', headers: { 'content-type': 'audio/wav', 'x-listen': 'always' }, payload: encodeWav(Buffer.alloc(16000), { sampleRate: 16000 }) });
+      return res.statusCode;
+    };
+    return { app, post, buys, agentSaw };
+  }
+
+  it('speaks the news, and a yes without the wake word runs one real buy', async () => {
+    const { app, post, buys, agentSaw } = rig(['Ghosty, run the midterms simulation', 'Yes.', 'yes']);
+    assert.equal(await post(), 200);
+    assert.equal(await post(), 200);
+    assert.deepEqual(buys, [['ETH', 5]]);
+    assert.equal(await post(), 204, 'a second yes is not for Ghosty any more');
+    assert.deepEqual(buys, [['ETH', 5]]);
+    assert.deepEqual(agentSaw, []);
+    await app.close();
+  });
+
+  it('no cancels, and nothing runs without the simulation', async () => {
+    const { app, post, buys } = rig(['Ghosty yes', 'Ghosty, start the simulation', 'no thanks']);
+    assert.equal(await post(), 200);
+    assert.equal(await post(), 200);
+    assert.equal(await post(), 200);
+    assert.deepEqual(buys, []);
+    await app.close();
+  });
+});
+
+describe('midterms simulation choices', () => {
+  it('Hyperliquid runs the long, Uniswap the USDC buy', async () => {
+    for (const [answer, want] of [['Hyperliquid please', 'long'], ['on Uniswap', 'buy']] as const) {
+      const clips = ['Ghosty, run the midterms simulation', answer];
+      const ran: string[] = [];
+      const app = buildApp({
+        config: loadConfig({}),
+        assistant: null,
+        orderAgent: { async handle() { return { text: 'ok', id: 'm', orders: [] }; } },
+        deps: {
+          stt: { async transcribe() { return { text: clips.shift()! }; } },
+          simulationBuy: async () => (ran.push('buy'), { reply: 'bought' }),
+          simulationLong: async () => (ran.push('long'), { reply: 'longed' }),
+          simulationEvaluation: async () => 'ETH is flat.',
+        } as never,
+      });
+      for (let i = 0; i < 2; i++) await app.inject({ method: 'POST', url: '/voice', headers: { 'content-type': 'audio/wav', 'x-listen': 'always' }, payload: encodeWav(Buffer.alloc(16000), { sampleRate: 16000 }) });
+      assert.deepEqual(ran, [want], answer);
+      await app.close();
+    }
+  });
+});
+
+describe('simulation window and other orders', () => {
+  it('a full Apple order during the window goes to the order agent, not the ETH buy', async () => {
+    const clips = ['Ghosty, run the midterms simulation', 'buy 5 dollars of Apple on Uniswap'];
+    const ran: string[] = [];
+    const agentSaw: string[] = [];
+    const app = buildApp({
+      config: loadConfig({}),
+      assistant: null,
+      orderAgent: { async handle(u: string) { agentSaw.push(u); return { text: 'ok', id: 'm', orders: [] }; } },
+      deps: {
+        stt: { async transcribe() { return { text: clips.shift()! }; } },
+        simulationBuy: async () => (ran.push('buy'), { reply: 'bought' }),
+        simulationLong: async () => (ran.push('long'), { reply: 'longed' }),
+        simulationEvaluation: async () => '',
+      } as never,
+    });
+    for (let i = 0; i < 2; i++) await app.inject({ method: 'POST', url: '/voice', headers: { 'content-type': 'audio/wav', 'x-listen': 'always' }, payload: encodeWav(Buffer.alloc(16000), { sampleRate: 16000 }) });
+    assert.deepEqual(ran, []);
+    assert.deepEqual(agentSaw, ['buy 5 dollars of Apple on Uniswap']);
+    await app.close();
   });
 });

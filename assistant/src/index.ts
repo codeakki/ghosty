@@ -344,6 +344,8 @@ app.post('/voice', async (req, reply) => {
 
 // The pod only ever sees 200, 204 or an error from this server: no sign requests, no trades.
 app.post('/sign', async (_req, reply) => reply.code(404).send({ error: 'no_signer_on_this_server' }));
+// The pod asks for background Dabao sign requests while idle: never any here.
+app.get('/sign/next', async (_req, reply) => reply.code(204).send());
 
 /** The message plus its network cause, e.g. "fetch failed: Connect Timeout Error". */
 function errorDetail(err: unknown): string {

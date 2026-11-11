@@ -100,7 +100,9 @@ export function registerIntegrationRoutes(app: FastifyInstance, ctx: Integration
   app.get('/x402/status', async () => ({
     mode: payments.mode,
     network: `hedera:${config.HEDERA_NETWORK}`,
-    payer: config.HEDERA_ACCOUNT_ID ?? null,
+    // The account that actually pays: the Dabao's account when the Dabao signs.
+    payer: (config.X402_SIGNER === 'dabao' ? config.HEDERA_DABAO_ACCOUNT_ID : config.HEDERA_ACCOUNT_ID) ?? null,
+    signer: config.X402_SIGNER,
     payTo: config.X402_PAY_TO ?? null,
     signalDesk: config.SIGNAL_DESK_URL,
     preferredAsset: config.X402_PREFERRED_ASSET,
